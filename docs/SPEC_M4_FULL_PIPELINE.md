@@ -1,3 +1,5 @@
+> 🗄 **归档（V1）**。V2 七层集成与 launch 架构见 [`ARCHITECTURE_V2.md`](./ARCHITECTURE_V2.md) §5。
+
 # SPEC M4: 全链路集成
 
 **分支**：`feat/full-pipeline`  

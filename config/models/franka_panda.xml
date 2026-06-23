@@ -1,0 +1,92 @@
+<mujoco model="franka_panda_m1">
+  <compiler angle="radian" autolimits="true"/>
+
+  <option timestep="0.001" integrator="implicitfast" gravity="0 0 -9.81">
+    <flag contact="enable" energy="disable"/>
+  </option>
+
+  <default>
+    <joint damping="0.5" armature="0.01" frictionloss="0.0"/>
+    <geom type="capsule" size="0.035" rgba="0.62 0.64 0.68 1" contype="1" conaffinity="1"/>
+    <motor ctrllimited="true"/>
+  </default>
+
+  <asset>
+    <material name="dark" rgba="0.12 0.13 0.15 1"/>
+    <material name="orange" rgba="0.95 0.45 0.10 1"/>
+    <material name="floor" rgba="0.35 0.35 0.35 1"/>
+  </asset>
+
+  <worldbody>
+    <light name="key" pos="0 -2 3" dir="0 1 -1" diffuse="0.8 0.8 0.8"/>
+    <geom name="floor" type="plane" size="2 2 0.02" material="floor" contype="1" conaffinity="1"/>
+
+    <body name="panda_link0" pos="0 0 0.02">
+      <geom name="base" type="cylinder" size="0.10 0.04" material="dark" mass="2.0"/>
+
+      <body name="panda_link1" pos="0 0 0.13">
+        <joint name="panda_joint1" axis="0 0 1" range="-2.8973 2.8973" damping="0.8"/>
+        <geom fromto="0 0 0 0 0 0.20" mass="2.7"/>
+
+        <body name="panda_link2" pos="0 0 0.20" euler="-1.57079632679 0 0">
+          <joint name="panda_joint2" axis="0 0 1" range="-1.7628 1.7628" damping="0.8"/>
+          <geom fromto="0 0 0 0 0 0.22" mass="2.7"/>
+
+          <body name="panda_link3" pos="0 0 0.22" euler="1.57079632679 0 0">
+            <joint name="panda_joint3" axis="0 0 1" range="-2.8973 2.8973" damping="0.8"/>
+            <geom fromto="0 0 0 0 0 0.20" mass="2.0"/>
+
+            <body name="panda_link4" pos="0.0825 0 0.20" euler="1.57079632679 0 0">
+              <joint name="panda_joint4" axis="0 0 1" range="-3.0718 -0.0698" damping="0.8"/>
+              <geom fromto="0 0 0 0 0 0.22" material="orange" mass="2.0"/>
+
+              <body name="panda_link5" pos="-0.0825 0 0.22" euler="-1.57079632679 0 0">
+                <joint name="panda_joint5" axis="0 0 1" range="-2.8973 2.8973" damping="0.4"/>
+                <geom fromto="0 0 0 0 0 0.18" mass="1.2"/>
+
+                <body name="panda_link6" pos="0 0 0.18" euler="1.57079632679 0 0">
+                  <joint name="panda_joint6" axis="0 0 1" range="-0.0175 3.7525" damping="0.4"/>
+                  <geom fromto="0 0 0 0 0 0.12" mass="1.0"/>
+
+                  <body name="panda_link7" pos="0.088 0 0.12" euler="1.57079632679 0 0">
+                    <joint name="panda_joint7" axis="0 0 1" range="-2.8973 2.8973" damping="0.2"/>
+                    <geom fromto="0 0 0 0 0 0.10" material="orange" mass="0.7"/>
+
+                    <body name="panda_hand" pos="0 0 0.10">
+                      <geom name="hand" type="box" size="0.05 0.04 0.03" material="dark" mass="0.6"/>
+                      <site name="panda_ee" pos="0 0 0.08" size="0.015" rgba="0 0.8 1 1"/>
+                      <camera name="scene_camera" pos="0.55 -0.75 0.55" xyaxes="0.82 0.57 0 -0.25 0.36 0.90" fovy="45"/>
+                      <camera name="wrist_camera" pos="0 -0.08 0.03" xyaxes="1 0 0 0 0 1" fovy="70"/>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="panda_joint1_motor" joint="panda_joint1" gear="1" ctrlrange="-87 87"/>
+    <motor name="panda_joint2_motor" joint="panda_joint2" gear="1" ctrlrange="-87 87"/>
+    <motor name="panda_joint3_motor" joint="panda_joint3" gear="1" ctrlrange="-87 87"/>
+    <motor name="panda_joint4_motor" joint="panda_joint4" gear="1" ctrlrange="-87 87"/>
+    <motor name="panda_joint5_motor" joint="panda_joint5" gear="1" ctrlrange="-12 12"/>
+    <motor name="panda_joint6_motor" joint="panda_joint6" gear="1" ctrlrange="-12 12"/>
+    <motor name="panda_joint7_motor" joint="panda_joint7" gear="1" ctrlrange="-12 12"/>
+  </actuator>
+
+  <sensor>
+    <jointpos name="panda_joint1_pos" joint="panda_joint1"/>
+    <jointpos name="panda_joint2_pos" joint="panda_joint2"/>
+    <jointpos name="panda_joint3_pos" joint="panda_joint3"/>
+    <jointpos name="panda_joint4_pos" joint="panda_joint4"/>
+    <jointpos name="panda_joint5_pos" joint="panda_joint5"/>
+    <jointpos name="panda_joint6_pos" joint="panda_joint6"/>
+    <jointpos name="panda_joint7_pos" joint="panda_joint7"/>
+    <force name="ee_force" site="panda_ee"/>
+    <torque name="ee_torque" site="panda_ee"/>
+  </sensor>
+</mujoco>

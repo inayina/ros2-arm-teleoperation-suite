@@ -1,0 +1,5 @@
+# Manually trigger an emergency stop in safety_monitor.
+string reason          # why the e-stop is requested (logged)
+---
+bool success
+string message

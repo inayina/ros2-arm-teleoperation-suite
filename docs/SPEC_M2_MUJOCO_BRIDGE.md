@@ -1,3 +1,5 @@
+> 🗄 **归档（V1）**。V2 中 MuJoCo 为纯物理服务器，见 [`ARCHITECTURE_V2.md`](./ARCHITECTURE_V2.md) §6.4–6.5。
+
 # SPEC M2: MuJoCo × ROS2 桥接
 
 **分支**：`feat/mujoco-ros2-bridge`  

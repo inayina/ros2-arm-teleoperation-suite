@@ -1,0 +1,21 @@
+# CANopen DS402 fieldbus configuration for canopen_hw_interface.
+# Switch to real hardware: set interface to can0 (code unchanged).
+can:
+  interface: "vcan0"          # vcan0 (dev) -> can0 (hardware)
+  bustype: "socketcan"
+  bitrate: 1000000            # 1 Mbit/s
+  num_joints: 7
+  node_ids: [1, 2, 3, 4, 5, 6, 7]
+
+  # CANopen COB-ID bases (DS301/DS402)
+  rpdo_base: 0x200            # master -> drive (target torque)
+  tpdo_base: 0x180            # drive -> master (actual pos/vel/torque)
+  sdo_rx_base: 0x600          # master -> drive SDO
+  sdo_tx_base: 0x580          # drive -> master SDO
+  emcy_base: 0x080            # emergency frames
+  sync_cob_id: 0x080          # SYNC
+  sync_period_ms: 1           # cyclic SYNC -> 1 kHz PDO
+
+  # Scaling
+  torque_scale: 0.001         # 1 bit = 0.001 N*m  (DS402 0x6071)
+  encoder_resolution: 131072  # 17-bit encoder counts/rev

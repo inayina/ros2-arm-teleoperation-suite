@@ -1,0 +1,11 @@
+<library path="canopen_hw_interface">
+  <class name="canopen_hw_interface/CanopenSystem"
+         type="canopen_hw_interface::CanopenSystem"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      CANopen DS402 system interface. Encodes effort commands as RPDO and
+      decodes position/velocity/effort from TPDO. In sim mode it bridges to
+      the MuJoCo physics server via the /sim backplane.
+    </description>
+  </class>
+</library>

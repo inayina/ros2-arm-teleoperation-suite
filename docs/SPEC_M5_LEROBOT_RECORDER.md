@@ -1,3 +1,5 @@
+> 🗄 **归档（V1）**。V2 多模态录制（含 rgb/depth/ft）见 [`ARCHITECTURE_V2.md`](./ARCHITECTURE_V2.md) §6.6。
+
 # SPEC M5: LeRobot 数据录制节点
 
 **分支**：`feat/lerobot-recorder`  

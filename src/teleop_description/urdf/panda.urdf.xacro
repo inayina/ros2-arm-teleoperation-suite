@@ -1,0 +1,89 @@
+<?xml version="1.0"?>
+<!--
+  Top-level robot description for the teleoperation arm.
+
+  SCAFFOLD NOTE:
+  This builds a simplified 7-DOF revolute chain (cylinders, no meshes) so the
+  stack is fully functional without external assets. For the real robot, drop
+  in franka_description and replace the `arm_chain` macro with the Panda macro;
+  the ros2_control block below stays the same.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="panda">
+
+  <!-- Args propagated from launch -->
+  <xacro:arg name="use_sim" default="true"/>
+  <xacro:arg name="can_interface" default="vcan0"/>
+
+  <xacro:property name="num_joints" value="7"/>
+
+  <!-- ===== Geometry macros ===== -->
+  <xacro:macro name="link_cyl" params="name length:=0.15 radius:=0.04 mass:=1.0">
+    <link name="${name}">
+      <visual>
+        <origin xyz="0 0 ${length/2}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${radius}" length="${length}"/></geometry>
+        <material name="steel"><color rgba="0.6 0.6 0.65 1.0"/></material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${length/2}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${radius}" length="${length}"/></geometry>
+      </collision>
+      <inertial>
+        <origin xyz="0 0 ${length/2}" rpy="0 0 0"/>
+        <mass value="${mass}"/>
+        <inertia ixx="0.01" ixy="0.0" ixz="0.0" iyy="0.01" iyz="0.0" izz="0.005"/>
+      </inertial>
+    </link>
+  </xacro:macro>
+
+  <!-- Recursive revolute chain: panda_joint{index} / panda_link{index} -->
+  <xacro:macro name="arm_chain" params="index last_index parent">
+    <xacro:if value="${index &lt;= last_index}">
+      <xacro:link_cyl name="panda_link${index}"/>
+      <joint name="panda_joint${index}" type="revolute">
+        <parent link="${parent}"/>
+        <child link="panda_link${index}"/>
+        <origin xyz="0 0 0.15" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-2.8973" upper="2.8973" effort="87.0" velocity="2.62"/>
+        <dynamics damping="0.1" friction="0.0"/>
+      </joint>
+      <xacro:arm_chain index="${index + 1}" last_index="${last_index}" parent="panda_link${index}"/>
+    </xacro:if>
+  </xacro:macro>
+
+  <!-- ===== Kinematic tree ===== -->
+  <link name="world"/>
+
+  <xacro:link_cyl name="panda_link0" length="0.10" radius="0.06" mass="2.0"/>
+  <joint name="base_fixed" type="fixed">
+    <parent link="world"/>
+    <child link="panda_link0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <xacro:arm_chain index="1" last_index="${num_joints}" parent="panda_link0"/>
+
+  <!-- End-effector / tool frame -->
+  <link name="panda_hand"/>
+  <joint name="panda_hand_joint" type="fixed">
+    <parent link="panda_link${num_joints}"/>
+    <child link="panda_hand"/>
+    <origin xyz="0 0 0.15" rpy="0 0 0"/>
+  </joint>
+  <link name="panda_ee"/>
+  <joint name="panda_ee_joint" type="fixed">
+    <parent link="panda_hand"/>
+    <child link="panda_ee"/>
+    <origin xyz="0 0 0.05" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ===== ros2_control hardware binding ===== -->
+  <xacro:include filename="$(find teleop_description)/urdf/panda.ros2_control.xacro"/>
+  <xacro:panda_ros2_control
+      name="panda_canopen_system"
+      num_joints="${num_joints}"
+      use_sim="$(arg use_sim)"
+      can_interface="$(arg can_interface)"/>
+
+</robot>

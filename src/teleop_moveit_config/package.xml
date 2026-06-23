@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>teleop_moveit_config</name>
+  <version>2.0.0</version>
+  <description>
+    L2 motion layer config: MoveIt Servo (Cartesian to joint) parameters, SRDF
+    and kinematics for the teleop arm. Consumes /safe_master_pose, emits
+    /joint_target.
+  </description>
+  <maintainer email="ina@example.com">Ina</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>moveit_servo</exec_depend>
+  <exec_depend>moveit_kinematics</exec_depend>
+  <exec_depend>teleop_description</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -1,0 +1,39 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 1000   # Hz, ros2_control real-time loop
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    forward_effort_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    cartesian_impedance_controller:
+      type: teleop_controllers/CartesianImpedanceController
+
+# --- M1/M2: drive raw torque through the CAN layer ---
+forward_effort_controller:
+  ros__parameters:
+    joints:
+      - panda_joint1
+      - panda_joint2
+      - panda_joint3
+      - panda_joint4
+      - panda_joint5
+      - panda_joint6
+      - panda_joint7
+    interface_name: effort
+
+# --- M3: Cartesian impedance controller ---
+cartesian_impedance_controller:
+  ros__parameters:
+    joints:
+      - panda_joint1
+      - panda_joint2
+      - panda_joint3
+      - panda_joint4
+      - panda_joint5
+      - panda_joint6
+      - panda_joint7
+    kp: [60.0, 60.0, 60.0, 60.0, 25.0, 25.0, 10.0]
+    kd: [5.0, 5.0, 5.0, 5.0, 2.0, 2.0, 1.0]

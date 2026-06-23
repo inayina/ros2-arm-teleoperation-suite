@@ -1,0 +1,11 @@
+<library path="teleop_controllers">
+  <class name="teleop_controllers/CartesianImpedanceController"
+         type="teleop_controllers::CartesianImpedanceController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Cartesian impedance controller. Tracks a joint-space reference from
+      /joint_target and outputs joint torques (effort command interface),
+      with contact-adaptive stiffness driven by /ft_sensor.
+    </description>
+  </class>
+</library>

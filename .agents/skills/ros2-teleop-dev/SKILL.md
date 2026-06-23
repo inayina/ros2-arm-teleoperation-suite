@@ -1,15 +1,16 @@
 ---
 name: ros2-teleop-dev
-description: Development assistant for ros2-arm-teleoperation-suite. Provides project architecture, ROS2 topic map, milestone acceptance criteria, debug commands, and key implementation patterns for the 5-layer robotic teleoperation system (teleop input → Cartesian impedance control → CAN bus → MuJoCo sim → LeRobot recorder).
+description: Development assistant for ros2-arm-teleoperation-suite. Provides project architecture, ROS2 topic map, milestone acceptance criteria, debug commands, and key implementation patterns for the V2 industrial-grade teleoperation stack (teleop → safety layer → MoveIt Servo motion layer → ros2_control impedance controller → CANopen DS402 fieldbus → virtual servo drive → MuJoCo sim → camera bridge → LeRobot recorder).
 ---
 
 # ros2-arm-teleoperation-suite 开发助手
 
 ## 项目概况
 
-- **目标**：机械臂遥操作全链路系统（无实体硬件，纯软件仿真）
+- **目标**：工业级机械臂遥操作全链路平台（无实体硬件，纯软件仿真）
+- **架构**：**V2**（见 `docs/ARCHITECTURE_V2.md`）；V1 五层设计存档于 `docs/DESIGN_SPEC.md`
 - **机器人**：Franka Panda（MuJoCo v3 + mujoco_menagerie XML）
-- **ROS2 发行版**：Jazzy
+- **ROS2 发行版**：Jazzy（含 ros2_control / MoveIt 2 Servo）
 - **Python 环境**：conda `ros2-teleop`（`/home/ina/miniforge3/envs/ros2-teleop`）
 - **项目路径**：`/home/ina/dev/ros2-arm-teleoperation-suite`
 - **兄弟项目**：`/home/ina/robot-sim-lab/robot-arm-episode-data-lab`（LeRobot 数据预处理）
@@ -17,48 +18,67 @@ description: Development assistant for ros2-arm-teleoperation-suite. Provides pr
 
 ---
 
-## 五层架构速查
+## V2 七层架构速查
 
 ```
-Layer 1  teleop_input         Python   /master_pose (PoseStamped @ 50Hz)
+L0 teleop_input        Python  /teleop/cmd_pose + /teleop/heartbeat
    ↓
-Layer 2  impedance_controller  C++17   /joint_torque_cmd (JointState @ 500Hz)
+L1 safety_monitor      C++     /safe_master_pose（JointLimit·Workspace·Velocity·Watchdog·E-Stop）
    ↓
-Layer 3a can_bridge            Python  vcan0 ↔ CANopen DS402 PDO
-Layer 3b rs485_modbus          Python  Modbus TCP → /gripper_state
+L2 moveit_servo        C++     /joint_target（笛卡尔→关节, 奇异/限位规避）
    ↓
-Layer 4  mujoco_sim            Python  /joint_states + /ft_sensor @ 100Hz
+L3 ros2_control        C++     controller_manager @1kHz
+     · cartesian_impedance_controller（controller_interface 插件, effort 命令）
+     · joint_state_broadcaster → /joint_states
+     · canopen_system（SystemInterface 硬件接口）
+   ↓ vcan0 (CANopen DS402: RPDO/TPDO/SDO/NMT/EMCY)
+L4 virtual_servo_driver Python DS402 状态机 + 电流环 + 编码器 + 故障注入 ×7
+   ↓ /sim/joint_effort_cmd  ↑ /sim/encoder_state
+L5 mujoco_sim          Python  物理引擎 + FT 真值 + 虚拟相机 @1kHz/100Hz
    ↓
-Layer 5  lerobot_recorder      Python  data/episodes/ (HF datasets Arrow)
+L6 camera_bridge       Python  /camera/color/image_raw + /camera/depth/image_raw @30Hz
+L7 lerobot_recorder    Python  多模态对齐 → LeRobot Dataset
 ```
+
+> 核心原则：MuJoCo 提供**仿真真值**；机器人栈只通过 CANopen 编码器反馈「测得」状态（measured-state），两者分离。
 
 ---
 
-## ROS2 话题全表
+## ROS2 话题全表（V2）
 
 | Topic | 类型 | 发布者 | 订阅者 | QoS |
 |---|---|---|---|---|
-| `/master_pose` | `geometry_msgs/PoseStamped` | teleop_input | impedance_controller | Best Effort |
-| `/joint_torque_cmd` | `sensor_msgs/JointState` | impedance_controller | can_bridge | Best Effort |
-| `/joint_states` | `sensor_msgs/JointState` | mujoco_sim | impedance_controller, lerobot_recorder | Best Effort |
-| `/ft_sensor` | `geometry_msgs/WrenchStamped` | mujoco_sim | impedance_controller | Best Effort |
-| `/gripper_cmd` | `std_msgs/Float32` | teleop_input | rs485_bridge | Reliable |
-| `/gripper_state` | `std_msgs/Float32` | rs485_bridge | lerobot_recorder | Best Effort |
-| `/episode/status` | `std_msgs/String` | teleop_input | lerobot_recorder | Reliable |
+| `/teleop/cmd_pose` | `geometry_msgs/PoseStamped` | teleop_input | safety_monitor | Best Effort |
+| `/teleop/heartbeat` | `std_msgs/Header` | teleop_input | safety_monitor | Reliable |
+| `/teleop/gripper_cmd` | `std_msgs/Float64` | teleop_input | gripper_driver | Reliable |
+| `/safe_master_pose` | `geometry_msgs/PoseStamped` | safety_monitor | servo_node | Reliable |
+| `/safety/estop` | `std_msgs/Bool` | safety_monitor | canopen_system | Reliable + Transient Local |
+| `/safety/status` | `teleop_interfaces/SafetyStatus` | safety_monitor | recorder | Reliable |
+| `/joint_target` | `trajectory_msgs/JointTrajectory` | servo_node | cartesian_impedance_controller | Reliable |
+| `/joint_states` | `sensor_msgs/JointState` | joint_state_broadcaster | servo, impedance, recorder | Best Effort |
+| `/sim/joint_effort_cmd` | `std_msgs/Float64MultiArray` | virtual_servo_driver | mujoco_sim | Best Effort |
+| `/sim/encoder_state` | `sensor_msgs/JointState` | mujoco_sim | virtual_servo_driver | Best Effort |
+| `/servo_drive/status` | `teleop_interfaces/DriveStatus` | virtual_servo_driver | recorder | Reliable |
+| `/ft_sensor` | `geometry_msgs/WrenchStamped` | mujoco_sim | impedance ctrl, recorder | Best Effort |
+| `/ee_pose` | `geometry_msgs/PoseStamped` | mujoco_sim | recorder | Best Effort |
+| `/camera/color/image_raw` | `sensor_msgs/Image` | camera_bridge | recorder | Best Effort |
+| `/camera/depth/image_raw` | `sensor_msgs/Image` | camera_bridge | recorder | Best Effort |
+| `/gripper/state` | `std_msgs/Float64` | gripper_driver | recorder | Best Effort |
+
+> CAN 帧（vcan0）不是 ROS Topic：RPDO `0x200+id` / TPDO `0x180+id` / SDO `0x600·0x580+id` / NMT `0x000` / SYNC `0x080` / EMCY `0x080+id`。用 `candump vcan0` 抓帧。
 
 ---
 
-## 里程碑与分支
+## 里程碑与分支（V2）
 
 | 里程碑 | 分支 | 状态 | 关键验收 |
 |---|---|---|---|
-| M0 | episode-data-lab 项目 | ✅ Done | `export_to_lerobot.py` dry-run 通过 |
-| M1 | `feat/can-rs485-layer` | 🔲 | `candump vcan0` 抓到 PDO 帧；pytest 通过 |
-| M2 | `feat/mujoco-ros2-bridge` | 🔲 | Panda viewer 响应 `/joint_torque_cmd` |
-| M3 | `feat/impedance-controller` | 🔲 | 末端误差 < 2mm；500Hz 控制频率 |
-| M4 | `feat/full-pipeline` | 🔲 | 一键 launch，端到端延迟 < 50ms |
-| M5 | `feat/lerobot-recorder` | 🔲 | 50 帧 Episode，load_from_disk 可读 |
-| M6 | `feat/polish` | 🔲 | README + 演示视频 |
+| M1 | `feat/v2-control-skeleton` | 🔲 | `ros2 control list_controllers` 显示 broadcaster active；Panda 重力补偿站立；`/joint_states` @1kHz |
+| M2 | `feat/v2-canopen-fieldbus` | 🔲 | `candump vcan0` 抓到周期 PDO；DS402 到 Operation Enabled；故障注入→EMCY |
+| M3 | `feat/v2-impedance-controller` | 🔲 | 阻抗插件被加载 active；末端误差 < 2mm；`update()` 1kHz |
+| M4 | `feat/v2-motion-layer` | 🔲 | 键盘→servo→阻抗→CAN→MuJoCo 端到端 < 50ms；奇异/限位自动减速 |
+| M5 | `feat/v2-safety-layer` | 🔲 | 5 监视器单测过；心跳超时 100ms→E-Stop→DS402 Quick Stop；可复位 |
+| M6 | `feat/v2-perception-recorder` | 🔲 | RGB/Depth @30Hz；多模态 LeRobotDataset 可 load，字段完整 |
 
 ---
 
@@ -74,6 +94,18 @@ ros2 topic echo /ft_sensor --once        # 单次查看消息内容
 ros2 topic info --verbose /master_pose   # 查看 QoS 设置
 ros2 node list                           # 查看所有节点
 ros2 node info /impedance_controller     # 查看节点订阅/发布
+```
+
+### ros2_control（V2）
+
+```bash
+ros2 control list_controllers                 # 查看控制器状态 (active/inactive)
+ros2 control list_hardware_interfaces         # 查看 command/state interfaces
+ros2 control list_hardware_components          # 查看 canopen_system 硬件组件
+# 热切换：阻抗控制器 ↔ JointTrajectoryController
+ros2 control switch_controllers \
+  --deactivate cartesian_impedance_controller \
+  --activate joint_trajectory_controller
 ```
 
 ### CAN 总线
@@ -228,7 +260,8 @@ ds.save_to_disk(f"data/episodes/episode_{idx:06d}/train")
 
 ## 参见
 
-- 详细架构设计：[docs/DESIGN_SPEC.md](../docs/DESIGN_SPEC.md)
+- **V2 工业级架构（当前基线）**：[docs/ARCHITECTURE_V2.md](../docs/ARCHITECTURE_V2.md)
+- 详细架构设计（V1 存档）：[docs/DESIGN_SPEC.md](../docs/DESIGN_SPEC.md)
 - 开发路线图与周检查清单：[docs/ROADMAP.md](../docs/ROADMAP.md)
 - M1 CAN/RS485 详细 SPEC：[docs/SPEC_M1_CAN_RS485.md](../docs/SPEC_M1_CAN_RS485.md)
 - M2 MuJoCo 桥接 SPEC：[docs/SPEC_M2_MUJOCO_BRIDGE.md](../docs/SPEC_M2_MUJOCO_BRIDGE.md)

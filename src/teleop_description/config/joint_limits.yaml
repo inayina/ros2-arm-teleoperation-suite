@@ -1,0 +1,13 @@
+# Franka Panda joint limits (rad, rad/s, N*m).
+# Used by safety_monitor (JointLimitMonitor / VelocityLimitMonitor) and MoveIt.
+joint_limits:
+  panda_joint1: {min_position: -2.8973, max_position: 2.8973, max_velocity: 2.1750, max_effort: 87.0}
+  panda_joint2: {min_position: -1.7628, max_position: 1.7628, max_velocity: 2.1750, max_effort: 87.0}
+  panda_joint3: {min_position: -2.8973, max_position: 2.8973, max_velocity: 2.1750, max_effort: 87.0}
+  panda_joint4: {min_position: -3.0718, max_position: -0.0698, max_velocity: 2.1750, max_effort: 87.0}
+  panda_joint5: {min_position: -2.8973, max_position: 2.8973, max_velocity: 2.6100, max_effort: 12.0}
+  panda_joint6: {min_position: -0.0175, max_position: 3.7525, max_velocity: 2.6100, max_effort: 12.0}
+  panda_joint7: {min_position: -2.8973, max_position: 2.8973, max_velocity: 2.6100, max_effort: 12.0}
+
+# Soft-limit margin applied by safety_monitor before hard limits.
+soft_limit_margin_rad: 0.05

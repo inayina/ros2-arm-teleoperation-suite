@@ -1,0 +1,26 @@
+# Cartesian impedance controller parameters (joint-space gains in scaffold).
+cartesian_impedance_controller:
+  ros__parameters:
+    joints:
+      - panda_joint1
+      - panda_joint2
+      - panda_joint3
+      - panda_joint4
+      - panda_joint5
+      - panda_joint6
+      - panda_joint7
+    # Scaffold joint-space PD gains. Cartesian K/D added in M3.
+    kp: [60.0, 60.0, 60.0, 60.0, 25.0, 25.0, 10.0]
+    kd: [5.0, 5.0, 5.0, 5.0, 2.0, 2.0, 1.0]
+
+    # ---- M3 Cartesian parameters (reserved) ----
+    cartesian_stiffness:
+      translation: [500.0, 500.0, 500.0]   # N/m
+      rotation: [50.0, 50.0, 50.0]         # N*m/rad
+    cartesian_damping:
+      translation: [50.0, 50.0, 50.0]
+      rotation: [5.0, 5.0, 5.0]
+    contact_force_threshold: 5.0           # N
+    contact_stiffness_scale: 0.1
+    ee_link: panda_ee
+    base_link: panda_link0

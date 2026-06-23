@@ -9,69 +9,53 @@
 
 ### Overview
 
-`ros2-arm-teleoperation-suite` is a full-pipeline ROS 2 (Jazzy) robotic arm teleoperation suite, completely based on software simulation (without physical hardware). It is designed to demonstrate the complete 5-layer architecture of an embodied AI teleoperation system.
+`ros2-arm-teleoperation-suite` is a full-pipeline ROS 2 (Jazzy) robotic arm teleoperation suite, completely based on software simulation (without physical hardware). The **V2 architecture** is designed as an industrial-grade stack (not a teaching demo), mirroring how real industrial arms are built: a dedicated safety layer, decoupled motion/control layers, a `ros2_control` real-time loop, a CANopen DS402 fieldbus driving a simulated servo drive, vision perception, and multi-modal LeRobot data recording.
 
-### Key Features
+> **Architecture spec: [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md)** (mermaid diagrams, node/topic graphs, package layout, launch design, M1–M6 milestones). V1 design is archived in [`docs/DESIGN_SPEC.md`](docs/DESIGN_SPEC.md).
 
-1. **Teleop Input Layer**: Converts keyboard/gamepad inputs to target pose commands (with pre-reserved interfaces for Quest 3 VR).
-2. **Control Layer (C++)**: 6-DOF Cartesian impedance controller with KDL-based Inverse Kinematics and adaptive stiffness for contact compliance.
-3. **CAN / RS485 Bridge Layer**: Virtual CAN bus (vcan0) with CANopen DS402 PDO frame encoding/decoding, and pymodbus-based Modbus RTU simulation for the gripper.
-4. **Physics Simulation Layer**: 1kHz physics simulation using `mujoco` v3 and the Franka Panda model.
-5. **Data Recording Layer**: Records teleoperation episodes in the standard LeRobot (HuggingFace `datasets`) format, ready to be consumed by ACT / Diffusion Policy training pipelines.
+### Key Features (V2 · 7 layers)
 
-### System Architecture
+1. **L0 Teleop Input**: Keyboard / gamepad / Quest 3 → `/teleop/cmd_pose` + heartbeat.
+2. **L1 Safety Layer (C++)**: `safety_monitor` with Joint / Workspace / Velocity limit monitors, communication watchdog, and a latching E-Stop wired to DS402 Quick Stop. Outputs `/safe_master_pose` only when all checks pass.
+3. **L2 Motion Layer**: MoveIt 2 Servo for Cartesian→joint servoing with singularity / joint-limit avoidance, emitting `/joint_target` (decoupled from control).
+4. **L3 Control Layer (`ros2_control`, 1kHz)**: Cartesian impedance controller as a `controller_interface` plugin + `joint_state_broadcaster`, hot-swappable with `joint_trajectory_controller`.
+5. **L4 Fieldbus / Drive**: `canopen_system` hardware interface over vcan0 (CANopen DS402 PDO/SDO/NMT/EMCY) → `virtual_servo_driver` simulating DS402 state machine, encoder feedback, and fault states.
+6. **L5 Physics Simulation**: `mujoco` v3 (Franka Panda) as a pure physics server + virtual cameras; ground-truth vs. fieldbus-measured state separation.
+7. **L6 Perception + L7 Recording**: `camera_bridge` (RGB/Depth) and a multi-modal `lerobot_recorder` (state, ee_pose, ft, gripper, rgb, depth, action, timestamp) → LeRobot dataset for ACT / Diffusion Policy.
+
+### System Architecture (V2)
 
 ```mermaid
 flowchart TB
-    subgraph INPUT["Layer 1 · Teleop Input Layer"]
-        KBD["⌨️ Keyboard / 🎮 Gamepad"]
-        QUEST["🥽 Quest3 VR (Reserved)"]
-        TI["teleop_input\n(Python)"]
-        KBD --> TI
-        QUEST -.->|"future"| TI
-    end
+    TI["L0 teleop_input<br/>keyboard / gamepad / Quest3"]
+    SM["L1 safety_monitor (C++)<br/>JointLimit · Workspace · Velocity<br/>Watchdog · E-Stop"]
+    SV["L2 moveit_servo<br/>Cartesian → Joint"]
+    RC["L3 ros2_control (1kHz)<br/>cartesian_impedance_controller<br/>+ joint_state_broadcaster + canopen_system"]
+    FB["L4 vcan0 (CANopen DS402)<br/>+ virtual_servo_driver ×7"]
+    MJ["L5 mujoco_sim<br/>physics + FT + virtual cameras"]
+    CAM["L6 camera_bridge<br/>RGB + Depth"]
+    REC["L7 lerobot_recorder<br/>multi-modal → LeRobot Dataset"]
 
-    subgraph CTRL["Layer 2 · Impedance Control Layer (C++)"]
-        IC["impedance_controller\n(C++ / MultiThreadedExecutor)"]
-        IK["KDL ChainIkSolver\nPose → Joint Angles"]
-        IMP["Impedance Control\nτ = Jᵀ·[K(xd-x) + D(ẋd-ẋ)] + τ_g"]
-        IC --> IK --> IMP
-    end
+    TI -->|"/teleop/cmd_pose + heartbeat"| SM
+    SM -->|"/safe_master_pose"| SV
+    SM -.->|"/safety/estop → DS402 Quick Stop"| RC
+    SV -->|"/joint_target"| RC
+    RC <-->|"CAN frames"| FB
+    FB <-->|"/sim/* backplane"| MJ
+    MJ -->|"/ft_sensor, /ee_pose, /joint_states"| REC
+    MJ --> CAM
+    CAM -->|"/camera/color, /camera/depth"| REC
 
-    subgraph CAN_LAYER["Layer 3 · Communication Layer"]
-        CB["can_bridge\n(Python)"]
-        RS["rs485_bridge\nModbus RTU (Python)"]
-        VCAN["🔌 vcan0\nVirtual CAN Bus\n(CANopen DS402 PDO)"]
-        CB <-->|"CAN Frames"| VCAN
-    end
-
-    subgraph SIM["Layer 4 · Physics Simulation Layer"]
-        MJ["mujoco_sim\n(Python / MuJoCo v3)"]
-        PANDA["🦾 Franka Panda\nfranka_panda.xml\n1kHz Physics Step"]
-        MJ --> PANDA
-    end
-
-    subgraph REC["Layer 5 · Data Recording Layer"]
-        LR["lerobot_recorder\n(Python / HuggingFace datasets)"]
-        DS["💾 data/episodes/\nhf_dataset format\nCompatible with ACT / Diffusion Policy"]
-        LR --> DS
-    end
-
-    TI -->|"/master_pose\nPoseStamped @ 50Hz"| IC
-    IMP -->|"/joint_torque_cmd\nJointState"| CB
-    CB -->|"/joint_states\nEncoder Feedback"| MJ
-    RS -->|"/gripper_state\nFloat32"| LR
-    MJ -->|"/joint_states @ 100Hz"| IC
-    MJ -->|"/ft_sensor\nWrenchStamped"| IC
-    MJ -->|"/joint_states"| LR
-    TI -->|"/gripper_cmd\nFloat32"| RS
-
-    style INPUT fill:#1a3a5c,stroke:#4a9eff,color:#e8f4fd
-    style CTRL fill:#1a3a2a,stroke:#4aff8a,color:#e8fdf0
-    style CAN_LAYER fill:#3a2a1a,stroke:#ffaa4a,color:#fdf3e8
-    style SIM fill:#2a1a3a,stroke:#aa4aff,color:#f3e8fd
+    style SM fill:#5c1a1a,stroke:#ff4a4a,color:#fde8e8
+    style SV fill:#1a3a2a,stroke:#4aff8a,color:#e8fdf0
+    style RC fill:#1a2a5c,stroke:#4a7aff,color:#e8eefd
+    style FB fill:#3a2a1a,stroke:#ffaa4a,color:#fdf3e8
+    style MJ fill:#2a1a3a,stroke:#aa4aff,color:#f3e8fd
+    style CAM fill:#1a3a3a,stroke:#4affff,color:#e8fdfd
     style REC fill:#3a1a2a,stroke:#ff4aaa,color:#fde8f3
 ```
+
+> Full layered diagrams (node graph, topic graph, launch architecture) are in [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md).
 
 ### Quick Start
 
@@ -88,8 +72,14 @@ colcon build
 # 4. Source environment
 source install/setup.bash
 
-# 5. Launch the full system
-ros2 launch launch/full_system.launch.py
+# 5. Launch the full system (sim mode, impedance controller)
+ros2 launch teleop_bringup full_system.launch.py
+
+# Variants
+ros2 launch teleop_bringup m1_control_sim.launch.py                 # M1 smoke: ros2_control + MuJoCo
+ros2 launch teleop_bringup full_system.launch.py controller:=forward        # M1/M2 torque path
+ros2 launch teleop_bringup full_system.launch.py use_sim:=false can_interface:=can0  # real CAN
+ros2 launch teleop_bringup full_system.launch.py record:=true               # enable recorder
 ```
 
 ---
@@ -99,69 +89,53 @@ ros2 launch launch/full_system.launch.py
 
 ### 项目概述
 
-`ros2-arm-teleoperation-suite` 是一套基于 ROS 2 (Jazzy) 的机械臂遥操作全链路系统。在无实体硬件的条件下，纯基于软件仿真完整体现具身智能遥操作系统的五层核心架构。
+`ros2-arm-teleoperation-suite` 是一套基于 ROS 2 (Jazzy) 的机械臂遥操作全链路系统，无实体硬件、纯软件仿真。**V2 架构**以「工业级机械臂软件栈」为目标重构（而非教学演示）：独立安全层、运动/控制解耦、`ros2_control` 实时主循环、CANopen DS402 现场总线驱动虚拟伺服、视觉感知层、多模态 LeRobot 数据录制。
 
-### 核心特性
+> **架构规范见 [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md)**（Mermaid 架构图、节点图、Topic 图、Package 结构、Launch 架构、M1–M6 里程碑）。V1 设计存档于 [`docs/DESIGN_SPEC.md`](docs/DESIGN_SPEC.md)。
 
-1. **遥操作输入层**：支持键盘/手柄输入，转换为末端位姿指令（预留 Quest 3 接口）。
-2. **阻抗控制层（C++）**：基于 KDL 实现六维笛卡尔阻抗控制器，支持接触力自适应刚度调节（柔顺控制）。
-3. **总线通信层**：基于 `vcan0` 虚拟 CAN 总线实现 CANopen DS402 PDO 帧编解码；基于 `pymodbus` 仿真 RS485 Modbus RTU 夹爪控制。
-4. **物理仿真层**：基于 `mujoco` v3 引擎运行 Franka Panda 机械臂，1kHz 高频物理步进。
-5. **数据录制层**：支持将遥操作记录为 HuggingFace `datasets` 格式（LeRobot 兼容），无缝接入具身智能模型（ACT / Diffusion Policy）训练管线。
+### 核心特性（V2 · 七层）
 
-### 系统架构
+1. **L0 遥操作输入**：键盘 / 手柄 / Quest3 → `/teleop/cmd_pose` + 心跳。
+2. **L1 安全层（C++）**：`safety_monitor` 集成关节/工作空间/速度限位监视器、通信看门狗、可锁存 E-Stop（联动 DS402 Quick Stop）；全部检查通过才输出 `/safe_master_pose`。
+3. **L2 运动层**：MoveIt 2 Servo 笛卡尔→关节伺服，自带奇异点/关节限位规避，输出 `/joint_target`（与控制解耦）。
+4. **L3 控制层（`ros2_control`，1kHz）**：笛卡尔阻抗控制器作为 `controller_interface` 插件 + `joint_state_broadcaster`，可与 `joint_trajectory_controller` 热切换。
+5. **L4 现场总线/驱动**：`canopen_system` 硬件接口经 vcan0（CANopen DS402 PDO/SDO/NMT/EMCY）→ `virtual_servo_driver` 仿真 DS402 状态机、编码器反馈、故障态。
+6. **L5 物理仿真**：`mujoco` v3（Franka Panda）作为纯物理服务器 + 虚拟相机；区分仿真真值与总线测得值。
+7. **L6 感知 + L7 录制**：`camera_bridge`（RGB/Depth）+ 多模态 `lerobot_recorder`（state / ee_pose / ft / gripper / rgb / depth / action / timestamp）→ LeRobot 数据集，兼容 ACT / Diffusion Policy。
+
+### 系统架构（V2）
 
 ```mermaid
 flowchart TB
-    subgraph INPUT["Layer 1 · 遥操作输入层"]
-        KBD["⌨️ 键盘 / 🎮 手柄"]
-        QUEST["🥽 Quest3 VR（预留接口）"]
-        TI["teleop_input\n(Python)"]
-        KBD --> TI
-        QUEST -.->|"future"| TI
-    end
+    TI["L0 teleop_input<br/>键盘 / 手柄 / Quest3"]
+    SM["L1 safety_monitor (C++)<br/>关节 · 工作空间 · 速度<br/>看门狗 · E-Stop"]
+    SV["L2 moveit_servo<br/>笛卡尔 → 关节"]
+    RC["L3 ros2_control (1kHz)<br/>cartesian_impedance_controller<br/>+ joint_state_broadcaster + canopen_system"]
+    FB["L4 vcan0 (CANopen DS402)<br/>+ virtual_servo_driver ×7"]
+    MJ["L5 mujoco_sim<br/>物理 + FT + 虚拟相机"]
+    CAM["L6 camera_bridge<br/>RGB + Depth"]
+    REC["L7 lerobot_recorder<br/>多模态 → LeRobot Dataset"]
 
-    subgraph CTRL["Layer 2 · 阻抗控制层 (C++)"]
-        IC["impedance_controller\n(C++ / MultiThreadedExecutor)"]
-        IK["KDL ChainIkSolver\n末端位姿 → 关节角"]
-        IMP["阻抗控制律\nτ = Jᵀ·[K(xd-x) + D(ẋd-ẋ)] + τ_g"]
-        IC --> IK --> IMP
-    end
+    TI -->|"/teleop/cmd_pose + 心跳"| SM
+    SM -->|"/safe_master_pose"| SV
+    SM -.->|"/safety/estop → DS402 Quick Stop"| RC
+    SV -->|"/joint_target"| RC
+    RC <-->|"CAN 帧"| FB
+    FB <-->|"/sim/* 背板"| MJ
+    MJ -->|"/ft_sensor, /ee_pose, /joint_states"| REC
+    MJ --> CAM
+    CAM -->|"/camera/color, /camera/depth"| REC
 
-    subgraph CAN_LAYER["Layer 3 · 通信层"]
-        CB["can_bridge\n(Python)"]
-        RS["rs485_bridge\nModbus RTU (Python)"]
-        VCAN["🔌 vcan0\n虚拟 CAN 总线\n(CANopen DS402 PDO)"]
-        CB <-->|"CAN帧"| VCAN
-    end
-
-    subgraph SIM["Layer 4 · 物理仿真层"]
-        MJ["mujoco_sim\n(Python / MuJoCo v3)"]
-        PANDA["🦾 Franka Panda\nfranka_panda.xml\n1kHz 物理步进"]
-        MJ --> PANDA
-    end
-
-    subgraph REC["Layer 5 · 数据录制层"]
-        LR["lerobot_recorder\n(Python / HuggingFace datasets)"]
-        DS["💾 data/episodes/\nhf_dataset 格式\n兼容 ACT / Diffusion Policy"]
-        LR --> DS
-    end
-
-    TI -->|"/master_pose\nPoseStamped @ 50Hz"| IC
-    IMP -->|"/joint_torque_cmd\nJointState"| CB
-    CB -->|"/joint_states\n编码器反馈"| MJ
-    RS -->|"/gripper_state\nFloat32"| LR
-    MJ -->|"/joint_states @ 100Hz"| IC
-    MJ -->|"/ft_sensor\nWrenchStamped"| IC
-    MJ -->|"/joint_states"| LR
-    TI -->|"/gripper_cmd\nFloat32"| RS
-
-    style INPUT fill:#1a3a5c,stroke:#4a9eff,color:#e8f4fd
-    style CTRL fill:#1a3a2a,stroke:#4aff8a,color:#e8fdf0
-    style CAN_LAYER fill:#3a2a1a,stroke:#ffaa4a,color:#fdf3e8
-    style SIM fill:#2a1a3a,stroke:#aa4aff,color:#f3e8fd
+    style SM fill:#5c1a1a,stroke:#ff4a4a,color:#fde8e8
+    style SV fill:#1a3a2a,stroke:#4aff8a,color:#e8fdf0
+    style RC fill:#1a2a5c,stroke:#4a7aff,color:#e8eefd
+    style FB fill:#3a2a1a,stroke:#ffaa4a,color:#fdf3e8
+    style MJ fill:#2a1a3a,stroke:#aa4aff,color:#f3e8fd
+    style CAM fill:#1a3a3a,stroke:#4affff,color:#e8fdfd
     style REC fill:#3a1a2a,stroke:#ff4aaa,color:#fde8f3
 ```
+
+> 完整分层图（节点图、Topic 图、Launch 架构）见 [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md)。
 
 ### 快速开始
 
@@ -178,8 +152,14 @@ colcon build
 # 4. Source 环境
 source install/setup.bash
 
-# 5. 一键启动全链路系统
-ros2 launch launch/full_system.launch.py
+# 5. 一键启动全链路系统（仿真模式 + 阻抗控制器）
+ros2 launch teleop_bringup full_system.launch.py
+
+# 常用变体
+ros2 launch teleop_bringup m1_control_sim.launch.py                 # M1 验证：ros2_control + MuJoCo
+ros2 launch teleop_bringup full_system.launch.py controller:=forward        # M1/M2 力矩直通
+ros2 launch teleop_bringup full_system.launch.py use_sim:=false can_interface:=can0  # 实体 CAN
+ros2 launch teleop_bringup full_system.launch.py record:=true               # 启用录制
 ```
 
 ### 演示视频

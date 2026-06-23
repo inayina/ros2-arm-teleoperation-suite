@@ -1,34 +1,50 @@
-# 开发路线图：`ros2-arm-teleoperation-suite`
+# 开发路线图：`ros2-arm-teleoperation-suite` (V2)
 
-**版本**：v0.1  
-**更新日期**：2026-06-23  
-**目标**：6 周内完成可演示的五层机械臂遥操作全链路系统
+**版本**：v2.0  
+**更新日期**：2026-06-24  
+**目标**：构建工业级机械臂遥操作平台（七层栈），架构基线见 [`ARCHITECTURE_V2.md`](./ARCHITECTURE_V2.md)
+
+> V1（五层教学版）路线图与 SPEC 已归档，见本文件末尾「V1 历史存档」。
 
 ---
 
 ## 总览
 
 ```
-M0  M1          M2          M3              M4      M5    M6
-│   │           │           │               │       │     │
-▼   ▼           ▼           ▼               ▼       ▼     ▼
-预适配  CAN/RS485   MuJoCo桥接  阻抗控制器     全链路   录制  收尾
-(done) [Week 1]  [Week 2]   [Week 3-4]    [Week 5][W5]  [W6]
+M1            M2             M3            M4           M5         M6
+│             │              │             │            │          │
+▼             ▼              ▼             ▼            ▼          ▼
+ros2_control  CANopen DS402  阻抗控制器     MoveIt       安全层     视觉+
++ MuJoCo      现场总线        (插件)         Servo        + E-Stop   Recorder
 ```
+
+自底向上搭工业栈：先有实时控制框架与物理引擎，再插入现场总线与驱动器，然后是控制律、运动层、安全层，最后补齐感知与数据闭环。
 
 ---
 
 ## 里程碑总表
 
-| 里程碑 | 分支 | 核心目标 | 验收标准 | 预计用时 |
-|---|---|---|---|---|
-| **M0** | *(episode-data-lab 项目)* | LeRobot hf_dataset 预适配 | `export_to_lerobot.py` dry-run 通过 | **Done ✅** |
-| **M1** | `feat/can-rs485-layer` | CAN + RS485 通信层 | vcan0 收发帧，Modbus RTU 通 | Week 1 |
-| **M2** | `feat/mujoco-ros2-bridge` | MuJoCo × ROS2 桥接 | Panda 响应 `/joint_torque_cmd` | Week 2 |
-| **M3** | `feat/impedance-controller` | C++ 阻抗控制器 | 末端误差 < 2mm，柔顺响应可见 | Week 3-4 |
-| **M4** | `feat/full-pipeline` | 全链路贯通 | 键盘→CAN→MuJoCo→反馈，闭环稳定 | Week 5 |
-| **M5** | `feat/lerobot-recorder` | LeRobot 数据录制 | 50 步 Episode 可 load_from_disk | Week 5 |
-| **M6** | `feat/polish` | 收尾发布 | README + 演示视频 + Bullet Points | Week 6 |
+| 里程碑 | 分支 | 核心目标 | 关键验收标准 |
+|---|---|---|---|
+| **M1** | `feat/v2-control-skeleton` | 描述 + ros2_control + MuJoCo 物理服务器 | `ros2 control list_controllers` 显示 `joint_state_broadcaster` active；Panda 重力补偿站立；`/joint_states` @1kHz；`/sim/*` 背板贯通 |
+| **M2** | `feat/v2-canopen-fieldbus` | CANopen DS402 总线 + 虚拟伺服 | `candump vcan0` 抓到周期 RPDO/TPDO；DS402 到 `Operation Enabled`；`forward_command_controller` 经 CAN 驱动 Panda；故障注入→EMCY + `Fault`；`test_ds402_state_machine`/`test_pdo_codec` 通过 |
+| **M3** | `feat/v2-impedance-controller` | 阻抗控制器（ros2_control 插件） | 插件被 controller_manager 加载且 active；给定 `/joint_target` 末端误差 <2mm；接触 >5N 柔顺；`update()` 稳定 1kHz；与 `jtc` 可热切 |
+| **M4** | `feat/v2-motion-layer` | MoveIt Servo 运动层 | 键盘→`/safe_master_pose`(直通)→servo→`/joint_target`→阻抗→CAN→MuJoCo 端到端平滑；奇异/限位自动减速；端到端延迟 <50ms |
+| **M5** | `feat/v2-safety-layer` | 安全层 + E-Stop 闭环 | 5 监视器逐项单测；越限指令被拒并保持安全位姿；心跳超时 100ms→E-Stop→DS402 Quick Stop→力矩归零；`/safety/reset` 复位；rqt_robot_monitor 可视化 |
+| **M6** | `feat/v2-perception-recorder` | 视觉 + 多模态 Recorder + 收尾 | `/camera/color`+`/camera/depth` @30Hz；Recorder 多模态对齐；`LeRobotDataset.load` 字段完整；README/架构图/演示视频更新 |
+
+---
+
+## 里程碑依赖
+
+```mermaid
+flowchart LR
+    M1["M1 ros2_control<br/>+ MuJoCo"] --> M2["M2 CANopen<br/>DS402 总线"]
+    M2 --> M3["M3 阻抗控制器<br/>(插件)"]
+    M3 --> M4["M4 MoveIt<br/>Servo"]
+    M4 --> M5["M5 安全层<br/>+ E-Stop"]
+    M5 --> M6["M6 视觉 +<br/>LeRobot Recorder"]
+```
 
 ---
 
@@ -36,79 +52,84 @@ M0  M1          M2          M3              M4      M5    M6
 
 ```
 main
-├── feat/can-rs485-layer      ← M1 开发分支
-├── feat/mujoco-ros2-bridge   ← M2 开发分支
-├── feat/impedance-controller ← M3 开发分支
-├── feat/full-pipeline        ← M4 集成分支（rebase from M1/M2/M3）
-├── feat/lerobot-recorder     ← M5 开发分支
-└── feat/polish               ← M6 收尾分支
+├── feat/v2-control-skeleton      ← M1（teleop_interfaces/description/canopen_hw_interface/mujoco_sim/bringup）
+├── feat/v2-canopen-fieldbus      ← M2（virtual_servo_driver + DS402/PDO/SDO）
+├── feat/v2-impedance-controller  ← M3（teleop_controllers 插件）
+├── feat/v2-motion-layer          ← M4（teleop_moveit_config + servo）
+├── feat/v2-safety-layer          ← M5（safety_monitor 5 监视器 + E-Stop）
+└── feat/v2-perception-recorder   ← M6（camera_bridge + lerobot_recorder）
 ```
 
-**合并规则**：
-- 每个 feat 分支 PR → main，保持 main 始终可运行
-- M4 `full-pipeline` 从 M1/M2/M3 merge 后集成测试
-- commit 格式：`type(scope): message`，例如 `feat(can_bridge): add PDO encoder feedback`
+**合并规则**：每个 feat 分支 PR → main，保持 main 始终可 `colcon build`。
+commit 格式：`type(scope): message`，例如 `feat(canopen_hw_interface): cyclic RPDO write`。
 
 ---
 
-## 分支 SPEC 文件索引
+## 包 ↔ 里程碑映射
 
-| 文件 | 对应里程碑 |
-|---|---|
-| [SPEC_M1_CAN_RS485.md](./SPEC_M1_CAN_RS485.md) | M1：CAN + RS485 通信层 |
-| [SPEC_M2_MUJOCO_BRIDGE.md](./SPEC_M2_MUJOCO_BRIDGE.md) | M2：MuJoCo × ROS2 桥接 |
-| [SPEC_M3_IMPEDANCE_CTRL.md](./SPEC_M3_IMPEDANCE_CTRL.md) | M3：C++ 阻抗控制器 |
-| [SPEC_M4_FULL_PIPELINE.md](./SPEC_M4_FULL_PIPELINE.md) | M4：全链路集成 |
-| [SPEC_M5_LEROBOT_RECORDER.md](./SPEC_M5_LEROBOT_RECORDER.md) | M5：LeRobot 数据录制 |
+| 包 | 语言 | 引入里程碑 |
+|---|---|---|
+| `teleop_interfaces` | msg/srv | M1 |
+| `teleop_description` | xacro | M1 |
+| `canopen_hw_interface` | C++ | M1（直连）→ M2（接 CAN） |
+| `mujoco_sim` | Python | M1 |
+| `teleop_bringup` | launch | M1 |
+| `virtual_servo_driver` | Python | M2 |
+| `gripper_driver` | Python | M2 |
+| `teleop_controllers` | C++ | M3 |
+| `teleop_moveit_config` | config | M4 |
+| `teleop_input` | Python | M4 |
+| `safety_monitor` | C++ | M5 |
+| `camera_bridge` | Python | M6 |
+| `lerobot_recorder` | Python | M6 |
 
 ---
 
-## 开发检查清单（逐周）
+## 开发检查清单（逐里程碑）
 
-### Week 1 — M1: CAN / RS485 层
+### M1 — ros2_control 骨架 + MuJoCo
+- [x] `teleop_interfaces` 构建通过，`SafetyStatus`/`DriveStatus`/`TriggerEstop` 可被发现
+- [x] `teleop_description` 生成 URDF（`xacro` 展开无报错），含 `ros2_control` 标签
+- [x] `mujoco_sim_node` 加载 Panda，开放 `/sim/joint_effort_cmd` 订阅 + `/sim/encoder_state` 发布
+- [x] `canopen_hw_interface` 以「直连 sim」模式跑通（先不走 CAN），`controller_manager` 加载成功
+- [x] `joint_state_broadcaster` active，`/joint_states` 输出 7 关节 measured state
+- [x] `ros2 launch teleop_bringup m1_control_sim.launch.py` 一键起 M1 最小闭环（MoveIt/Safety/Recorder 不参与）
 
-- [ ] `scripts/setup_vcan.sh` 可成功创建 vcan0 接口
-- [ ] `can_bridge_node.py` 启动，能向 vcan0 发送 PDO 帧
-- [ ] `can_bridge_node.py` 能接收 vcan0 回环帧并发布 `/joint_states`
-- [ ] `rs485_modbus_node.py` 启动 Modbus TCP Server 仿真
-- [ ] `/gripper_cmd` 写入 → Modbus 寄存器 `0x0040` 变化
-- [ ] `/gripper_state` 正确回读寄存器 `0x0041`
-- [ ] `tests/test_can_bridge.py` 全通过
+### M2 — CANopen DS402 现场总线
+- [ ] `setup_vcan.sh` 建 vcan0；`virtual_servo_driver` ×7 上线
+- [ ] DS402 状态机走通 `Switch On Disabled → Operation Enabled`
+- [ ] `canopen_hw_interface` write→RPDO、read←TPDO，`candump vcan0` 可见周期帧
+- [ ] `forward_command_controller` 经 CAN 驱动 Panda 运动
+- [ ] 故障注入（过流/超速/通信）→ EMCY 帧 + 进入 `Fault`
+- [ ] `test_ds402_state_machine.py` / `test_pdo_codec.py` 通过
 
-### Week 2 — M2: MuJoCo 桥接
+### M3 — 阻抗控制器（插件）
+- [ ] `cartesian_impedance_controller` 经 pluginlib 导出，`controller_manager` 加载 active
+- [ ] command interface=`effort`，state interface=`position/velocity`
+- [ ] 给定 `/joint_target`，末端跟踪误差 <2mm
+- [ ] 接触力 >5N 自动降刚度（柔顺）
+- [ ] `update()` 稳定 1kHz，可与 `joint_trajectory_controller` 热切
 
-- [ ] `config/models/franka_panda.xml` 下载就位
-- [ ] `mujoco_sim_node.py` 启动，MuJoCo viewer 弹出
-- [ ] 发布 `/joint_torque_cmd` → Panda 关节运动可见
-- [ ] `/ft_sensor` 在末端接触时有非零力矩输出
-- [ ] `/joint_states` 以 100Hz 稳定发布
-- [ ] 运行 10 秒无崩溃
+### M4 — MoveIt Servo 运动层
+- [ ] `teleop_moveit_config` 的 `servo.yaml`/`kinematics.yaml` 就位
+- [ ] `servo_node` 订阅 `/safe_master_pose`（pose 模式）→ 输出 `/joint_target`
+- [ ] `teleop_input` 键盘映射 → `/teleop/cmd_pose`（M5 前先直通到 servo）
+- [ ] 接近奇异/限位时 servo 自动减速
+- [ ] 端到端延迟 <50ms
 
-### Week 3-4 — M3: 阻抗控制器
+### M5 — 安全层 + E-Stop
+- [ ] `safety_monitor` 5 个子监视器逐项 GTest 通过
+- [ ] 越限指令被拒，保持上一安全位姿
+- [ ] 心跳超时 100ms → `/safety/estop` → DS402 Quick Stop → 力矩归零
+- [ ] `/safety/trigger_estop` / `/safety/reset` 服务可用
+- [ ] `/safety/diagnostics` 在 rqt_robot_monitor 显示
 
-- [ ] `impedance_controller_node.cpp` 编译通过（colcon build）
-- [ ] KDL Chain 从 URDF 正确构建，7 个关节
-- [ ] 给定目标位姿，末端跟踪误差 < 2mm（见 SPEC_M3）
-- [ ] 接触力 > 5N 时自动切换柔顺模式
-- [ ] `tests/test_impedance_controller.cpp` GTest 全通过
-- [ ] 控制频率 ≥ 500Hz（MultiThreadedExecutor 验证）
-
-### Week 5 — M4: 全链路 + M5: 录制
-
-- [ ] `launch/full_system.launch.py` 一键启动所有 5 个节点
-- [ ] 键盘 W/A/S/D 输入 → MuJoCo Panda 运动
-- [ ] 按 G → 夹爪开合
-- [ ] 端到端延迟 < 50ms（`/master_pose` → MuJoCo 渲染）
-- [ ] 按 R 开始录制 → 按 R 停止 → `data/episodes/` 生成文件
-- [ ] `datasets.load_from_disk()` 读取 Episode，字段完整
-- [ ] 录制 50 步 Episode 文件大小合理（< 10MB）
-
-### Week 6 — M6: 收尾
-
-- [ ] `README.md` 中英双语，包含架构图、演示 GIF
-- [ ] 简历 Bullet Points 填写量化数据（延迟 ms、误差 mm）
-- [ ] `media/` 目录包含演示视频
-- [ ] `requirements.txt` 锁版本，`scripts/install_deps.sh` 可用
+### M6 — 视觉 + Recorder + 收尾
+- [ ] `camera_bridge` 发布 `/camera/color`+`/camera/depth`+`camera_info` @30Hz
+- [ ] `lerobot_recorder` 多模态 `ApproximateTimeSynchronizer` 对齐
+- [ ] 录制 Episode → `LeRobotDataset.load` 字段完整（state/ee/ft/gripper/rgb/depth/action/ts）
+- [ ] ACT 配置可直接消费数据集
+- [ ] README/架构图/演示视频更新
 
 ---
 
@@ -116,11 +137,18 @@ main
 
 | 风险 | 影响 | 应对 |
 |---|---|---|
-| KDL IK 收敛慢 | M3 控制频率不足 | 降维到位置控制，阻抗层叠加 |
-| MuJoCo viewer 无 GPU | M2 渲染卡顿 | 使用 `mujoco.viewer` offscreen 模式 |
-| vcan0 内核模块缺失 | M1 全阻塞 | 预先 `apt install linux-modules-extra-$(uname -r)` |
-| colcon 构建 KDL 失败 | M3 全阻塞 | 备选：用 Python 版 KDL（pykdl-utils）先通路 |
+| `ros2_control` 自定义 HW 接口实时性不足 | M1/M3 抖动 | 先用 `mock_components` 直连验证逻辑，再切 CANopen |
+| CANopen 周期 + SYNC 时序复杂 | M2 阻塞 | 先实现单关节 PDO 回环，再扩到 7 轴 |
+| MoveIt Servo 配置门槛高 | M4 阻塞 | 先用官方 panda_moveit_config 模板裁剪 |
+| MuJoCo 无 GPU 渲染相机慢 | M6 卡顿 | `headless:=true` + offscreen renderer |
+| KDL/Jacobian 在插件里求解慢 | M3 控制频率不足 | 预计算 + Eigen，必要时降到位置阻抗 |
 
 ---
 
-*路线图随开发进度更新，每个里程碑合并到 main 后勾选对应条目。*
+## V1 历史存档
+
+V1 为五层教学版（teleop → impedance(独立节点) → can_bridge → mujoco → recorder），相关文档：
+- [`DESIGN_SPEC.md`](./DESIGN_SPEC.md)（V1 总体设计）
+- `SPEC_M1_CAN_RS485.md` / `SPEC_M2_MUJOCO_BRIDGE.md` / `SPEC_M3_IMPEDANCE_CTRL.md` / `SPEC_M4_FULL_PIPELINE.md` / `SPEC_M5_LEROBOT_RECORDER.md`
+
+> 这些文档保留作演进对照，**当前开发以 V2 为准**。

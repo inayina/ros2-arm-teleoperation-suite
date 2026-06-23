@@ -1,3 +1,5 @@
+> 🗄 **归档（V1）**。V2 中阻抗控制器改为 `ros2_control` 控制器插件，见 [`ARCHITECTURE_V2.md`](./ARCHITECTURE_V2.md) §6.3。
+
 # SPEC M3: 笛卡尔阻抗控制器（C++ 核心）
 
 **分支**：`feat/impedance-controller`  

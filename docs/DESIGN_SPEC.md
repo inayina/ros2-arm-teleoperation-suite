@@ -1,3 +1,5 @@
+> 🗄 **归档（V1）**：本文档描述 V1 五层教学版架构。当前开发基线为 [`ARCHITECTURE_V2.md`](./ARCHITECTURE_V2.md)，保留本文件作演进对照。
+
 # Design Specification: `ros2-arm-teleoperation-suite`
 
 **版本**：v0.1-draft  

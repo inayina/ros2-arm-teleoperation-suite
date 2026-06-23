@@ -105,6 +105,66 @@ robot-ops-dashboard    ◀─可选扩展──   MQTT 关节力矩状态推送
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+### 2.1.1 架构图（Mermaid）
+
+```mermaid
+flowchart TB
+    subgraph INPUT["Layer 1 · 遥操作输入层"]
+        KBD["⌨️ 键盘 / 🎮 手柄"]
+        QUEST["🥽 Quest3 VR（预留接口）"]
+        TI["teleop_input\n(Python)"]
+        KBD --> TI
+        QUEST -.->|"future"| TI
+    end
+
+    subgraph CTRL["Layer 2 · 阻抗控制层 (C++)"]
+        IC["impedance_controller\n(C++ / MultiThreadedExecutor)"]
+        IK["KDL ChainIkSolver\n末端位姿 → 关节角"]
+        IMP["阻抗控制律\nτ = Jᵀ·[K(xd-x) + D(ẋd-ẋ)] + τ_g"]
+        IC --> IK --> IMP
+    end
+
+    subgraph CAN_LAYER["Layer 3 · 通信层"]
+        CB["can_bridge\n(Python)"]
+        RS["rs485_bridge\nModbus RTU (Python)"]
+        VCAN["🔌 vcan0\n虚拟 CAN 总线\n(CANopen DS402 PDO)"]
+        CB <-->|"CAN帧"| VCAN
+    end
+
+    subgraph SIM["Layer 4 · 物理仿真层"]
+        MJ["mujoco_sim\n(Python / MuJoCo v3)"]
+        PANDA["🦾 Franka Panda\nfranka_panda.xml\n1kHz 物理步进"]
+        MJ --> PANDA
+    end
+
+    subgraph REC["Layer 5 · 数据录制层"]
+        LR["lerobot_recorder\n(Python / HuggingFace datasets)"]
+        DS["💾 data/episodes/\nhf_dataset 格式\n兼容 ACT / Diffusion Policy"]
+        LR --> DS
+    end
+
+    subgraph UPSTREAM["上游项目（数据消费方）"]
+        ELAB["robot-arm-episode-data-lab\nLeRobot 训练管线"]
+    end
+
+    TI -->|"/master_pose\nPoseStamped @ 50Hz"| IC
+    IMP -->|"/joint_torque_cmd\nJointState"| CB
+    CB -->|"/joint_states\n编码器反馈"| MJ
+    RS -->|"/gripper_state\nFloat32"| LR
+    MJ -->|"/joint_states @ 100Hz"| IC
+    MJ -->|"/ft_sensor\nWrenchStamped"| IC
+    MJ -->|"/joint_states"| LR
+    TI -->|"/gripper_cmd\nFloat32"| RS
+    DS -.->|"datasets.load_from_disk()"| ELAB
+
+    style INPUT fill:#1a3a5c,stroke:#4a9eff,color:#e8f4fd
+    style CTRL fill:#1a3a2a,stroke:#4aff8a,color:#e8fdf0
+    style CAN_LAYER fill:#3a2a1a,stroke:#ffaa4a,color:#fdf3e8
+    style SIM fill:#2a1a3a,stroke:#aa4aff,color:#f3e8fd
+    style REC fill:#3a1a2a,stroke:#ff4aaa,color:#fde8f3
+    style UPSTREAM fill:#2a2a2a,stroke:#888,color:#ccc
+```
+
 ### 2.2 ROS2 话题列表
 
 | Topic | 消息类型 | 发布者 | 订阅者 | QoS |
@@ -318,8 +378,7 @@ episode_step = {
 ```
 ros2-arm-teleoperation-suite/
 ├── docs/
-│   ├── DESIGN_SPEC.md          ← 本文件
-│   └── architecture.drawio     ← 架构图（待补充）
+│   └── DESIGN_SPEC.md          ← 本文件（含 §2.1.1 Mermaid 架构图）
 │
 ├── src/
 │   ├── impedance_controller/   ← C++ 控制节点（ROS2 package）
@@ -437,7 +496,7 @@ find_package(geometry_msgs REQUIRED)
 sudo apt install can-utils linux-modules-extra-$(uname -r)
 
 # ROS2 相关
-sudo apt install ros-humble-kdl-parser ros-humble-robot-state-publisher
+sudo apt install ros-jazzy-kdl-parser ros-jazzy-robot-state-publisher
 
 # MuJoCo 模型
 # 从 https://github.com/google-deepmind/mujoco_menagerie 获取 franka_panda.xml

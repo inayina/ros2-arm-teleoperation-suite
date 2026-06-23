@@ -1,0 +1,36 @@
+# Impedance Controller Parameters
+# 笛卡尔空间阻抗控制器参数配置
+
+impedance_controller:
+  # 控制频率
+  control_rate_hz: 500
+
+  # 刚度矩阵 K（对角元素）
+  # [tx, ty, tz, rx, ry, rz] - 平移 N/m，旋转 N·m/rad
+  stiffness:
+    translation: [500.0, 500.0, 500.0]
+    rotation:    [50.0,  50.0,  50.0]
+
+  # 阻尼矩阵 D（对角元素）
+  # 临界阻尼: D = 2 * sqrt(K * M)，M 取末端等效质量
+  damping:
+    translation: [50.0, 50.0, 50.0]
+    rotation:    [5.0,  5.0,  5.0]
+
+  # 接触检测阈值（N）
+  contact_force_threshold: 5.0
+
+  # 接触模式下刚度缩减比例（Z 轴方向）
+  contact_stiffness_scale: 0.1
+
+  # 关节限位保护
+  joint_limits:
+    # Franka Panda 关节角度限位（rad）
+    q_min: [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]
+    q_max: [ 2.8973,  1.7628,  2.8973, -0.0698,  2.8973,  3.7525,  2.8973]
+
+  # IK 解算参数
+  ik:
+    max_iterations: 500
+    eps_pos: 1.0e-5    # 位置精度 (m)
+    eps_rot: 1.0e-5    # 姿态精度 (rad)

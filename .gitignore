@@ -1,0 +1,29 @@
+# ROS2 build artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+venv/
+
+# Data (too large for git)
+data/episodes/
+data/*.hdf5
+data/*.zarr
+
+# Media (track manually)
+media/*.mp4
+media/*.mkv
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+
+# MuJoCo cache
+*.mjb

@@ -29,4 +29,17 @@ class CurrentLoop:
         target = self.tau_cmd if enabled else 0.0
         alpha = min(1.0, self.bw * dt)
         self.tau_out += alpha * (target - self.tau_out)
+        self.tau_out = max(-self.max_torque, min(self.max_torque, self.tau_out))
+        if abs(self.tau_out) > self.max_torque * 1.05:
+            return 0.0, 0x3210
         return self.tau_out, 0
+
+    def ramp_to_zero(self, dt: float = 0.001, ramp_rate: float = 500.0) -> float:
+        """Quick Stop ramp torque to zero."""
+        delta = ramp_rate * dt
+        if abs(self.tau_out) < delta:
+            self.tau_out = 0.0
+        else:
+            self.tau_out -= delta if self.tau_out > 0 else -delta
+        self.tau_cmd = 0.0
+        return self.tau_out

@@ -59,20 +59,25 @@ flowchart TB
 
 ### Quick Start
 
+ROS 2 Jazzy should be run with the system Python 3.12 environment (`/usr/bin/python3` + `/opt/ros/jazzy`). Do not run `ros2 launch` from the conda `ros2-teleop` environment; keep conda for LeRobot data processing, training, and notebooks.
+
 ```bash
-# 1. Setup virtual CAN interface
+# 1. Source ROS 2
+source /opt/ros/jazzy/setup.bash
+
+# 2. Setup virtual CAN interface
 bash scripts/setup_vcan.sh
 
-# 2. Install dependencies
+# 3. Install dependencies
 bash scripts/install_deps.sh
 
-# 3. Build the workspace
+# 4. Build the workspace
 colcon build
 
-# 4. Source environment
+# 5. Source workspace environment
 source install/setup.bash
 
-# 5. Launch the full system (sim mode, impedance controller)
+# 6. Launch the full system (sim mode, impedance controller)
 ros2 launch teleop_bringup full_system.launch.py
 
 # Variants
@@ -139,20 +144,25 @@ flowchart TB
 
 ### 快速开始
 
+ROS 2 Jazzy 主运行环境使用系统 Python 3.12（`/usr/bin/python3` + `/opt/ros/jazzy`）。不要在 conda `ros2-teleop` 环境里运行 `ros2 launch`；conda 仅用于 LeRobot 数据处理、训练和 notebook。
+
 ```bash
-# 1. 配置虚拟 CAN 环境
+# 1. Source ROS 2
+source /opt/ros/jazzy/setup.bash
+
+# 2. 配置虚拟 CAN 环境
 bash scripts/setup_vcan.sh
 
-# 2. 安装依赖
+# 3. 安装依赖
 bash scripts/install_deps.sh
 
-# 3. 编译工作空间
+# 4. 编译工作空间
 colcon build
 
-# 4. Source 环境
+# 5. Source 工作空间环境
 source install/setup.bash
 
-# 5. 一键启动全链路系统（仿真模式 + 阻抗控制器）
+# 6. 一键启动全链路系统（仿真模式 + 阻抗控制器）
 ros2 launch teleop_bringup full_system.launch.py
 
 # 常用变体

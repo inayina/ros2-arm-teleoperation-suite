@@ -11,7 +11,7 @@ description: Development assistant for ros2-arm-teleoperation-suite. Provides pr
 - **架构**：**V2**（见 `docs/ARCHITECTURE_V2.md`）；V1 五层设计存档于 `docs/DESIGN_SPEC.md`
 - **机器人**：Franka Panda（MuJoCo v3 + mujoco_menagerie XML）
 - **ROS2 发行版**：Jazzy（含 ros2_control / MoveIt 2 Servo）
-- **Python 环境**：conda `ros2-teleop`（`/home/ina/miniforge3/envs/ros2-teleop`）
+- **Python 环境**：ROS2/Jazzy 主运行环境使用系统 Python 3.12（`/usr/bin/python3` + `/opt/ros/jazzy`）；conda 仅用于 LeRobot 数据处理、训练或 notebook，不用于 `ros2 launch`
 - **项目路径**：`/home/ina/dev/ros2-arm-teleoperation-suite`
 - **兄弟项目**：`/home/ina/robot-sim-lab/robot-arm-episode-data-lab`（LeRobot 数据预处理）
 - **主分支**：`main`
@@ -141,11 +141,15 @@ colcon test-result --verbose
 source install/setup.bash
 ```
 
-### conda 环境
+### Python / conda 环境
 
 ```bash
-conda activate ros2-teleop
-# Python 依赖路径：/home/ina/miniforge3/envs/ros2-teleop/bin/python
+# ROS2 Jazzy 主运行环境：使用系统 Python 3.12，避免 conda Python 与 rclpy ABI 不匹配
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+
+# conda ros2-teleop 可用于 LeRobot 数据处理、训练或 notebook；
+# 不要在该 conda 环境中运行 ros2 launch / rclpy 节点。
 ```
 
 ### MuJoCo
@@ -261,10 +265,22 @@ ds.save_to_disk(f"data/episodes/episode_{idx:06d}/train")
 ## 参见
 
 - **V2 工业级架构（当前基线）**：[docs/ARCHITECTURE_V2.md](../docs/ARCHITECTURE_V2.md)
-- 详细架构设计（V1 存档）：[docs/DESIGN_SPEC.md](../docs/DESIGN_SPEC.md)
-- 开发路线图与周检查清单：[docs/ROADMAP.md](../docs/ROADMAP.md)
-- M1 CAN/RS485 详细 SPEC：[docs/SPEC_M1_CAN_RS485.md](../docs/SPEC_M1_CAN_RS485.md)
-- M2 MuJoCo 桥接 SPEC：[docs/SPEC_M2_MUJOCO_BRIDGE.md](../docs/SPEC_M2_MUJOCO_BRIDGE.md)
-- M3 阻抗控制器 SPEC：[docs/SPEC_M3_IMPEDANCE_CTRL.md](../docs/SPEC_M3_IMPEDANCE_CTRL.md)
-- M4 全链路集成 SPEC：[docs/SPEC_M4_FULL_PIPELINE.md](../docs/SPEC_M4_FULL_PIPELINE.md)
-- M5 LeRobot 录制 SPEC：[docs/SPEC_M5_LEROBOT_RECORDER.md](../docs/SPEC_M5_LEROBOT_RECORDER.md)
+- **开发路线图与里程碑检查清单**：[docs/ROADMAP.md](../docs/ROADMAP.md)
+
+### V2 里程碑细化 SPEC（当前）
+
+- **M1** ros2_control 骨架 + MuJoCo：[docs/SPEC_V2_M1_CONTROL_SKELETON.md](../docs/SPEC_V2_M1_CONTROL_SKELETON.md)
+- **M2** CANopen DS402 现场总线：[docs/SPEC_V2_M2_CANOPEN_FIELDBUS.md](../docs/SPEC_V2_M2_CANOPEN_FIELDBUS.md)
+- **M3** 笛卡尔阻抗控制器（插件）：[docs/SPEC_V2_M3_IMPEDANCE_CTRL.md](../docs/SPEC_V2_M3_IMPEDANCE_CTRL.md)
+- **M4** MoveIt Servo 运动层：[docs/SPEC_V2_M4_MOTION_LAYER.md](../docs/SPEC_V2_M4_MOTION_LAYER.md)
+- **M5** 安全层 + E-Stop 闭环：[docs/SPEC_V2_M5_SAFETY_LAYER.md](../docs/SPEC_V2_M5_SAFETY_LAYER.md)
+- **M6** 视觉感知 + LeRobot Recorder：[docs/SPEC_V2_M6_PERCEPTION_RECORDER.md](../docs/SPEC_V2_M6_PERCEPTION_RECORDER.md)
+
+### V1 历史存档 SPEC（参照用）
+
+- 整体设计规范（V1）：[docs/DESIGN_SPEC.md](../docs/DESIGN_SPEC.md)
+- M1 CAN/RS485 SPEC（V1）：[docs/SPEC_M1_CAN_RS485.md](../docs/SPEC_M1_CAN_RS485.md)
+- M2 MuJoCo 桥接 SPEC（V1）：[docs/SPEC_M2_MUJOCO_BRIDGE.md](../docs/SPEC_M2_MUJOCO_BRIDGE.md)
+- M3 阻抗控制器 SPEC（V1）：[docs/SPEC_M3_IMPEDANCE_CTRL.md](../docs/SPEC_M3_IMPEDANCE_CTRL.md)
+- M4 全链路集成 SPEC（V1）：[docs/SPEC_M4_FULL_PIPELINE.md](../docs/SPEC_M4_FULL_PIPELINE.md)
+- M5 LeRobot 录制 SPEC（V1）：[docs/SPEC_M5_LEROBOT_RECORDER.md](../docs/SPEC_M5_LEROBOT_RECORDER.md)

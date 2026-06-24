@@ -3,6 +3,7 @@ build/
 install/
 log/
 .ros_log/
+.ros_home/
 
 # Python
 __pycache__/

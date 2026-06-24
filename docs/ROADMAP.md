@@ -145,10 +145,25 @@ commit 格式：`type(scope): message`，例如 `feat(canopen_hw_interface): cyc
 
 ---
 
+## V2 细化 SPEC 索引
+
+各里程碑对应的细化 SPEC（`SPEC_V2_M*.md`）：
+
+| 里程碑 | SPEC 文件 |
+|---|---|
+| M1 ros2_control + MuJoCo | [`SPEC_V2_M1_CONTROL_SKELETON.md`](./SPEC_V2_M1_CONTROL_SKELETON.md) |
+| M2 CANopen DS402 现场总线 | [`SPEC_V2_M2_CANOPEN_FIELDBUS.md`](./SPEC_V2_M2_CANOPEN_FIELDBUS.md) |
+| M3 阻抗控制器（插件） | [`SPEC_V2_M3_IMPEDANCE_CTRL.md`](./SPEC_V2_M3_IMPEDANCE_CTRL.md) |
+| M4 MoveIt Servo 运动层 | [`SPEC_V2_M4_MOTION_LAYER.md`](./SPEC_V2_M4_MOTION_LAYER.md) |
+| M5 安全层 + E-Stop | [`SPEC_V2_M5_SAFETY_LAYER.md`](./SPEC_V2_M5_SAFETY_LAYER.md) |
+| M6 视觉 + LeRobot Recorder | [`SPEC_V2_M6_PERCEPTION_RECORDER.md`](./SPEC_V2_M6_PERCEPTION_RECORDER.md) |
+
+---
+
 ## V1 历史存档
 
 V1 为五层教学版（teleop → impedance(独立节点) → can_bridge → mujoco → recorder），相关文档：
 - [`DESIGN_SPEC.md`](./DESIGN_SPEC.md)（V1 总体设计）
-- `SPEC_M1_CAN_RS485.md` / `SPEC_M2_MUJOCO_BRIDGE.md` / `SPEC_M3_IMPEDANCE_CTRL.md` / `SPEC_M4_FULL_PIPELINE.md` / `SPEC_M5_LEROBOT_RECORDER.md`
+- [`SPEC_M1_CAN_RS485.md`](./SPEC_M1_CAN_RS485.md) / [`SPEC_M2_MUJOCO_BRIDGE.md`](./SPEC_M2_MUJOCO_BRIDGE.md) / [`SPEC_M3_IMPEDANCE_CTRL.md`](./SPEC_M3_IMPEDANCE_CTRL.md) / [`SPEC_M4_FULL_PIPELINE.md`](./SPEC_M4_FULL_PIPELINE.md) / [`SPEC_M5_LEROBOT_RECORDER.md`](./SPEC_M5_LEROBOT_RECORDER.md)
 
-> 这些文档保留作演进对照，**当前开发以 V2 为准**。
+> 这些文档保留作演进对照，**当前开发以 V2 为准，见上方 V2 细化 SPEC 索引**。

@@ -1,0 +1,41 @@
+# Per-axis virtual servo drive configuration (node_id 1..7 = panda_joint1..7)
+servo_drives:
+  - node_id: 1
+    max_torque_nm: 87.0
+    max_velocity_rad_s: 2.62
+    overcurrent_thresh_nm: 90.0
+    bandwidth_hz: 500.0
+  - node_id: 2
+    max_torque_nm: 87.0
+    max_velocity_rad_s: 2.62
+    overcurrent_thresh_nm: 90.0
+    bandwidth_hz: 500.0
+  - node_id: 3
+    max_torque_nm: 87.0
+    max_velocity_rad_s: 2.62
+    overcurrent_thresh_nm: 90.0
+    bandwidth_hz: 500.0
+  - node_id: 4
+    max_torque_nm: 87.0
+    max_velocity_rad_s: 2.62
+    overcurrent_thresh_nm: 90.0
+    bandwidth_hz: 500.0
+  - node_id: 5
+    max_torque_nm: 12.0
+    max_velocity_rad_s: 2.62
+    overcurrent_thresh_nm: 15.0
+    bandwidth_hz: 500.0
+  - node_id: 6
+    max_torque_nm: 12.0
+    max_velocity_rad_s: 2.62
+    overcurrent_thresh_nm: 15.0
+    bandwidth_hz: 500.0
+  - node_id: 7
+    max_torque_nm: 12.0
+    max_velocity_rad_s: 2.62
+    overcurrent_thresh_nm: 15.0
+    bandwidth_hz: 500.0
+
+can:
+  interface: vcan0
+  sync_period_ms: 1

@@ -96,12 +96,12 @@ commit 格式：`type(scope): message`，例如 `feat(canopen_hw_interface): cyc
 - [x] `ros2 launch teleop_bringup m1_control_sim.launch.py` 一键起 M1 最小闭环（MoveIt/Safety/Recorder 不参与）
 
 ### M2 — CANopen DS402 现场总线
-- [ ] `setup_vcan.sh` 建 vcan0；`virtual_servo_driver` ×7 上线
-- [ ] DS402 状态机走通 `Switch On Disabled → Operation Enabled`
-- [ ] `canopen_hw_interface` write→RPDO、read←TPDO，`candump vcan0` 可见周期帧
-- [ ] `forward_command_controller` 经 CAN 驱动 Panda 运动
-- [ ] 故障注入（过流/超速/通信）→ EMCY 帧 + 进入 `Fault`
-- [ ] `test_ds402_state_machine.py` / `test_pdo_codec.py` 通过
+- [x] `setup_vcan.sh` 建 vcan0；`virtual_servo_driver` ×7 上线
+- [x] DS402 状态机走通 `Switch On Disabled → Operation Enabled`
+- [x] `canopen_hw_interface` write→RPDO、read←TPDO，`candump vcan0` 可见周期帧
+- [x] `forward_command_controller` 经 CAN 驱动 Panda 运动
+- [x] 故障注入（过流/超速/通信）→ EMCY 帧 + 进入 `Fault`
+- [x] `test_ds402_state_machine.py` / `test_pdo_codec.py` 通过
 
 ### M3 — 阻抗控制器（插件）
 - [ ] `cartesian_impedance_controller` 经 pluginlib 导出，`controller_manager` 加载 active

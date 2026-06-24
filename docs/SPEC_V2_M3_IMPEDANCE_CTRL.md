@@ -27,23 +27,23 @@ src/
 ├── teleop_controllers/             ← [NEW] L3 阻抗控制器（C++ ros2_control 插件）
 │   ├── include/teleop_controllers/
 │   │   ├── cartesian_impedance_controller.hpp   # 控制器主头文件
-│   │   ├── impedance_math.hpp                    # 数学工具（Jacobian、FK、阻抗律）
-│   │   └── visibility_control.h                  # 跨平台符号导出宏
+│   │   ├── impedance_math.hpp                    # 数学工具（解析式 FK、Jacobian、误差）
+│   │   └── visibility_control.h                  # 跨平台符号导出宏（待添加）
 │   ├── src/
 │   │   ├── cartesian_impedance_controller.cpp   # 控制器实现
-│   │   └── impedance_math.cpp                    # KDL/Eigen 数学实现
+│   │   └── impedance_math.cpp                    # Eigen 解析式实现（见 §5.6）
 │   ├── controllers_plugin.xml      # pluginlib 导出声明
 │   ├── config/
 │   │   └── impedance_params.yaml   # 刚度 K、阻尼 D、力矩限幅
 │   ├── test/
-│   │   ├── test_impedance_controller.cpp  # GTest：控制律正确性
-│   │   └── test_impedance_math.cpp        # GTest：FK/Jacobian 精度
+│   │   ├── test_impedance_math.cpp       # GTest：FK/Jacobian 数值精度
+│   │   └── test_impedance_controller.cpp # GTest：控制律正确性
 │   ├── CMakeLists.txt
 │   └── package.xml
 │
 └── teleop_bringup/
     └── config/
-        └── ros2_controllers.yaml   # [MODIFY] 添加 cartesian_impedance_controller 条目
+        └── controllers.yaml   # [MODIFY] 添加 cartesian_impedance_controller 和 jtc 条目
 ```
 
 ---
@@ -287,7 +287,7 @@ ft_sub_ = node_->create_subscription<WrenchStamped>(
     }, ft_options);
 ```
 
-### 5.5 `ros2_controllers.yaml` 新增条目
+### 5.5 `controllers.yaml` 新增条目（实际文件名）
 
 ```yaml
 cartesian_impedance_controller:
@@ -302,6 +302,29 @@ joint_trajectory_controller:
     command_interfaces: [effort]
     state_interfaces: [position, velocity]
 ```
+
+### 5.6 设计决策：Eigen 解析式 FK/Jacobian（不使用 KDL）
+
+> **决策日期**：2026-06-24（M3 实施阶段）
+
+原 SPEC 草稿提及用 KDL 计算 Jacobian。实际实现**改为 Eigen 手写 Panda 解析式 FK 和几何 Jacobian**。
+
+**原因**：
+
+| 因素 | KDL 方案 | Eigen 解析式方案（已采用） |
+|---|---|---|
+| 依赖 | `ros-jazzy-orocos-kdl`（额外 apt 包） | 无额外依赖（Eigen 已是 ros2_control 基础依赖） |
+| 性能 | 运行时 URDF 树遍历 | 编译时已知 DH 参数，无分支 |
+| 可测试性 | 需 KDL 运行时环境 | 纯 Eigen，GTest 直接链接无 ROS |
+| 精度 | 数值与解析式相同 | 可与数值微分对比验证 |
+| 维护 | KDL API 变化有风险 | Panda DH 参数固定，不会变化 |
+
+**实现文件**：
+- `include/teleop_controllers/impedance_math.hpp`：FK/Jacobian/误差函数声明
+- `src/impedance_math.cpp`：修正 DH 参数（Franka Emika Technical Spec Table 4），实现解析式几何 Jacobian
+- `test/test_impedance_math.cpp`：零位 FK 参考值验证 + 数值微分 Jacobian 对比（误差 < 1e-4 rad）
+
+**重力补偿（M3 阶段）**：`g(q) = 0`。MuJoCo 在物理引擎层面已补偿重力，M3 不需额外重力模型。M4 阶段如接入真实硬件可引入 KDL 重力项或 Pinocchio。
 
 ---
 
@@ -365,8 +388,8 @@ colcon test-result --verbose
 
 | 风险 | 应对 |
 |---|---|
-| KDL Jacobian 在 1kHz 内计算超时 | 预分配 KDL 结构体；必要时用 Eigen 手写 Panda Jacobian（解析解）或降频到位置阻抗 |
-| 方位误差四元数翻转（q 和 -q 等价） | `on_activate()` 记录初始四元数，用连续性约束避免跳变 |
+| ~~KDL Jacobian 在 1kHz 内计算超时~~ | **已解决**：改用 Eigen 解析式 Jacobian（见 §5.6），无 KDL 依赖，运行时零树遍历开销 |
+| 方位误差四元数翻转（q 和 -q 等价） | `cartesian_error()` 中检测 `q_cur.dot(q_des) < 0` 时翻转 q_des 符号，强制最短路径 |
 | 刚度过大导致 Panda 振荡 | 先用小刚度（K=[50,50,50,5,5,5]）验证稳定性，再逐步增大 |
 | pluginlib 找不到插件（ament_index 问题） | 确认 `package.xml` 中 `<export><build_type>` 和 `controllers_plugin.xml` 路径正确 |
 

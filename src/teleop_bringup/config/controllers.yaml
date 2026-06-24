@@ -11,6 +11,10 @@ controller_manager:
     cartesian_impedance_controller:
       type: teleop_controllers/CartesianImpedanceController
 
+    # M3: available for hot-swap (ros2 control switch_controllers)
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
 # --- M1/M2: drive raw torque through the CAN layer ---
 forward_effort_controller:
   ros__parameters:
@@ -24,7 +28,10 @@ forward_effort_controller:
       - panda_joint7
     interface_name: effort
 
-# --- M3: Cartesian impedance controller ---
+# --- M3: Cartesian impedance controller (Eigen analytic FK, no KDL) ---
+# τ = Jᵀ [ K (x_d − x) + D (ẋ_d − ẋ) ] + g(q)
+# Stiffness [Tx Ty Tz Rx Ry Rz]: N/m for translation, N·m/rad for rotation.
+# Damping: set for critical damping per axis (D = 2√K).
 cartesian_impedance_controller:
   ros__parameters:
     joints:
@@ -35,5 +42,45 @@ cartesian_impedance_controller:
       - panda_joint5
       - panda_joint6
       - panda_joint7
-    kp: [60.0, 60.0, 60.0, 60.0, 25.0, 25.0, 10.0]
-    kd: [5.0, 5.0, 5.0, 5.0, 2.0, 2.0, 1.0]
+
+    # Cartesian stiffness [Tx Ty Tz Rx Ry Rz]
+    cartesian_stiffness: [50.0, 50.0, 50.0, 2.0, 2.0, 2.0]
+
+    # Critical damping: D = 2√K (per axis)
+    cartesian_damping: [14.1, 14.1, 14.1, 2.8, 2.8, 2.8]
+
+    # Contact compliance (>5 N → translational stiffness scales down)
+    contact_threshold_n: 5.0
+    stiffness_scale: 50.0
+
+    # Joint-space posture stabilizer for the redundant Panda arm.
+    # This keeps the simulated arm near the Servo joint target while the
+    # Cartesian impedance term defines the end-effector behavior.
+    joint_stiffness: [35.0, 35.0, 30.0, 25.0, 12.0, 10.0, 8.0]
+    joint_damping: [8.0, 8.0, 7.0, 6.0, 3.0, 2.5, 2.0]
+
+    # Safety limits
+    max_torque_nm: [87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0]
+    max_cartesian_error_m: 0.1
+
+# --- M3: JTC for hot-swap verification ---
+# Deactivate impedance controller, activate this for position trajectory mode.
+# ros2 control switch_controllers \
+#   --deactivate cartesian_impedance_controller \
+#   --activate joint_trajectory_controller --strict
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - panda_joint1
+      - panda_joint2
+      - panda_joint3
+      - panda_joint4
+      - panda_joint5
+      - panda_joint6
+      - panda_joint7
+    command_interfaces:
+      - effort
+    state_interfaces:
+      - position
+      - velocity
+    allow_partial_joints_goal: false

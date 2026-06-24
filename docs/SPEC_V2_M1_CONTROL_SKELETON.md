@@ -338,7 +338,31 @@ forward_command_controller:
 
 ---
 
-## 6. 常用调试命令
+## 6. 视觉证明与采集产物
+
+M1 的 README 可见证明图已补到 `media/m1/m1_control_loop_proof.svg`，运行证据 PNG 也已补齐，覆盖本里程碑的核心闭环：
+
+```text
+forward_effort_controller
+  → canopen_system(use_sim:=true)
+  → /sim/joint_effort_cmd
+  → mujoco_sim
+  → /sim/encoder_state
+  → joint_state_broadcaster
+  → /joint_states
+```
+
+运行证据产物如下，采集要求见 [`MEDIA_CAPTURE_PLAN.md`](./MEDIA_CAPTURE_PLAN.md)：
+
+| 文件 | 证明内容 | 对应验收 |
+|---|---|---|
+| `media/m1/rqt_graph_m1.png` | `ros2_control`、`mujoco_sim`、`/sim/*`、`/joint_states` 拓扑贯通 | AC-2/AC-3/AC-6 |
+| `media/m1/panda_gravity_comp.png` | Panda 在 MuJoCo viewer 中重力补偿站立、不坍塌 | AC-5 |
+| `media/m1/joint_states_hz.png` | `ros2 topic hz /joint_states` 显示 ≥ 950 Hz | AC-4 |
+
+---
+
+## 7. 常用调试命令
 
 ```bash
 # 构建 M1 相关包
@@ -370,7 +394,7 @@ ros2 run tf2_tools view_frames
 
 ---
 
-## 7. 关键风险与应对
+## 8. 关键风险与应对
 
 | 风险 | 应对 |
 |---|---|

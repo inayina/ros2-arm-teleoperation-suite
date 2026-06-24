@@ -41,6 +41,8 @@ public:
       "max_velocity", {2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61});
     const double margin = declare_parameter<double>("soft_limit_margin", 0.05);
     const double watchdog_timeout = declare_parameter<double>("watchdog_timeout", 0.1);
+    // M4: monitor-only (faults in /safety/status). M5: set true for auto E-Stop trips.
+    auto_estop_enabled_ = declare_parameter<bool>("auto_estop_enabled", false);
     auto ws_min = declare_parameter<std::vector<double>>("workspace_min", {-0.8, -0.8, 0.0});
     auto ws_max = declare_parameter<std::vector<double>>("workspace_max", {0.8, 0.8, 1.3});
 
@@ -98,7 +100,7 @@ private:
     if (!joint_limit_.check(*msg, fault)) {add_fault(fault);}
     if (!velocity_.check(*msg, fault, estop)) {
       add_fault(fault);
-      if (estop) {estop_.trip(fault);}
+      if (estop && auto_estop_enabled_) {estop_.trip(fault);}
     }
   }
 
@@ -147,7 +149,9 @@ private:
     const bool comm_ok = watchdog_.ok(now_s(), fault);
     if (!comm_ok) {
       pending_faults_.push_back(fault);
-      estop_.trip(fault);
+      if (auto_estop_enabled_) {
+        estop_.trip(fault);
+      }
     }
 
     live_faults_ = pending_faults_;
@@ -206,6 +210,7 @@ private:
   VelocityLimitMonitor velocity_;
   CommWatchdog watchdog_;
   EstopManager estop_;
+  bool auto_estop_enabled_{false};
 
   std::vector<std::string> joint_names_;
   std::vector<std::string> pending_faults_;

@@ -1,0 +1,9 @@
+teleop_input:
+  ros__parameters:
+    bypass_safety: false         # safety_monitor publishes /safe_master_pose
+    base_frame: panda_link0
+    cmd_rate: 100.0
+    heartbeat_rate: 50.0
+    home_position: [0.4, 0.0, 0.5]
+    position_step_m: 0.005
+    rotation_step_rad: 0.0523598776

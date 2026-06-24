@@ -4,7 +4,15 @@
 moveit_servo:
   ros__parameters:
     use_gazebo: false
-    command_in_type: "speed_units"      # twist in m/s, rad/s
+
+    # Input: PoseStamped pose-tracking mode (NOT speed_units/twist).
+    # servo_node subscribes to pose_command_in_topic (remapped to /safe_master_pose
+    # at launch time via the remapping in servo.launch.py).
+    # Valid values: unitless | speed_units (pose tracking uses switch_command_type POSE=2).
+    command_in_type: "speed_units"
+    cartesian_command_in_topic: ~/delta_twist_cmds   # unused in pose mode, kept for completeness
+    pose_command_in_topic: ~/pose_target_cmds        # remapped → /safe_master_pose at launch
+
     scale:
       linear: 0.4
       rotational: 0.8
@@ -17,9 +25,8 @@ moveit_servo:
     publish_joint_velocities: false
     publish_joint_accelerations: false
 
-    # Incoming pose target (remapped from /safe_master_pose at launch).
-    pose_command_in_topic: ~/pose_target_cmds
-    cartesian_command_in_topic: ~/delta_twist_cmds
+    # Joint state source (mandatory for IK).
+    joint_topic: /joint_states
 
     move_group_name: panda_arm
     planning_frame: panda_link0
@@ -29,13 +36,16 @@ moveit_servo:
     publish_period: 0.008               # 125 Hz
     incoming_command_timeout: 0.1
 
-    # Singularity / limit safeguards (the value MoveIt Servo adds over raw IK).
-    lower_singularity_threshold: 17.0
-    hard_stop_singularity_threshold: 30.0
-    joint_limit_margins: [0.1]
+    # Singularity safeguards (condition number: higher = closer to singularity).
+    # hard_stop must be greater than lower (MoveIt Servo validation).
+    lower_singularity_threshold: 17.0           # begin slowing down
+    hard_stop_singularity_threshold: 30.0       # stop completely
     leaving_singularity_threshold_multiplier: 2.0
 
-    check_collisions: true
+    # Joint limit margins (rad) — servo slows before reaching hw limits.
+    joint_limit_margins: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+
+    check_collisions: false
     collision_check_rate: 10.0
     self_collision_proximity_threshold: 0.01
     scene_collision_proximity_threshold: 0.02

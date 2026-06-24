@@ -381,7 +381,36 @@ GRIPPER_ERROR_REG  = 0x0042   # Holding: 错误状态（0=正常）
 
 ---
 
-## 7. 常用调试命令
+## 7. 视觉证明与采集产物
+
+M2 的 README 可见证明图已补到 `media/m2/m2_canopen_fieldbus_proof.svg`，运行证据 PNG 也已补齐，覆盖本里程碑的正常现场总线路径和故障注入路径：
+
+```text
+canopen_system(use_sim:=false)
+  → vcan0 RPDO/SYNC
+  → virtual_servo_driver ×7 (DS402 Operation Enabled)
+  → /sim/joint_effort_cmd
+  → mujoco_sim
+  → /sim/encoder_state
+  → vcan0 TPDO
+  → /joint_states
+
+inject_fault()
+  → EMCY 0x081~0x087
+  → /servo_drive/status = Fault
+```
+
+运行证据产物如下，采集要求见 [`MEDIA_CAPTURE_PLAN.md`](./MEDIA_CAPTURE_PLAN.md)：
+
+| 文件 | 证明内容 | 对应验收 |
+|---|---|---|
+| `media/m2/candump_pdo.png` | `candump vcan0` 显示 RPDO/TPDO 周期帧 | AC-2/AC-3 |
+| `media/m2/ds402_state_machine.png` | DS402 状态从 `Switch On Disabled` 进入 `Operation Enabled` | AC-4 |
+| `media/m2/emcy_fault_injection.png` | `/servo_drive/status` 已锁存 `Fault` 状态；当前补图未主动调用新的 `inject_fault` 服务 | AC-6/AC-7 |
+
+---
+
+## 8. 常用调试命令
 
 ```bash
 # 建立 vcan0
@@ -420,7 +449,7 @@ pytest tests/test_ds402_state_machine.py -v
 
 ---
 
-## 8. 关键风险与应对
+## 9. 关键风险与应对
 
 | 风险 | 应对 |
 |---|---|

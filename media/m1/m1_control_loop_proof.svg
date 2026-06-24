@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="620" viewBox="0 0 1180 620" role="img" aria-labelledby="title desc">
+  <title id="title">M1 ros2_control and MuJoCo visual proof</title>
+  <desc id="desc">Visual proof card for the M1 control skeleton: ros2_control forward controller, direct sim hardware interface, MuJoCo backplane, encoder feedback, joint states, and gravity-compensated Panda standing.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#72a7ff"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <style>
+      .bg { fill: #101828; }
+      .panel { fill: #172033; stroke: #34445f; stroke-width: 2; filter: url(#shadow); }
+      .node { fill: #1d2b45; stroke: #72a7ff; stroke-width: 2; rx: 16; }
+      .sim { fill: #241c3a; stroke: #b98cff; }
+      .ok { fill: #163524; stroke: #58d68d; }
+      .warn { fill: #332a16; stroke: #ffcc66; }
+      .title { font-family: Inter, Arial, sans-serif; font-size: 34px; font-weight: 700; fill: #f8fbff; }
+      .subtitle { font-family: Inter, Arial, sans-serif; font-size: 18px; fill: #b9c7dd; }
+      .label { font-family: Inter, Arial, sans-serif; font-size: 18px; font-weight: 700; fill: #f8fbff; }
+      .small { font-family: Inter, Arial, sans-serif; font-size: 14px; fill: #cbd6e6; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; fill: #e9f0fa; }
+      .caption { font-family: Inter, Arial, sans-serif; font-size: 15px; fill: #9fb2cc; }
+      .check { font-family: Inter, Arial, sans-serif; font-size: 16px; fill: #b9ffd2; }
+      .line { stroke: #72a7ff; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .line2 { stroke: #b98cff; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1180" height="620"/>
+  <rect x="40" y="38" width="1100" height="544" rx="26" class="panel"/>
+
+  <text x="70" y="88" class="title">M1 Visual Proof: ros2_control + MuJoCo</text>
+  <text x="70" y="118" class="subtitle">Minimal closed loop verifies controller loading, /sim backplane, /joint_states feedback, and Panda gravity-compensated standing.</text>
+
+  <rect x="74" y="162" width="220" height="96" class="node"/>
+  <text x="96" y="198" class="label">forward controller</text>
+  <text x="96" y="224" class="mono">/forward_effort_controller</text>
+  <text x="96" y="246" class="small">active command source</text>
+
+  <rect x="370" y="162" width="250" height="96" class="node"/>
+  <text x="394" y="198" class="label">canopen_system</text>
+  <text x="394" y="224" class="mono">use_sim:=true</text>
+  <text x="394" y="246" class="small">direct sim hardware interface</text>
+
+  <rect x="704" y="162" width="230" height="96" class="sim"/>
+  <text x="728" y="198" class="label">MuJoCo physics</text>
+  <text x="728" y="224" class="mono">franka_panda.xml</text>
+  <text x="728" y="246" class="small">gravity compensation visible</text>
+
+  <rect x="370" y="334" width="250" height="96" class="ok"/>
+  <text x="394" y="370" class="label">joint_state_broadcaster</text>
+  <text x="394" y="396" class="mono">/joint_states</text>
+  <text x="394" y="418" class="small">target evidence: >= 950 Hz</text>
+
+  <rect x="704" y="334" width="230" height="96" class="sim"/>
+  <text x="728" y="370" class="label">/sim backplane</text>
+  <text x="728" y="396" class="mono">effort_cmd + encoder_state</text>
+  <text x="728" y="418" class="small">command and feedback both present</text>
+
+  <path class="line" d="M294 210 C320 210 340 210 370 210"/>
+  <path class="line" d="M620 210 C650 210 674 210 704 210"/>
+  <path class="line2" d="M820 258 C820 294 820 304 820 334"/>
+  <path class="line2" d="M704 382 C672 382 654 382 620 382"/>
+  <path class="line" d="M495 334 C495 302 495 292 495 258"/>
+
+  <text x="316" y="194" class="caption">effort commands</text>
+  <text x="638" y="194" class="caption">/sim/joint_effort_cmd</text>
+  <text x="837" y="304" class="caption">encoder truth</text>
+  <text x="632" y="366" class="caption">/sim/encoder_state</text>
+  <text x="512" y="306" class="caption">state export</text>
+
+  <rect x="76" y="342" width="216" height="86" class="warn"/>
+  <text x="100" y="374" class="label">Launch proof point</text>
+  <text x="100" y="400" class="mono">m1_control_sim.launch.py</text>
+
+  <rect x="76" y="468" width="858" height="66" rx="16" class="ok"/>
+  <text x="100" y="497" class="check">AC evidence to capture: controller active, /joint_states near 1 kHz, /sim topics alive, Panda standing without collapse.</text>
+  <text x="100" y="520" class="mono">media/m1/panda_gravity_comp.png + media/m1/rqt_graph_m1.png + media/m1/joint_states_hz.png</text>
+
+  <g transform="translate(982 162)">
+    <rect x="0" y="0" width="108" height="270" rx="18" fill="#121a29" stroke="#58d68d" stroke-width="2"/>
+    <circle cx="54" cy="42" r="20" fill="#58d68d"/>
+    <rect x="46" y="64" width="16" height="70" rx="8" fill="#58d68d"/>
+    <line x1="54" y1="80" x2="24" y2="126" stroke="#58d68d" stroke-width="10" stroke-linecap="round"/>
+    <line x1="54" y1="96" x2="84" y2="144" stroke="#58d68d" stroke-width="10" stroke-linecap="round"/>
+    <line x1="54" y1="132" x2="30" y2="210" stroke="#58d68d" stroke-width="10" stroke-linecap="round"/>
+    <line x1="54" y1="132" x2="82" y2="210" stroke="#58d68d" stroke-width="10" stroke-linecap="round"/>
+    <text x="18" y="246" class="small">Panda stable</text>
+  </g>
+</svg>

@@ -18,10 +18,12 @@
 #include <cmath>
 
 #include "teleop_controllers/impedance_math.hpp"
+#include "teleop_controllers/joint_trajectory_mapping.hpp"
 
 using teleop_controllers::impedance_math::cartesian_error;
 using teleop_controllers::impedance_math::forward_kinematics;
 using teleop_controllers::impedance_math::jacobian;
+using teleop_controllers::map_joint_trajectory_target;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers: simplified control law mirror (mirrors update() logic)
@@ -127,6 +129,50 @@ TEST(ControlLawTest, JacobianNullspaceTorque)
   const double min_sv = svd.singularValues().minCoeff();
   EXPECT_GT(min_sv, 1e-3)
     << "Jacobian at ready pose should be well-conditioned (no singularity). min_sv=" << min_sv;
+}
+
+TEST(JointTrajectoryMappingTest, AcceptsLegacyPositionOrderWithoutJointNames)
+{
+  trajectory_msgs::msg::JointTrajectory msg;
+  msg.points.resize(1);
+  msg.points.back().positions = {1.0, 2.0, 3.0};
+  const std::vector<std::string> joints = {"j1", "j2", "j3"};
+
+  std::vector<double> mapped;
+  ASSERT_TRUE(map_joint_trajectory_target(msg, joints, mapped));
+  EXPECT_EQ(mapped, std::vector<double>({1.0, 2.0, 3.0}));
+}
+
+TEST(JointTrajectoryMappingTest, MapsReorderedJointNames)
+{
+  trajectory_msgs::msg::JointTrajectory msg;
+  msg.joint_names = {"j3", "j1", "j2"};
+  msg.points.resize(1);
+  msg.points.back().positions = {30.0, 10.0, 20.0};
+  const std::vector<std::string> joints = {"j1", "j2", "j3"};
+
+  std::vector<double> mapped;
+  ASSERT_TRUE(map_joint_trajectory_target(msg, joints, mapped));
+  EXPECT_EQ(mapped, std::vector<double>({10.0, 20.0, 30.0}));
+}
+
+TEST(JointTrajectoryMappingTest, RejectsMissingOrUnknownJointNames)
+{
+  const std::vector<std::string> joints = {"j1", "j2", "j3"};
+
+  trajectory_msgs::msg::JointTrajectory missing;
+  missing.joint_names = {"j1", "j2"};
+  missing.points.resize(1);
+  missing.points.back().positions = {1.0, 2.0};
+
+  std::vector<double> mapped;
+  EXPECT_FALSE(map_joint_trajectory_target(missing, joints, mapped));
+
+  trajectory_msgs::msg::JointTrajectory unknown;
+  unknown.joint_names = {"j1", "j2", "j4"};
+  unknown.points.resize(1);
+  unknown.points.back().positions = {1.0, 2.0, 4.0};
+  EXPECT_FALSE(map_joint_trajectory_target(unknown, joints, mapped));
 }
 
 int main(int argc, char ** argv)

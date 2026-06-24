@@ -85,6 +85,7 @@ if(BUILD_TESTING)
   target_include_directories(test_impedance_controller PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   )
+  ament_target_dependencies(test_impedance_controller trajectory_msgs)
   target_link_libraries(test_impedance_controller Eigen3::Eigen)
 endif()
 

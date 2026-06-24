@@ -14,7 +14,7 @@
 1. 配置 `teleop_moveit_config`（`servo.yaml`、`kinematics.yaml`、SRDF）
 2. 启动 `servo_node`：订阅 `/safe_master_pose`（pose tracking 模式），输出 `/joint_target`
 3. 实现 `teleop_input_node`：键盘/手柄 → `/teleop/cmd_pose` + `/teleop/heartbeat`
-4. M5 前临时：`teleop_input` 输出直通 `/safe_master_pose`（安全层占位）
+4. 通过已存在的 `safety_monitor` 将 `/teleop/cmd_pose` 过滤后发布为 `/safe_master_pose`
 5. 验证端到端链路：键盘 → servo → 阻抗控制器 → CAN → MuJoCo，延迟 < 50ms
 6. 奇异点/关节限位附近自动减速验证
 
@@ -90,17 +90,13 @@ src/
 | `/safe_master_pose` | `geometry_msgs/PoseStamped` | 订阅 | 安全层输出（M5 前直通） |
 | `/joint_target` | `trajectory_msgs/JointTrajectory` | 发布 | 输出给阻抗控制器，125 Hz |
 
-### 3.4 M5 前临时直通（`teleop_input_node` 内部）
+### 3.4 M4 输入链路（通过 `safety_monitor`）
 
 ```python
-# M5 安全层就位前，直接将 /teleop/cmd_pose 重发为 /safe_master_pose
-# （生产环境 M5 安全层会替换这条路径）
-self._safe_pub = self.create_publisher(
-    PoseStamped, "/safe_master_pose", 10)
-
-def _on_cmd_pose(self, msg: PoseStamped):
-    # TODO M5: 此处将改为由 safety_monitor 过滤
-    self._safe_pub.publish(msg)   # 临时直通
+# teleop_input 只发布 /teleop/cmd_pose；safety_monitor 是唯一的
+# /safe_master_pose 发布者。M4 使用当前 safety path，M5 再扩展
+# heartbeat watchdog、E-Stop 复位等完整安全闭环。
+self._cmd_pub = self.create_publisher(PoseStamped, "/teleop/cmd_pose", 10)
 ```
 
 ---
@@ -296,6 +292,9 @@ ros2 launch teleop_moveit_config servo.launch.py
 
 # 全链路启动（M4 完整栈）
 ros2 launch teleop_bringup full_system.launch.py
+
+# 采集 M4 验收信号（heartbeat、/joint_target、controller 状态）
+bash scripts/validate_m4_motion_layer.sh
 
 # 手动发 /safe_master_pose 测试 servo 响应
 ros2 topic pub /safe_master_pose geometry_msgs/msg/PoseStamped \

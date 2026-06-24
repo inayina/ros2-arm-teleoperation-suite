@@ -1,0 +1,43 @@
+# Joint velocity and acceleration limits used by MoveIt Servo.
+# MoveIt Servo uses these to clamp outgoing joint trajectory commands and
+# to trigger the near-limit slowdown (together with joint_limit_margins in
+# servo.yaml).
+#
+# Values based on Franka Panda hardware datasheet:
+#   https://frankaemika.github.io/docs/control_parameters.html
+joint_limits:
+  panda_joint1:
+    has_velocity_limits: true
+    max_velocity: 2.1750          # rad/s
+    has_acceleration_limits: true
+    max_acceleration: 15.0        # rad/s²
+  panda_joint2:
+    has_velocity_limits: true
+    max_velocity: 2.1750
+    has_acceleration_limits: true
+    max_acceleration: 7.5
+  panda_joint3:
+    has_velocity_limits: true
+    max_velocity: 2.1750
+    has_acceleration_limits: true
+    max_acceleration: 10.0
+  panda_joint4:
+    has_velocity_limits: true
+    max_velocity: 2.1750
+    has_acceleration_limits: true
+    max_acceleration: 12.5
+  panda_joint5:
+    has_velocity_limits: true
+    max_velocity: 2.6100
+    has_acceleration_limits: true
+    max_acceleration: 15.0
+  panda_joint6:
+    has_velocity_limits: true
+    max_velocity: 2.6100
+    has_acceleration_limits: true
+    max_acceleration: 20.0
+  panda_joint7:
+    has_velocity_limits: true
+    max_velocity: 2.6100
+    has_acceleration_limits: true
+    max_acceleration: 20.0

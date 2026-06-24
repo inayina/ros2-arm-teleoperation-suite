@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="640" viewBox="0 0 1180 640" role="img" aria-labelledby="title desc">
+  <title id="title">M2 CANopen DS402 visual proof</title>
+  <desc id="desc">Visual proof card for the M2 fieldbus milestone: ros2_control hardware interface sends RPDO and SYNC over vcan0, virtual servo drivers reach Operation Enabled, TPDO returns encoder feedback, and EMCY proves fault injection.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ffb86b"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000000" flood-opacity="0.3"/>
+    </filter>
+    <style>
+      .bg { fill: #0f1724; }
+      .panel { fill: #172033; stroke: #394861; stroke-width: 2; filter: url(#shadow); }
+      .node { fill: #1d2b45; stroke: #72a7ff; stroke-width: 2; rx: 16; }
+      .bus { fill: #332817; stroke: #ffb86b; stroke-width: 2; rx: 16; }
+      .drive { fill: #173424; stroke: #58d68d; stroke-width: 2; rx: 16; }
+      .fault { fill: #391b20; stroke: #ff6978; stroke-width: 2; rx: 16; }
+      .sim { fill: #241c3a; stroke: #b98cff; stroke-width: 2; rx: 16; }
+      .title { font-family: Inter, Arial, sans-serif; font-size: 34px; font-weight: 700; fill: #f8fbff; }
+      .subtitle { font-family: Inter, Arial, sans-serif; font-size: 18px; fill: #b9c7dd; }
+      .label { font-family: Inter, Arial, sans-serif; font-size: 18px; font-weight: 700; fill: #f8fbff; }
+      .small { font-family: Inter, Arial, sans-serif; font-size: 14px; fill: #cbd6e6; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; fill: #e9f0fa; }
+      .caption { font-family: Inter, Arial, sans-serif; font-size: 15px; fill: #9fb2cc; }
+      .check { font-family: Inter, Arial, sans-serif; font-size: 16px; fill: #b9ffd2; }
+      .line { stroke: #ffb86b; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .line2 { stroke: #b98cff; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .line3 { stroke: #ff6978; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1180" height="640"/>
+  <rect x="40" y="38" width="1100" height="564" rx="26" class="panel"/>
+
+  <text x="70" y="88" class="title">M2 Visual Proof: CANopen DS402 Fieldbus</text>
+  <text x="70" y="118" class="subtitle">M1 direct sim path is replaced by vcan0 RPDO/TPDO traffic, DS402 state transitions, and EMCY fault evidence.</text>
+
+  <rect x="72" y="158" width="240" height="104" class="node"/>
+  <text x="96" y="194" class="label">ros2_control</text>
+  <text x="96" y="220" class="mono">canopen_system</text>
+  <text x="96" y="244" class="small">use_sim:=false, forward controller</text>
+
+  <rect x="388" y="158" width="230" height="104" class="bus"/>
+  <text x="414" y="194" class="label">vcan0 fieldbus</text>
+  <text x="414" y="220" class="mono">SYNC + RPDO + TPDO</text>
+  <text x="414" y="244" class="small">candump evidence point</text>
+
+  <rect x="694" y="158" width="270" height="104" class="drive"/>
+  <text x="720" y="194" class="label">virtual_servo_driver x7</text>
+  <text x="720" y="220" class="mono">DS402 Operation Enabled</text>
+  <text x="720" y="244" class="small">encoder feedback and current loop</text>
+
+  <rect x="694" y="346" width="270" height="104" class="sim"/>
+  <text x="720" y="382" class="label">MuJoCo physics server</text>
+  <text x="720" y="408" class="mono">/sim/joint_effort_cmd</text>
+  <text x="720" y="432" class="small">Panda moves through fieldbus path</text>
+
+  <rect x="388" y="346" width="230" height="104" class="bus"/>
+  <text x="414" y="382" class="label">TPDO feedback cache</text>
+  <text x="414" y="408" class="mono">0x181-0x187, 0x281-0x287</text>
+  <text x="414" y="432" class="small">read() returns measured state</text>
+
+  <rect x="72" y="346" width="240" height="104" class="drive"/>
+  <text x="96" y="382" class="label">/joint_states proof</text>
+  <text x="96" y="408" class="mono">joint_state_broadcaster</text>
+  <text x="96" y="432" class="small">state originates from CAN TPDO</text>
+
+  <path class="line" d="M312 210 C340 210 360 210 388 210"/>
+  <path class="line" d="M618 210 C646 210 666 210 694 210"/>
+  <path class="line2" d="M828 262 C828 300 828 314 828 346"/>
+  <path class="line2" d="M694 398 C662 398 650 398 618 398"/>
+  <path class="line" d="M388 398 C354 398 346 398 312 398"/>
+
+  <text x="326" y="194" class="caption">RPDO 0x201-0x207</text>
+  <text x="632" y="194" class="caption">NMT + SYNC</text>
+  <text x="846" y="314" class="caption">/sim backplane</text>
+  <text x="628" y="382" class="caption">encoder TPDO</text>
+  <text x="320" y="382" class="caption">measured state</text>
+
+  <rect x="72" y="486" width="592" height="66" class="drive"/>
+  <text x="96" y="515" class="check">Normal-path evidence: candump shows RPDO/TPDO frames and /servo_drive/status reports Operation Enabled.</text>
+  <text x="96" y="538" class="mono">media/m2/candump_pdo.png + media/m2/ds402_state_machine.png</text>
+
+  <rect x="704" y="486" width="360" height="66" class="fault"/>
+  <text x="728" y="515" class="label">Fault-path proof</text>
+  <text x="728" y="538" class="mono">EMCY 0x081-0x087 -> Fault</text>
+
+  <path class="line3" d="M964 210 C1032 244 1032 410 964 520"/>
+  <text x="988" y="354" class="caption">inject_fault()</text>
+
+  <g transform="translate(1000 150)">
+    <rect x="0" y="0" width="88" height="104" rx="14" fill="#111a28" stroke="#ffb86b" stroke-width="2"/>
+    <text x="17" y="30" class="mono">candump</text>
+    <text x="17" y="55" class="mono">181</text>
+    <text x="17" y="78" class="mono">201</text>
+    <text x="17" y="101" class="mono">081</text>
+  </g>
+</svg>

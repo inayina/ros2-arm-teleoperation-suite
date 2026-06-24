@@ -27,6 +27,7 @@
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "pluginlib/class_list_macros.hpp"
 #include "teleop_controllers/impedance_math.hpp"
+#include "teleop_controllers/joint_trajectory_mapping.hpp"
 
 namespace teleop_controllers
 {
@@ -116,12 +117,10 @@ controller_interface::CallbackReturn CartesianImpedanceController::on_configure(
   sub_target_ = get_node()->create_subscription<trajectory_msgs::msg::JointTrajectory>(
     "/joint_target", rclcpp::SystemDefaultsQoS(),
     [this](const trajectory_msgs::msg::JointTrajectory::SharedPtr msg) {
-      if (!msg->points.empty()) {
-        const auto & pts = msg->points.back().positions;
-        if (pts.size() == num_joints_) {
-          target_positions_.writeFromNonRT(std::vector<double>(pts.begin(), pts.end()));
-          target_received_.store(true);
-        }
+      std::vector<double> mapped;
+      if (map_joint_trajectory_target(*msg, joint_names_, mapped)) {
+        target_positions_.writeFromNonRT(mapped);
+        target_received_.store(true);
       }
     });
 

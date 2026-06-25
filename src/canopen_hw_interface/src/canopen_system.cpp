@@ -212,6 +212,15 @@ bool CanopenSystem::sdo_write_u16(uint8_t node_id, uint16_t index, uint16_t valu
   return send_can_frame(kSdoRxBase + node_id, data, 8);
 }
 
+void CanopenSystem::ds402_quick_stop_all()
+{
+  for (uint8_t node_id : node_ids_) {
+    sdo_write_u16(node_id, 0x6040, 0x0002);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  RCLCPP_WARN(get_logger(), "DS402 Quick Stop issued to all drives.");
+}
+
 void CanopenSystem::ds402_enable_all()
 {
   send_nmt_start();
@@ -280,7 +289,20 @@ hardware_interface::CallbackReturn CanopenSystem::on_activate(
   node_ = std::make_shared<rclcpp::Node>("canopen_hw_backplane");
   sub_estop_ = node_->create_subscription<std_msgs::msg::Bool>(
     "/safety/estop", rclcpp::QoS(1).reliable().transient_local(),
-    [this](const std_msgs::msg::Bool::SharedPtr msg) { estop_active_.store(msg->data); });
+    [this](const std_msgs::msg::Bool::SharedPtr msg) {
+      const bool active = msg->data;
+      const bool prev = estop_active_.exchange(active);
+      if (active && !prev) {
+        if (!use_sim_) {
+          ds402_quick_stop_all();
+        }
+        RCLCPP_WARN(get_logger(), "E-Stop active: zeroing torque%s.",
+          use_sim_ ? "" : " + DS402 Quick Stop");
+      } else if (!active && prev && !use_sim_) {
+        ds402_enable_all();
+        RCLCPP_INFO(get_logger(), "E-Stop cleared: re-enabling DS402 drives.");
+      }
+    });
 
   running_.store(true);
 

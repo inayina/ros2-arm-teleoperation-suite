@@ -52,8 +52,8 @@ if [[ "${1:-}" == "--launch" ]]; then
   setsid ros2 launch teleop_bringup full_system.launch.py headless:=true \
     > "${LOG_DIR}/full_system.log" 2>&1 &
   LAUNCH_PID=$!
-  log_info "Waiting 28 s for all layers + servo init (PID ${LAUNCH_PID})..."
-  sleep 28
+  log_info "Waiting 35 s for all layers + servo init (PID ${LAUNCH_PID})..."
+  sleep 35
 fi
 
 echo ""

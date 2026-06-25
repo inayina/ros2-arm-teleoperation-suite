@@ -1,20 +1,61 @@
-"""Bring up the L1 safety layer: safety_monitor + diagnostic_aggregator."""
+# Copyright 2026 ros2-arm-teleoperation-suite contributors
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+"""Bring up the L1 safety layer: safety_monitor (+ optional diagnostic_aggregator)."""
+
+from ament_index_python.packages import get_package_prefix, PackageNotFoundError
 from launch import LaunchDescription
+from launch.substitutions import PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from launch.substitutions import PathJoinSubstitution
 
 
 def generate_launch_description():
-    safety_params = PathJoinSubstitution(
-        [FindPackageShare("safety_monitor"), "config", "safety_limits.yaml"]
-    )
-    return LaunchDescription([
+    pkg = FindPackageShare('safety_monitor')
+    safety_params = PathJoinSubstitution([pkg, 'config', 'safety_limits.yaml'])
+
+    actions = [
         Node(
-            package="safety_monitor",
-            executable="safety_monitor_node",
-            name="safety_monitor",
-            output="screen",
+            package='safety_monitor',
+            executable='safety_monitor_node',
+            name='safety_monitor',
+            output='screen',
             parameters=[safety_params],
         ),
-    ])
+    ]
+
+    # diagnostic_aggregator is optional (apt: ros-jazzy-diagnostic-aggregator).
+    try:
+        get_package_prefix('diagnostic_aggregator')
+        aggregator_params = PathJoinSubstitution([pkg, 'config', 'aggregator.yaml'])
+        actions.append(
+            Node(
+                package='diagnostic_aggregator',
+                executable='aggregator_node',
+                name='diagnostic_aggregator',
+                output='screen',
+                parameters=[aggregator_params],
+                remappings=[('/diagnostics', '/safety/diagnostics')],
+            )
+        )
+    except PackageNotFoundError:
+        pass
+
+    return LaunchDescription(actions)

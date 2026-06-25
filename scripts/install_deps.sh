@@ -16,6 +16,8 @@ sudo apt-get install -y \
   ros-jazzy-moveit-servo \
   ros-jazzy-moveit-kinematics \
   ros-jazzy-diagnostic-aggregator \
+  ros-jazzy-rqt-robot-monitor \
+  ros-jazzy-rqt-runtime-monitor \
   ros-jazzy-realtime-tools \
   can-utils \
   linux-modules-extra-"$(uname -r)" || true

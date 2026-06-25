@@ -96,6 +96,7 @@ private:
   bool send_nmt_start();
   bool sdo_write_u16(uint8_t node_id, uint16_t index, uint16_t value);
   void ds402_enable_all();
+  void ds402_quick_stop_all();
   void decode_tpdo1(size_t joint_idx, const uint8_t * data);
   void decode_tpdo2(size_t joint_idx, const uint8_t * data);
   static std::vector<uint8_t> encode_rpdo_torque(double torque_nm);

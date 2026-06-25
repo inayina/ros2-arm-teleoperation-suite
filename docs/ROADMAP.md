@@ -126,11 +126,14 @@ commit 格式：`type(scope): message`，例如 `feat(canopen_hw_interface): cyc
 - [ ] 端到端延迟 <50ms（`ros2 topic delay` 参考测量，非阻塞）
 
 ### M5 — 安全层 + E-Stop
-- [ ] `safety_monitor` 5 个子监视器逐项 GTest 通过
-- [ ] 越限指令被拒，保持上一安全位姿
-- [ ] 将 `auto_estop_enabled: true` 写入 `safety_limits.yaml`，验证心跳超时 100ms → `/safety/estop` → DS402 Quick Stop → 力矩归零
-- [ ] `/safety/trigger_estop` / `/safety/reset` 服务可用（接口已存在，M5 做闭环验收）
-- [ ] `/safety/diagnostics` 在 rqt_robot_monitor 显示
+- [x] `safety_monitor` 5 个子监视器 GTest 通过（含 joint name 查找）
+- [x] 越限/越界指令被拒，`/safe_master_pose` 保持上一安全位姿
+- [x] `auto_estop_enabled: true`：心跳超时 → `/safety/estop` latch
+- [x] `/safety/trigger_estop` / `/safety/reset` 服务闭环
+- [x] `/safety/diagnostics` 发布 5 条监视器条目 + `diagnostic_aggregator`
+- [x] `canopen_system` E-Stop 时下发 DS402 Quick Stop SDO（CAN 模式）
+- [ ] rqt_robot_monitor 可视化验收（手动）
+- [ ] `virtual_servo_driver` Quick Stop Active 状态验收（`--can` 模式手动）
 
 ### M6 — 视觉 + Recorder + 收尾
 - [ ] `camera_bridge` 发布 `/camera/color`+`/camera/depth`+`camera_info` @30Hz

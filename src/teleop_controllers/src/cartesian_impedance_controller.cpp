@@ -184,7 +184,7 @@ CartesianImpedanceController::state_interface_configuration() const
 controller_interface::CallbackReturn CartesianImpedanceController::on_activate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
-  estop_active_.store(false);
+  // Do not clear estop_active_ here — /safety/estop (Transient Local) is authoritative.
 
   std::vector<double> current(num_joints_, 0.0);
   for (size_t i = 0; i < num_joints_; ++i) {

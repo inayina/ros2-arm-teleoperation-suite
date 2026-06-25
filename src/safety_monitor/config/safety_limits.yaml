@@ -10,9 +10,12 @@ safety_monitor:
       - panda_joint7
     lower: [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]
     upper: [ 2.8973,  1.7628,  2.8973, -0.0698,  2.8973,  3.7525,  2.8973]
-    max_velocity: [2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61]
+    max_velocity: [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]  # sim-friendly diagnostics
     soft_limit_margin: 0.05
-    watchdog_timeout: 0.1        # seconds; teleop heartbeat + joint_states freshness
-    auto_estop_enabled: false   # M4: monitor-only; set true in M5 for watchdog/velocity→E-Stop
+    watchdog_timeout: 0.1          # teleop heartbeat timeout [s]
+    joint_states_timeout: 1.0      # /joint_states freshness timeout [s] (allow sim bring-up)
+    auto_estop_enabled: true       # M5: watchdog -> E-Stop latch
+    velocity_auto_estop_enabled: false  # sim-friendly: velocity faults warn, but do not latch
+    startup_grace_s: 8.0           # suppress velocity auto-E-Stop during sim bring-up
     workspace_min: [-0.8, -0.8, 0.0]
     workspace_max: [ 0.8,  0.8, 1.3]

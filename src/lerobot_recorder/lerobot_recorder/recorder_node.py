@@ -1,43 +1,42 @@
 #!/usr/bin/env python3
-"""L7 multi-modal recorder.
-
-Time-aligns the observation streams and records, per frame:
-  observation.state    <- /joint_states (position)
-  observation.ee_pose  <- /ee_pose
-  observation.ft       <- /ft_sensor
-  observation.gripper  <- /gripper/state
-  observation.images.scene <- /camera/color/image_raw
-  observation.depth.scene  <- /camera/depth/image_raw
-  action               <- /safe_master_pose (+ gripper)
-  timestamp / frame_index / episode_index
-
-Control: /teleop/record_trigger (std_msgs/String) "start" | "stop".
-
-SCAFFOLD: synchronizes joint_states + color + depth via message_filters; ee/ft/
-gripper/action are cached as latest. M6 task: full LeRobotDataset v2 output and
-richer sync. Output dir: `output_dir` param (default data/episodes).
-"""
+"""L7 multi-modal recorder for M6 LeRobot episodes."""
 import numpy as np
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
 
-import message_filters
-from sensor_msgs.msg import Image, JointState
+from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseStamped, WrenchStamped
 from std_msgs.msg import Float64, String
+from teleop_interfaces.msg import DriveStatus, DriveStatusArray, SafetyStatus
 
 from .lerobot_writer import write_episode
+from .time_sync import MultiModalSync
 
 
 def _img_to_np(msg: Image) -> np.ndarray:
-    buf = np.frombuffer(msg.data, dtype=np.uint8)
     if msg.encoding in ("rgb8", "bgr8"):
-        return buf.reshape(msg.height, msg.width, 3)
+        arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
+        if msg.encoding == "bgr8":
+            arr = arr[:, :, ::-1]
+        return arr.copy()
     if msg.encoding == "16UC1":
-        return np.frombuffer(msg.data, dtype=np.uint16).reshape(msg.height, msg.width)
-    return buf
+        depth_mm = np.frombuffer(msg.data, dtype=np.uint16).reshape(msg.height, msg.width)
+        return (depth_mm.astype(np.float32) * 0.001).copy()
+    if msg.encoding == "32FC1":
+        return np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width).copy()
+    raise ValueError(f"Unsupported image encoding: {msg.encoding}")
+
+
+def _pad(values, length: int) -> list[float]:
+    out = [float(v) for v in values[:length]]
+    out.extend([0.0] * (length - len(out)))
+    return out
+
+
+def _stamp_sec(msg) -> float:
+    stamp = msg.header.stamp
+    return float(stamp.sec) + float(stamp.nanosec) * 1e-9
 
 
 class RecorderNode(Node):
@@ -45,6 +44,8 @@ class RecorderNode(Node):
         super().__init__("lerobot_recorder")
         self.declare_parameter("output_dir", "data/episodes")
         self.declare_parameter("task", "teleop")
+        self.declare_parameter("sync_queue_size", 30)
+        self.declare_parameter("sync_slop", 0.05)
         self.out_dir = self.get_parameter("output_dir").value
         self.task = self.get_parameter("task").value
 
@@ -52,35 +53,35 @@ class RecorderNode(Node):
         self.episode_index = 0
         self.frames = []
 
-        # Latest-value caches for non-synchronized streams.
-        self._ee = None
-        self._ft = None
         self._grip = 0.0
         self._action = None
+        self._safety_estop = False
+        self._drive_fault = False
 
-        self.create_subscription(PoseStamped, "/ee_pose", self._on_ee, 10)
-        self.create_subscription(WrenchStamped, "/ft_sensor", self._on_ft, 10)
         self.create_subscription(Float64, "/gripper/state", self._on_grip, 10)
-        self.create_subscription(PoseStamped, "/safe_master_pose", self._on_action, 10)
+        self.create_subscription(PoseStamped, "/teleop/cmd_pose", self._on_action, 10)
+        self.create_subscription(SafetyStatus, "/safety/status", self._on_safety, 10)
+        self.create_subscription(DriveStatusArray, "/servo_drive/status", self._on_drive_status, 10)
         self.create_subscription(String, "/teleop/record_trigger", self._on_trigger, 10)
 
-        # Synchronized observation streams.
-        js_sub = message_filters.Subscriber(self, JointState, "/joint_states",
-                                             qos_profile=qos_profile_sensor_data)
-        color_sub = message_filters.Subscriber(self, Image, "/camera/color/image_raw",
-                                                qos_profile=qos_profile_sensor_data)
-        depth_sub = message_filters.Subscriber(self, Image, "/camera/depth/image_raw",
-                                                qos_profile=qos_profile_sensor_data)
-        self.sync = message_filters.ApproximateTimeSynchronizer(
-            [js_sub, color_sub, depth_sub], queue_size=30, slop=0.05)
-        self.sync.registerCallback(self._on_frame)
+        self.sync = MultiModalSync(
+            self,
+            self._on_frame,
+            queue_size=int(self.get_parameter("sync_queue_size").value),
+            slop=float(self.get_parameter("sync_slop").value),
+        )
 
         self.get_logger().info(f"lerobot_recorder up (output={self.out_dir}).")
 
-    def _on_ee(self, m): self._ee = m
-    def _on_ft(self, m): self._ft = m
     def _on_grip(self, m): self._grip = m.data
     def _on_action(self, m): self._action = m
+    def _on_safety(self, m): self._safety_estop = bool(m.estop_active)
+
+    def _on_drive_status(self, msg: DriveStatusArray):
+        self._drive_fault = any(
+            d.ds402_state == DriveStatus.STATE_FAULT or d.fault_code != 0
+            for d in msg.drives
+        )
 
     def _on_trigger(self, msg: String):
         cmd = msg.data.strip().lower()
@@ -94,6 +95,8 @@ class RecorderNode(Node):
                 path = write_episode(self.out_dir, self.episode_index, self.frames, self.task)
                 self.get_logger().info(f"saved {len(self.frames)} frames -> {path}")
                 self.episode_index += 1
+            else:
+                self.get_logger().warn("recording stopped without synchronized frames")
 
     @staticmethod
     def _pose_vec(p: PoseStamped):
@@ -101,25 +104,33 @@ class RecorderNode(Node):
         q = p.pose.position
         return [q.x, q.y, q.z, o.x, o.y, o.z, o.w]
 
-    def _on_frame(self, js: JointState, color: Image, depth: Image):
+    def _on_frame(self, js, ee_msg: PoseStamped, ft_msg: WrenchStamped, color: Image, depth: Image):
         if not self.recording:
             return
-        ee = self._pose_vec(self._ee) if self._ee else [0.0] * 7
-        ft = ([self._ft.wrench.force.x, self._ft.wrench.force.y, self._ft.wrench.force.z,
-               self._ft.wrench.torque.x, self._ft.wrench.torque.y, self._ft.wrench.torque.z]
-              if self._ft else [0.0] * 6)
+        ft = [
+            ft_msg.wrench.force.x,
+            ft_msg.wrench.force.y,
+            ft_msg.wrench.force.z,
+            ft_msg.wrench.torque.x,
+            ft_msg.wrench.torque.y,
+            ft_msg.wrench.torque.z,
+        ]
         action_pose = self._pose_vec(self._action) if self._action else [0.0] * 7
         frame = {
-            "observation.state": list(js.position),
-            "observation.ee_pose": ee,
+            "observation.state": _pad(list(js.position), 7),
+            "observation.ee_pose": self._pose_vec(ee_msg),
             "observation.ft": ft,
-            "observation.gripper": [self._grip],
+            "observation.gripper": [float(self._grip)],
             "observation.images.scene": _img_to_np(color),
             "observation.depth.scene": _img_to_np(depth),
-            "action": action_pose + [self._grip],
-            "timestamp": self.get_clock().now().nanoseconds * 1e-9,
+            "action": action_pose + [float(self._grip)],
+            "timestamp": _stamp_sec(color),
             "frame_index": len(self.frames),
             "episode_index": self.episode_index,
+            "done": False,
+            "task": self.task,
+            "safety_estop": self._safety_estop,
+            "drive_fault": self._drive_fault,
         }
         self.frames.append(frame)
 

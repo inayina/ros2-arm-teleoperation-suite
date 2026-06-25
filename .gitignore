@@ -33,3 +33,4 @@ media/*.mkv
 # Local validation logs
 .m4_validation/
 .m5_validation/
+.m6_validation/

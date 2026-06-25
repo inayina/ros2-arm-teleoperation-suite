@@ -1,0 +1,34 @@
+# M6 LeRobot/ACT dataset contract.
+#
+# The recorder writes HuggingFace-loadable episodes at:
+#   data/episodes/episode_000000/train
+# ACT or Diffusion Policy loaders should map the following columns directly.
+
+dataset:
+  root: data/episodes
+  episode_pattern: episode_{episode_index:06d}/train
+  task_key: task
+  fps: 30
+
+observation:
+  state_key: observation.state
+  state_dim: 7
+  action_key: action
+  action_dim: 8
+  proprioceptive_keys:
+    - observation.ee_pose
+    - observation.ft
+    - observation.gripper
+  image_keys:
+    scene: observation.images.scene
+  depth_keys:
+    scene: observation.depth.scene
+
+metadata:
+  timestamp_key: timestamp
+  frame_index_key: frame_index
+  episode_index_key: episode_index
+  done_key: done
+  filter_flags:
+    - safety_estop
+    - drive_fault

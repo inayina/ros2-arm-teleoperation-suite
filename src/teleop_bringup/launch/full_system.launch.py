@@ -32,14 +32,25 @@ def generate_launch_description():
     can_interface = LaunchConfiguration("can_interface")
     controller = LaunchConfiguration("controller")
     record = LaunchConfiguration("record")
+    output_dir = LaunchConfiguration("output_dir")
+    task = LaunchConfiguration("task")
     model_path = LaunchConfiguration("model_path")
     headless = LaunchConfiguration("headless")
+    camera_width = LaunchConfiguration("camera_width")
+    camera_height = LaunchConfiguration("camera_height")
+    camera_rate = LaunchConfiguration("camera_rate")
 
     common = {"use_sim": use_sim, "can_interface": can_interface}
 
     description = _include("teleop_description", "description.launch.py", common)
     simulation = _include("teleop_bringup", "simulation.launch.py",
-                          {"model_path": model_path, "headless": headless})
+                          {
+                              "model_path": model_path,
+                              "headless": headless,
+                              "camera_width": camera_width,
+                              "camera_height": camera_height,
+                              "camera_rate": camera_rate,
+                          })
     fieldbus = _include("teleop_bringup", "fieldbus.launch.py", common)
     ros2_control = _include(
         "teleop_bringup", "ros2_control.launch.py",
@@ -48,7 +59,9 @@ def generate_launch_description():
     motion = _include("teleop_bringup", "motion.launch.py",
                       {"use_sim": use_sim, "can_interface": can_interface})
     recording = _include(
-        "teleop_bringup", "recording.launch.py", condition=IfCondition(record))
+        "teleop_bringup", "recording.launch.py",
+        {"output_dir": output_dir, "task": task},
+        condition=IfCondition(record))
 
     return LaunchDescription([
         DeclareLaunchArgument("use_sim", default_value="true"),
@@ -56,9 +69,14 @@ def generate_launch_description():
         DeclareLaunchArgument("controller", default_value="impedance",
                               description="impedance | forward"),
         DeclareLaunchArgument("record", default_value="false"),
+        DeclareLaunchArgument("output_dir", default_value="data/episodes"),
+        DeclareLaunchArgument("task", default_value="teleop"),
         DeclareLaunchArgument("model_path", default_value="config/models/franka_panda.xml"),
         DeclareLaunchArgument("headless", default_value="false",
                               description="true → MuJoCo offscreen renderer (no viewer window)"),
+        DeclareLaunchArgument("camera_width", default_value="640"),
+        DeclareLaunchArgument("camera_height", default_value="480"),
+        DeclareLaunchArgument("camera_rate", default_value="30.0"),
 
         description,
         simulation,

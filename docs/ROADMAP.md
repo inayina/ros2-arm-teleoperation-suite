@@ -1,7 +1,7 @@
 # 开发路线图：`ros2-arm-teleoperation-suite` (V2)
 
 **版本**：v2.0  
-**更新日期**：2026-06-24  
+**更新日期**：2026-06-25  
 **目标**：构建工业级机械臂遥操作平台（七层栈），架构基线见 [`ARCHITECTURE_V2.md`](./ARCHITECTURE_V2.md)
 
 > V1（五层教学版）路线图与 SPEC 已归档，见本文件末尾「V1 历史存档」。
@@ -136,11 +136,11 @@ commit 格式：`type(scope): message`，例如 `feat(canopen_hw_interface): cyc
 - [ ] `virtual_servo_driver` Quick Stop Active 状态验收（`--can` 模式手动）
 
 ### M6 — 视觉 + Recorder + 收尾
-- [ ] `camera_bridge` 发布 `/camera/color`+`/camera/depth`+`camera_info` @30Hz
-- [ ] `lerobot_recorder` 多模态 `ApproximateTimeSynchronizer` 对齐
-- [ ] 录制 Episode → `LeRobotDataset.load` 字段完整（state/ee/ft/gripper/rgb/depth/action/ts）
-- [ ] ACT 配置可直接消费数据集
-- [ ] README/架构图/演示视频更新
+- [x] `camera_bridge` 发布 `/camera/color`+`/camera/depth`+`camera_info` @30Hz（MuJoCo renderer + synthetic fallback）
+- [x] `lerobot_recorder` 多模态 `ApproximateTimeSynchronizer` 对齐（joint/ee/ft/rgb/depth）
+- [x] 录制 Episode → `episode_xxxxxx/train` HuggingFace dataset，字段完整（state/ee/ft/gripper/rgb/depth/action/ts/safety/drive）
+- [x] ACT 配置可直接消费数据集（`config/lerobot/act_m6_dataset.yaml`）
+- [x] README/验证脚本更新（演示截图仍按 `MEDIA_CAPTURE_PLAN` 手动采集）
 
 ### M7 — 遥操作设备抽象 + 合成数据生成 Pipeline
 

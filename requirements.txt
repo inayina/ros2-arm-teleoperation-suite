@@ -8,11 +8,7 @@ mujoco>=3.0.0
 python-can>=4.0.0
 cantools>=36.0.0
 
-# RS485 / Modbus
-pymodbus>=3.0.0
-
 # Teleoperation input
-pynput>=1.7.6
 inputs>=0.5
 
 # LeRobot / HuggingFace data
@@ -21,7 +17,7 @@ Pillow>=10.0.0
 
 # Numerics
 numpy>=1.24.0
-scipy>=1.11.0
 
 # Testing
 pytest>=7.0.0
+

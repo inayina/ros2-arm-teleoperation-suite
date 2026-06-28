@@ -31,15 +31,15 @@ moveit_servo:
     move_group_name: panda_arm
     planning_frame: panda_link0
     ee_frame_name: panda_ee
-    robot_link_command_frame: panda_link0
+    robot_link_command_frame: panda_ee
 
     publish_period: 0.008               # 125 Hz
     incoming_command_timeout: 0.1
 
     # Singularity safeguards (condition number: higher = closer to singularity).
     # hard_stop must be greater than lower (MoveIt Servo validation).
-    lower_singularity_threshold: 17.0           # begin slowing down
-    hard_stop_singularity_threshold: 30.0       # stop completely
+    lower_singularity_threshold: 150.0          # begin slowing down
+    hard_stop_singularity_threshold: 300.0      # stop completely
     leaving_singularity_threshold_multiplier: 2.0
 
     # Joint limit margins (rad) — servo slows before reaching hw limits.

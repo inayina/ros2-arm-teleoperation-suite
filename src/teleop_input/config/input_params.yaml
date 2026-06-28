@@ -1,0 +1,10 @@
+/**:
+  ros__parameters:
+    driver_type: "keyboard"  # "keyboard" or "spacemouse"
+    base_frame: "panda_link0"
+    cmd_rate: 100.0
+    heartbeat_rate: 50.0
+    home_position: [0.4, 0.0, 0.5]
+    position_step_m: 0.005
+    rotation_step_rad: 0.05235987755982989  # 3.0 degrees in radians
+    bypass_safety: false

@@ -25,6 +25,9 @@ class MultiModalSync:
         self.depth_sub = message_filters.Subscriber(
             node, Image, "/camera/depth/image_raw", qos_profile=qos_profile_sensor_data
         )
+        self.obj_sub = message_filters.Subscriber(
+            node, PoseStamped, "/sim/object_pose", qos_profile=qos_profile_sensor_data
+        )
         self.sync = message_filters.ApproximateTimeSynchronizer(
             [
                 self.joint_sub,
@@ -32,6 +35,7 @@ class MultiModalSync:
                 self.ft_sub,
                 self.color_sub,
                 self.depth_sub,
+                self.obj_sub,
             ],
             queue_size=queue_size,
             slop=slop,

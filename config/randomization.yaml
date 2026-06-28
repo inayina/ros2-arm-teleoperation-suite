@@ -1,0 +1,16 @@
+domain_randomization:
+  enabled: true
+  seed: 42
+  camera:
+    scene_camera:
+      pos_noise: [-0.05, 0.05]   # xyz offset range (m)
+      rot_noise: [-5.0, 5.0]     # rpy offset range (deg)
+  object:
+    mass_range: [0.05, 0.5]      # kg
+    friction_range: [0.5, 1.5]
+    initial_pos_range:
+      x: [0.35, 0.55]
+      y: [-0.2, 0.2]
+  lighting:
+    key:
+      diffuse_noise: [-0.2, 0.2]

@@ -12,9 +12,9 @@ safety_monitor:
     upper: [ 2.8973,  1.7628,  2.8973, -0.0698,  2.8973,  3.7525,  2.8973]
     max_velocity: [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]  # sim-friendly diagnostics
     soft_limit_margin: 0.05
-    watchdog_timeout: 0.1          # teleop heartbeat timeout [s]
+    watchdog_timeout: 0.5          # teleop heartbeat timeout [s] (sim-friendly startup margin)
     joint_states_timeout: 1.0      # /joint_states freshness timeout [s] (allow sim bring-up)
-    auto_estop_enabled: true       # M5: watchdog -> E-Stop latch
+    auto_estop_enabled: true       # heartbeat/joint-state watchdog faults latch E-Stop
     velocity_auto_estop_enabled: false  # sim-friendly: velocity faults warn, but do not latch
     startup_grace_s: 8.0           # suppress velocity auto-E-Stop during sim bring-up
     workspace_min: [-0.8, -0.8, 0.0]

@@ -10,7 +10,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -68,25 +68,17 @@ def generate_launch_description():
         remappings=[('~/pose_target_cmds', '/safe_master_pose')],
     )
 
-    # MoveIt Servo starts paused; unpause and select pose-tracking mode after startup.
-    servo_init = TimerAction(
-        period=6.0,
-        actions=[
-            ExecuteProcess(
-                cmd=[
-                    'ros2', 'service', 'call', '/servo_node/pause_servo',
-                    'std_srvs/srv/SetBool', '{data: false}',
-                ],
-                output='log',
-            ),
-            ExecuteProcess(
-                cmd=[
-                    'ros2', 'service', 'call', '/servo_node/switch_command_type',
-                    'moveit_msgs/srv/ServoCommandType', '{command_type: 2}',
-                ],
-                output='log',
-            ),
+    # MoveIt Servo starts paused; initialize it with service waits/retries so
+    # /joint_target is created reliably even under heavy simulator startup load.
+    servo_init = ExecuteProcess(
+        cmd=[
+            'ros2', 'run', 'teleop_moveit_config', 'initialize_servo',
+            '--servo-node', '/servo_node',
+            '--joint-target-topic', '/joint_target',
+            '--pose-input-topic', '/safe_master_pose',
+            '--timeout', '30.0',
         ],
+        output='screen',
     )
 
     return LaunchDescription([

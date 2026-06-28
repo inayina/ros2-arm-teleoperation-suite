@@ -1,6 +1,9 @@
+import os
+from glob import glob
+
 from setuptools import find_packages, setup
 
-package_name = "virtual_servo_driver"
+package_name = "synth_data_gen"
 
 setup(
     name=package_name,
@@ -9,18 +12,17 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
-        ("share/" + package_name + "/config", ["config/servo_config.yaml", "config/ds402.dbc"]),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
     maintainer="Ina",
     maintainer_email="ina@example.com",
-    description="L4 CANopen DS402 virtual servo drive.",
+    description="Batch synthetic data generator for LeRobot training.",
     license="MIT",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "virtual_servo_driver = virtual_servo_driver.driver_node:main",
+            "batch_generator = synth_data_gen.batch_generator:main",
         ],
     },
 )

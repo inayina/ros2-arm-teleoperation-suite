@@ -15,6 +15,9 @@
 
   <exec_depend>moveit_servo</exec_depend>
   <exec_depend>moveit_kinematics</exec_depend>
+  <exec_depend>moveit_msgs</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
   <exec_depend>teleop_description</exec_depend>
   <exec_depend>xacro</exec_depend>
   <exec_depend>launch</exec_depend>

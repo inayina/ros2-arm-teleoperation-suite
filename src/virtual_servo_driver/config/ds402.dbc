@@ -1,0 +1,54 @@
+VERSION ""
+
+
+NS_ : 
+    NS_DESC_
+    CM_
+    BA_DEF_
+    BA_
+    VAL_
+    CAT_DEF_
+    CAT_
+    FILTER
+    BA_DEF_DEF_
+    EV_DATA_
+    ENVVAR_DATA_
+    SGTYPE_
+    SGTYPE_VAL_
+    BA_DEF_SGTYPE_
+    BA_SGTYPE_
+    SIG_TYPE_REF_
+    VAL_TABLE_
+    SIG_GROUP_
+    SIG_VALTYPE_
+    SIGTYPE_VALTYPE_
+    BO_TX_BU_
+    BA_DEF_REL_
+    BA_REL_
+    BA_DEF_DEF_REL_
+    BU_SG_REL_
+    BU_EV_REL_
+    BU_BO_REL_
+    SG_MUL_VAL_
+
+BS_:
+
+BU_: Master Drive
+
+BO_ 512 RPDO1_TargetTorque: 8 Master
+ SG_ TargetTorque : 0|16@1- (1,0) [-32768|32767] "raw" Drive
+
+BO_ 384 TPDO1_PositionVelocity: 8 Drive
+ SG_ ActualPosition : 0|32@1- (1,0) [-2147483648|2147483647] "counts" Master
+ SG_ ActualVelocity : 32|16@1- (1,0) [-32768|32767] "raw" Master
+
+BO_ 640 TPDO2_StatusTorque: 8 Drive
+ SG_ StatusWord : 0|16@1+ (1,0) [0|65535] "" Master
+ SG_ ActualTorque : 16|16@1- (1,0) [-32768|32767] "raw" Master
+
+CM_ "Generic CANopen DS402 PDO definitions for virtual_servo_driver.";
+CM_ SG_ 512 TargetTorque "0x6071: Target Torque";
+CM_ SG_ 384 ActualPosition "0x6064: Position Actual Value";
+CM_ SG_ 384 ActualVelocity "0x606C: Velocity Actual Value";
+CM_ SG_ 640 StatusWord "0x6041: Statusword";
+CM_ SG_ 640 ActualTorque "0x6077: Torque Actual Value";

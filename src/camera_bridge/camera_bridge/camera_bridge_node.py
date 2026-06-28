@@ -141,6 +141,8 @@ class CameraBridgeNode(Node):
         if self._camera is not None:
             self._set_model_joints(self._q)
             rgb, depth_arr = self._camera.render(self._data)
+            rgb = np.ascontiguousarray(np.flipud(rgb))
+            depth_arr = np.ascontiguousarray(np.flipud(depth_arr))
         elif self.synthetic_fallback:
             rgb, depth_arr = self._synthetic_frame()
         else:

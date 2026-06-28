@@ -61,7 +61,7 @@ public:
     auto max_vel = declare_parameter<std::vector<double>>(
       "max_velocity", {2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61});
     const double margin = declare_parameter<double>("soft_limit_margin", 0.05);
-    const double heartbeat_timeout = declare_parameter<double>("watchdog_timeout", 0.1);
+    const double heartbeat_timeout = declare_parameter<double>("watchdog_timeout", 0.5);
     const double joint_states_timeout = declare_parameter<double>("joint_states_timeout", 0.2);
     auto_estop_enabled_ = declare_parameter<bool>("auto_estop_enabled", true);
     velocity_auto_estop_enabled_ = declare_parameter<bool>("velocity_auto_estop_enabled", false);
@@ -124,6 +124,7 @@ private:
   {
     if (!estop_.active()) {
       estop_.trip(reason);
+      RCLCPP_ERROR(get_logger(), "E-STOP TRIPPED! Reason: %s", reason.c_str());
       publish_estop_locked();
       RCLCPP_ERROR(get_logger(), "E-STOP: %s", reason.c_str());
     }

@@ -35,10 +35,13 @@ def generate_launch_description():
     output_dir = LaunchConfiguration("output_dir")
     task = LaunchConfiguration("task")
     model_path = LaunchConfiguration("model_path")
+    randomize = LaunchConfiguration("randomize")
     headless = LaunchConfiguration("headless")
     camera_width = LaunchConfiguration("camera_width")
     camera_height = LaunchConfiguration("camera_height")
     camera_rate = LaunchConfiguration("camera_rate")
+    start_teleop = LaunchConfiguration("start_teleop")
+    teleop_driver = LaunchConfiguration("teleop_driver")
 
     common = {"use_sim": use_sim, "can_interface": can_interface}
 
@@ -46,6 +49,7 @@ def generate_launch_description():
     simulation = _include("teleop_bringup", "simulation.launch.py",
                           {
                               "model_path": model_path,
+                              "randomize": randomize,
                               "headless": headless,
                               "camera_width": camera_width,
                               "camera_height": camera_height,
@@ -56,8 +60,14 @@ def generate_launch_description():
         "teleop_bringup", "ros2_control.launch.py",
         {**common, "controller": controller})
     safety = _include("safety_monitor", "safety.launch.py")
-    motion = _include("teleop_bringup", "motion.launch.py",
-                      {"use_sim": use_sim, "can_interface": can_interface})
+    motion = _include(
+        "teleop_bringup", "motion.launch.py",
+        {
+            "use_sim": use_sim,
+            "can_interface": can_interface,
+            "start_teleop": start_teleop,
+            "teleop_driver": teleop_driver,
+        })
     recording = _include(
         "teleop_bringup", "recording.launch.py",
         {"output_dir": output_dir, "task": task},
@@ -72,11 +82,14 @@ def generate_launch_description():
         DeclareLaunchArgument("output_dir", default_value="data/episodes"),
         DeclareLaunchArgument("task", default_value="teleop"),
         DeclareLaunchArgument("model_path", default_value="config/models/franka_panda.xml"),
+        DeclareLaunchArgument("randomize", default_value="false"),
         DeclareLaunchArgument("headless", default_value="false",
                               description="true → MuJoCo offscreen renderer (no viewer window)"),
         DeclareLaunchArgument("camera_width", default_value="640"),
         DeclareLaunchArgument("camera_height", default_value="480"),
         DeclareLaunchArgument("camera_rate", default_value="30.0"),
+        DeclareLaunchArgument("start_teleop", default_value="true"),
+        DeclareLaunchArgument("teleop_driver", default_value="keyboard"),
 
         description,
         simulation,

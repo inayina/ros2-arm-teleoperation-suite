@@ -24,21 +24,114 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import PoseStamped, WrenchStamped
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, Float64
+
+import yaml
+from std_srvs.srv import Trigger
+
+from mujoco_sim.domain_randomizer import DomainRandomizer
 
 try:
     import mujoco  # noqa: F401
     _HAS_MUJOCO = True
-except Exception:  # pragma: no cover
+    _MUJOCO_IMPORT_ERROR = ""
+except Exception as exc:  # pragma: no cover
     _HAS_MUJOCO = False
+    _MUJOCO_IMPORT_ERROR = str(exc)
 
 JOINT_NAMES = [f"panda_joint{i}" for i in range(1, 8)]
+JOINT_LOWER = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973])
+JOINT_UPPER = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973])
+MAX_SIM_TORQUE_NM = np.array([87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0])
+FALLBACK_JOINT_ORIGINS = (
+    ((0.0, 0.0, 0.333), (0.0, 0.0, 0.0)),
+    ((0.0, 0.0, 0.0), (-math.pi / 2.0, 0.0, 0.0)),
+    ((0.0, -0.316, 0.0), (math.pi / 2.0, 0.0, 0.0)),
+    ((0.0825, 0.0, 0.0), (math.pi / 2.0, 0.0, 0.0)),
+    ((-0.0825, 0.384, 0.0), (-math.pi / 2.0, 0.0, 0.0)),
+    ((0.0, 0.0, 0.0), (math.pi / 2.0, 0.0, 0.0)),
+    ((0.088, 0.0, 0.0), (math.pi / 2.0, 0.0, 0.0)),
+)
+FALLBACK_HAND_ORIGIN = ((0.0, 0.0, 0.107), (0.0, 0.0, -math.pi / 4.0))
+FALLBACK_EE_ORIGIN = ((0.0, 0.0, 0.10), (0.0, 0.0, 0.0))
+
+
+def _rpy_matrix(roll, pitch, yaw):
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    rx = np.array([[1.0, 0.0, 0.0], [0.0, cr, -sr], [0.0, sr, cr]])
+    ry = np.array([[cp, 0.0, sp], [0.0, 1.0, 0.0], [-sp, 0.0, cp]])
+    rz = np.array([[cy, -sy, 0.0], [sy, cy, 0.0], [0.0, 0.0, 1.0]])
+    return rz @ ry @ rx
+
+
+def _transform(xyz, rpy):
+    t = np.eye(4)
+    t[:3, :3] = _rpy_matrix(*rpy)
+    t[:3, 3] = np.asarray(xyz, dtype=float)
+    return t
+
+
+def _joint_z(theta):
+    c, s = math.cos(theta), math.sin(theta)
+    t = np.eye(4)
+    t[:3, :3] = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+    return t
+
+
+def _quat_wxyz_from_matrix(mat):
+    trace = np.trace(mat)
+    if trace > 0.0:
+        s = math.sqrt(trace + 1.0) * 2.0
+        return np.array([
+            0.25 * s,
+            (mat[2, 1] - mat[1, 2]) / s,
+            (mat[0, 2] - mat[2, 0]) / s,
+            (mat[1, 0] - mat[0, 1]) / s,
+        ])
+    i = int(np.argmax(np.diag(mat)))
+    if i == 0:
+        s = math.sqrt(1.0 + mat[0, 0] - mat[1, 1] - mat[2, 2]) * 2.0
+        return np.array([
+            (mat[2, 1] - mat[1, 2]) / s,
+            0.25 * s,
+            (mat[0, 1] + mat[1, 0]) / s,
+            (mat[0, 2] + mat[2, 0]) / s,
+        ])
+    if i == 1:
+        s = math.sqrt(1.0 + mat[1, 1] - mat[0, 0] - mat[2, 2]) * 2.0
+        return np.array([
+            (mat[0, 2] - mat[2, 0]) / s,
+            (mat[0, 1] + mat[1, 0]) / s,
+            0.25 * s,
+            (mat[1, 2] + mat[2, 1]) / s,
+        ])
+    s = math.sqrt(1.0 + mat[2, 2] - mat[0, 0] - mat[1, 1]) * 2.0
+    return np.array([
+        (mat[1, 0] - mat[0, 1]) / s,
+        (mat[0, 2] + mat[2, 0]) / s,
+        (mat[1, 2] + mat[2, 1]) / s,
+        0.25 * s,
+    ])
+
+
+def fallback_ee_transform(q):
+    """Approximate Panda FK used only when MuJoCo is unavailable."""
+    t = np.eye(4)
+    for qi, (xyz, rpy) in zip(q, FALLBACK_JOINT_ORIGINS):
+        t = t @ _transform(xyz, rpy) @ _joint_z(float(qi))
+    t = t @ _transform(*FALLBACK_HAND_ORIGIN) @ _transform(*FALLBACK_EE_ORIGIN)
+    return t
 
 
 class MujocoSimNode(Node):
     def __init__(self):
         super().__init__("mujoco_sim")
         self.declare_parameter("model_path", "config/models/franka_panda.xml")
+        self.declare_parameter("headless", True)
+        self.declare_parameter("randomize", True)
+        self.declare_parameter("randomization_path", "config/randomization.yaml")
         self.declare_parameter("physics_rate", 1000.0)
         self.declare_parameter("publish_rate", 100.0)
         self.declare_parameter("base_frame", "panda_link0")
@@ -55,8 +148,21 @@ class MujocoSimNode(Node):
         self.gravity_compensation = bool(self.get_parameter("gravity_compensation").value)
         self.n = len(JOINT_NAMES)
 
+        # Domain Randomizer
+        rand_path = self.get_parameter("randomization_path").value
+        if rand_path and not os.path.isabs(rand_path):
+            rand_path = os.path.abspath(rand_path)
+        rand_cfg = {}
+        if os.path.exists(rand_path):
+            with open(rand_path, "r") as f:
+                rand_cfg = yaml.safe_load(f) or {}
+        if not bool(self.get_parameter("randomize").value):
+            rand_cfg = {"domain_randomization": {"enabled": False}}
+        self.randomizer = DomainRandomizer(rand_cfg)
+
         # Sim state (fallback integrator).
-        self.q = np.zeros(self.n)
+        self.initial_q = self._initial_positions()
+        self.q = self.initial_q.copy()
         self.qd = np.zeros(self.n)
         self.tau = np.zeros(self.n)
         self.inertia = np.full(self.n, 0.5)
@@ -68,6 +174,7 @@ class MujocoSimNode(Node):
         self.joint_dofadr = []
         self.actuator_ids = []
         self.ee_site_id = None
+        self.target_body_id = None
         self.force_sensor_id = None
         self.torque_sensor_id = None
         self._try_load_model()
@@ -75,10 +182,17 @@ class MujocoSimNode(Node):
         self.sub_effort = self.create_subscription(
             Float64MultiArray, "/sim/joint_effort_cmd", self._on_effort,
             qos_profile_sensor_data)
+        self.sub_grip = self.create_subscription(
+            Float64, "/teleop/gripper_cmd", self._on_grip, 10)
+        self.gripper_cmd = 0.04  # Open default
+
         self.pub_encoder = self.create_publisher(
             JointState, "/sim/encoder_state", qos_profile_sensor_data)
         self.pub_ft = self.create_publisher(WrenchStamped, "/ft_sensor", 10)
         self.pub_ee = self.create_publisher(PoseStamped, "/ee_pose", 10)
+        self.pub_obj = self.create_publisher(PoseStamped, "/sim/object_pose", 10)
+
+        self.srv_reset = self.create_service(Trigger, "/sim/reset_scene", self._on_reset)
 
         self.create_timer(1.0 / self.physics_rate, self._step)
         self._pub_decim = max(1, int(self.physics_rate / self.publish_rate))
@@ -87,11 +201,31 @@ class MujocoSimNode(Node):
         mode = "MuJoCo" if self.model is not None else "fallback integrator"
         self.get_logger().info(f"mujoco_sim up ({mode}).")
 
+    def _on_reset(self, request, response):
+        if self.model is not None and _HAS_MUJOCO:
+            import mujoco
+            self._set_initial_pose(mujoco)
+            self.randomizer.apply(self.model, self.data, mujoco)
+            response.success = True
+            response.message = "Scene reset and randomized."
+            self.get_logger().info("Reset scene triggered.")
+        else:
+            response.success = False
+            response.message = "No MuJoCo backend."
+        return response
+
     def _try_load_model(self):
         path = self.get_parameter("model_path").value
         if path and not os.path.isabs(path):
             path = os.path.abspath(path)
-        if not (_HAS_MUJOCO and path):
+        if not _HAS_MUJOCO:
+            self.get_logger().warn(
+                f"MuJoCo import failed ({_MUJOCO_IMPORT_ERROR}); using fallback integrator.")
+            self._reset_fallback_state()
+            return
+        if not path:
+            self.get_logger().warn("No MuJoCo model_path provided; using fallback integrator.")
+            self._reset_fallback_state()
             return
         try:
             import mujoco
@@ -99,10 +233,35 @@ class MujocoSimNode(Node):
             self.data = mujoco.MjData(self.model)
             self._build_mujoco_name_maps(mujoco)
             self._set_initial_pose(mujoco)
+            self.randomizer.apply(self.model, self.data, mujoco)
+
+            self.viewer = None
+            if not self.get_parameter("headless").value:
+                import mujoco.viewer
+                self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+
             self.get_logger().info(f"Loaded MuJoCo model: {path}")
         except Exception as e:  # pragma: no cover
             self.get_logger().warn(f"MuJoCo model load failed ({e}); using fallback.")
             self.model = None
+            self.data = None
+            self._reset_fallback_state()
+
+    def _initial_positions(self):
+        q0 = list(self.get_parameter("initial_positions").value)
+        if len(q0) != self.n:
+            self.get_logger().warn(
+                f"initial_positions has {len(q0)} values, expected {self.n}; using ready pose.")
+            q0 = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]
+        q0 = np.asarray(q0, dtype=float)
+        if q0.size != self.n or not np.all(np.isfinite(q0)):
+            q0 = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])
+        return np.clip(q0, JOINT_LOWER, JOINT_UPPER)
+
+    def _reset_fallback_state(self):
+        self.q = self.initial_q.copy()
+        self.qd = np.zeros(self.n)
+        self.tau = np.zeros(self.n)
 
     def _build_mujoco_name_maps(self, mujoco):
         self.joint_qposadr = []
@@ -121,10 +280,15 @@ class MujocoSimNode(Node):
                 raise RuntimeError(f"MuJoCo actuator '{motor_name}' not found")
             self.actuator_ids.append(aid)
 
+        self.gripper_aid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "gripper_motor")
+
+
         site_name = self.get_parameter("ee_site").value
         sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, site_name)
         if sid >= 0:
             self.ee_site_id = sid
+
+        self.target_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "target_object")
 
         self.force_sensor_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_SENSOR, "ee_force")
@@ -132,11 +296,7 @@ class MujocoSimNode(Node):
             self.model, mujoco.mjtObj.mjOBJ_SENSOR, "ee_torque")
 
     def _set_initial_pose(self, mujoco):
-        q0 = list(self.get_parameter("initial_positions").value)
-        if len(q0) != self.n:
-            self.get_logger().warn(
-                f"initial_positions has {len(q0)} values, expected {self.n}; using zeros.")
-            q0 = [0.0] * self.n
+        q0 = self._initial_positions()
         for i, adr in enumerate(self.joint_qposadr):
             self.data.qpos[adr] = q0[i]
         mujoco.mj_forward(self.model, self.data)
@@ -146,10 +306,26 @@ class MujocoSimNode(Node):
     def _on_effort(self, msg: Float64MultiArray):
         d = np.asarray(msg.data, dtype=float)
         if d.size >= self.n:
-            self.tau = d[: self.n]
+            self.tau = self._finite_tau(d[: self.n])
+
+    def _on_grip(self, msg: Float64):
+        self.gripper_cmd = float(np.clip(msg.data, 0.0, 1.0)) * 0.04
+
+    def _finite_tau(self, tau):
+        tau = np.nan_to_num(tau, nan=0.0, posinf=0.0, neginf=0.0)
+        return np.clip(tau, -MAX_SIM_TORQUE_NM, MAX_SIM_TORQUE_NM)
+
+    def _sanitize_fallback_state(self):
+        if not np.all(np.isfinite(self.q)) or not np.all(np.isfinite(self.qd)):
+            self.get_logger().warn("Non-finite fallback state detected; resetting to ready pose.")
+            self._reset_fallback_state()
+            return
+        self.q = np.clip(self.q, JOINT_LOWER, JOINT_UPPER)
+        self.qd = np.nan_to_num(self.qd, nan=0.0, posinf=0.0, neginf=0.0)
 
     def _step(self):
         dt = 1.0 / self.physics_rate
+        self.tau = self._finite_tau(self.tau)
         if self.model is not None:
             import mujoco
             self.data.qfrc_applied[:] = 0.0
@@ -161,17 +337,27 @@ class MujocoSimNode(Node):
                     self.data.qfrc_applied[dof] = self.data.qfrc_bias[dof]
             for i, aid in enumerate(self.actuator_ids):
                 self.data.ctrl[aid] = self.tau[i]
+            if getattr(self, 'gripper_aid', -1) >= 0:
+                self.data.ctrl[self.gripper_aid] = self.gripper_cmd
             mujoco.mj_step(self.model, self.data)
+
             self.q = np.array([self.data.qpos[adr] for adr in self.joint_qposadr])
             self.qd = np.array([self.data.qvel[adr] for adr in self.joint_dofadr])
+            if not np.all(np.isfinite(self.q)) or not np.all(np.isfinite(self.qd)):
+                self.get_logger().warn("Non-finite MuJoCo state detected; resetting scene.")
+                self._set_initial_pose(mujoco)
+                self.tau = np.zeros(self.n)
         else:
             # Simple decoupled second-order integrator.
             qdd = (self.tau - self.damping * self.qd) / self.inertia
             self.qd += qdd * dt
             self.q += self.qd * dt
+            self._sanitize_fallback_state()
 
         self._k += 1
         if self._k % self._pub_decim == 0:
+            if hasattr(self, 'viewer') and self.viewer is not None:
+                self.viewer.sync()
             self._publish()
 
     def _publish(self):
@@ -179,9 +365,9 @@ class MujocoSimNode(Node):
         js = JointState()
         js.header.stamp = stamp
         js.name = JOINT_NAMES
-        js.position = self.q.tolist()
-        js.velocity = self.qd.tolist()
-        js.effort = self.tau.tolist()
+        js.position = np.nan_to_num(self.q, nan=0.0, posinf=0.0, neginf=0.0).tolist()
+        js.velocity = np.nan_to_num(self.qd, nan=0.0, posinf=0.0, neginf=0.0).tolist()
+        js.effort = self._finite_tau(self.tau).tolist()
         self.pub_encoder.publish(js)
 
         ft = WrenchStamped()
@@ -195,7 +381,7 @@ class MujocoSimNode(Node):
             ft.wrench.torque.x = float(wrench[3])
             ft.wrench.torque.y = float(wrench[4])
             ft.wrench.torque.z = float(wrench[5])
-        self.pub_ft.publish(ft)  # TODO(M3): real contact wrench from MuJoCo sensors
+        self.pub_ft.publish(ft)
 
         ee = PoseStamped()
         ee.header.stamp = stamp
@@ -210,8 +396,30 @@ class MujocoSimNode(Node):
             ee.pose.orientation.z = float(quat[3])
             ee.pose.orientation.w = float(quat[0])
         else:
-            ee.pose.orientation.w = 1.0
+            t_ee = fallback_ee_transform(self.q)
+            quat = _quat_wxyz_from_matrix(t_ee[:3, :3])
+            ee.pose.position.x = float(t_ee[0, 3])
+            ee.pose.position.y = float(t_ee[1, 3])
+            ee.pose.position.z = float(t_ee[2, 3])
+            ee.pose.orientation.x = float(quat[1])
+            ee.pose.orientation.y = float(quat[2])
+            ee.pose.orientation.z = float(quat[3])
+            ee.pose.orientation.w = float(quat[0])
         self.pub_ee.publish(ee)
+
+        if self.model is not None and self.target_body_id is not None and self.target_body_id >= 0:
+            obj_pose = PoseStamped()
+            obj_pose.header.stamp = stamp
+            obj_pose.header.frame_id = "world"
+            obj_pose.pose.position.x = float(self.data.xpos[self.target_body_id][0])
+            obj_pose.pose.position.y = float(self.data.xpos[self.target_body_id][1])
+            obj_pose.pose.position.z = float(self.data.xpos[self.target_body_id][2])
+            oq = self.data.xquat[self.target_body_id]
+            obj_pose.pose.orientation.w = float(oq[0])
+            obj_pose.pose.orientation.x = float(oq[1])
+            obj_pose.pose.orientation.y = float(oq[2])
+            obj_pose.pose.orientation.z = float(oq[3])
+            self.pub_obj.publish(obj_pose)
 
     def _read_sensor3(self, sensor_id):
         if sensor_id is None or sensor_id < 0:
@@ -231,39 +439,8 @@ class MujocoSimNode(Node):
     def _site_quat(self):
         # Convert MuJoCo site rotation matrix (row-major 3x3) to wxyz quat.
         mat = np.array(self.data.site_xmat[self.ee_site_id]).reshape(3, 3)
-        trace = np.trace(mat)
-        if trace > 0.0:
-            s = math.sqrt(trace + 1.0) * 2.0
-            return np.array([
-                0.25 * s,
-                (mat[2, 1] - mat[1, 2]) / s,
-                (mat[0, 2] - mat[2, 0]) / s,
-                (mat[1, 0] - mat[0, 1]) / s,
-            ])
-        i = int(np.argmax(np.diag(mat)))
-        if i == 0:
-            s = math.sqrt(1.0 + mat[0, 0] - mat[1, 1] - mat[2, 2]) * 2.0
-            return np.array([
-                (mat[2, 1] - mat[1, 2]) / s,
-                0.25 * s,
-                (mat[0, 1] + mat[1, 0]) / s,
-                (mat[0, 2] + mat[2, 0]) / s,
-            ])
-        if i == 1:
-            s = math.sqrt(1.0 + mat[1, 1] - mat[0, 0] - mat[2, 2]) * 2.0
-            return np.array([
-                (mat[0, 2] - mat[2, 0]) / s,
-                (mat[0, 1] + mat[1, 0]) / s,
-                0.25 * s,
-                (mat[1, 2] + mat[2, 1]) / s,
-            ])
-        s = math.sqrt(1.0 + mat[2, 2] - mat[0, 0] - mat[1, 1]) * 2.0
-        return np.array([
-            (mat[1, 0] - mat[0, 1]) / s,
-            (mat[0, 2] + mat[2, 0]) / s,
-            (mat[1, 2] + mat[2, 1]) / s,
-            0.25 * s,
-        ])
+        return _quat_wxyz_from_matrix(mat)
+
 
 
 def main(args=None):
@@ -274,6 +451,8 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        if hasattr(node, 'viewer') and node.viewer is not None:
+            node.viewer.close()
         node.destroy_node()
         rclpy.shutdown()
 

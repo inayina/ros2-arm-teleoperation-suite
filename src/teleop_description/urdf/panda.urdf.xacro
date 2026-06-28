@@ -2,11 +2,10 @@
 <!--
   Top-level robot description for the teleoperation arm.
 
-  SCAFFOLD NOTE:
-  This builds a simplified 7-DOF revolute chain (cylinders, no meshes) so the
-  stack is fully functional without external assets. For the real robot, drop
-  in franka_description and replace the `arm_chain` macro with the Panda macro;
-  the ros2_control block below stays the same.
+  NOTE:
+  This keeps lightweight cylinder visuals so the stack runs without external
+  mesh assets, but the joint origins, rotations, limits, and tool frame follow
+  the Panda kinematic chain used by the MuJoCo model.
 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="panda">
 
@@ -36,22 +35,6 @@
     </link>
   </xacro:macro>
 
-  <!-- Recursive revolute chain: panda_joint{index} / panda_link{index} -->
-  <xacro:macro name="arm_chain" params="index last_index parent">
-    <xacro:if value="${index &lt;= last_index}">
-      <xacro:link_cyl name="panda_link${index}"/>
-      <joint name="panda_joint${index}" type="revolute">
-        <parent link="${parent}"/>
-        <child link="panda_link${index}"/>
-        <origin xyz="0 0 0.15" rpy="0 0 0"/>
-        <axis xyz="0 0 1"/>
-        <limit lower="-2.8973" upper="2.8973" effort="87.0" velocity="2.62"/>
-        <dynamics damping="0.1" friction="0.0"/>
-      </joint>
-      <xacro:arm_chain index="${index + 1}" last_index="${last_index}" parent="panda_link${index}"/>
-    </xacro:if>
-  </xacro:macro>
-
   <!-- ===== Kinematic tree ===== -->
   <link name="world"/>
 
@@ -62,20 +45,94 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
-  <xacro:arm_chain index="1" last_index="${num_joints}" parent="panda_link0"/>
+  <!--
+    Panda kinematics matching config/models/franka_panda.xml.
+    The visual geometry remains intentionally lightweight, but joint origins,
+    rotations, axes, and limits must match the simulated arm so MoveIt Servo
+    sees a real 7-DOF Panda instead of the old scaffold chain.
+  -->
+  <xacro:link_cyl name="panda_link1"/>
+  <joint name="panda_joint1" type="revolute">
+    <parent link="panda_link0"/>
+    <child link="panda_link1"/>
+    <origin xyz="0 0 0.333" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="87.0" velocity="2.62"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
+
+  <xacro:link_cyl name="panda_link2"/>
+  <joint name="panda_joint2" type="revolute">
+    <parent link="panda_link1"/>
+    <child link="panda_link2"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.7628" upper="1.7628" effort="87.0" velocity="2.62"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
+
+  <xacro:link_cyl name="panda_link3"/>
+  <joint name="panda_joint3" type="revolute">
+    <parent link="panda_link2"/>
+    <child link="panda_link3"/>
+    <origin xyz="0 -0.316 0" rpy="1.57079632679 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="87.0" velocity="2.62"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
+
+  <xacro:link_cyl name="panda_link4"/>
+  <joint name="panda_joint4" type="revolute">
+    <parent link="panda_link3"/>
+    <child link="panda_link4"/>
+    <origin xyz="0.0825 0 0" rpy="1.57079632679 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.0718" upper="-0.0698" effort="87.0" velocity="2.62"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
+
+  <xacro:link_cyl name="panda_link5"/>
+  <joint name="panda_joint5" type="revolute">
+    <parent link="panda_link4"/>
+    <child link="panda_link5"/>
+    <origin xyz="-0.0825 0.384 0" rpy="-1.57079632679 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="12.0" velocity="5.26"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
+
+  <xacro:link_cyl name="panda_link6"/>
+  <joint name="panda_joint6" type="revolute">
+    <parent link="panda_link5"/>
+    <child link="panda_link6"/>
+    <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-0.0175" upper="3.7525" effort="12.0" velocity="4.18"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
+
+  <xacro:link_cyl name="panda_link7"/>
+  <joint name="panda_joint7" type="revolute">
+    <parent link="panda_link6"/>
+    <child link="panda_link7"/>
+    <origin xyz="0.088 0 0" rpy="1.57079632679 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="12.0" velocity="5.26"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
 
   <!-- End-effector / tool frame -->
   <link name="panda_hand"/>
   <joint name="panda_hand_joint" type="fixed">
     <parent link="panda_link${num_joints}"/>
     <child link="panda_hand"/>
-    <origin xyz="0 0 0.15" rpy="0 0 0"/>
+    <origin xyz="0 0 0.107" rpy="0 0 -0.78539816339"/>
   </joint>
   <link name="panda_ee"/>
   <joint name="panda_ee_joint" type="fixed">
     <parent link="panda_hand"/>
     <child link="panda_ee"/>
-    <origin xyz="0 0 0.05" rpy="0 0 0"/>
+    <origin xyz="0 0 0.10" rpy="0 0 0"/>
   </joint>
 
   <!-- ===== ros2_control hardware binding ===== -->

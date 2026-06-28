@@ -1,6 +1,6 @@
 """L3 control layer: controller_manager + broadcaster + chosen controller."""
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, TimerAction
 from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import (
     Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution, PythonExpression,
@@ -59,5 +59,6 @@ def generate_launch_description():
         DeclareLaunchArgument("use_sim", default_value="true"),
         DeclareLaunchArgument("can_interface", default_value="vcan0"),
         DeclareLaunchArgument("controller", default_value="impedance"),
-        cm, impedance_spawner, forward_spawner,
+        cm,
+        TimerAction(period=3.0, actions=[impedance_spawner, forward_spawner]),
     ])

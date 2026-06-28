@@ -7,6 +7,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     model_path = LaunchConfiguration("model_path")
+    randomize = LaunchConfiguration("randomize")
     camera_name = LaunchConfiguration("camera_name")
     camera_width = LaunchConfiguration("camera_width")
     camera_height = LaunchConfiguration("camera_height")
@@ -18,6 +19,7 @@ def generate_launch_description():
             description="MuJoCo XML path. Relative paths resolve from launch cwd.",
         ),
         DeclareLaunchArgument("headless", default_value="false"),
+        DeclareLaunchArgument("randomize", default_value="false"),
         DeclareLaunchArgument("camera_name", default_value="scene_camera"),
         DeclareLaunchArgument("camera_width", default_value="640"),
         DeclareLaunchArgument("camera_height", default_value="480"),
@@ -27,7 +29,11 @@ def generate_launch_description():
             executable="mujoco_sim_node",
             name="mujoco_sim",
             output="screen",
-            parameters=[{"model_path": model_path}],
+            parameters=[{
+                "model_path": model_path,
+                "headless": LaunchConfiguration("headless"),
+                "randomize": randomize,
+            }],
         ),
         Node(
             package="camera_bridge",

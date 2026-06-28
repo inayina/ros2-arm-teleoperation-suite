@@ -34,6 +34,7 @@ constexpr uint32_t kTpdo2Base = 0x280;
 constexpr uint32_t kSyncCobId = 0x080;
 constexpr uint32_t kNmtCobId = 0x000;
 constexpr uint32_t kSdoRxBase = 0x600;
+constexpr std::array<double, 7> kReadyPose = {0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785};
 
 int16_t clamp_i16(int32_t v)
 {
@@ -89,6 +90,14 @@ hardware_interface::CallbackReturn CanopenSystem::on_init(
   tpdo_position_.assign(num_joints_, 0.0);
   tpdo_velocity_.assign(num_joints_, 0.0);
   tpdo_torque_.assign(num_joints_, 0.0);
+
+  if (num_joints_ == kReadyPose.size()) {
+    for (size_t i = 0; i < num_joints_; ++i) {
+      hw_state_position_[i] = kReadyPose[i];
+      encoder_position_[i] = kReadyPose[i];
+      tpdo_position_[i] = kReadyPose[i];
+    }
+  }
 
   RCLCPP_INFO(
     get_logger(), "CanopenSystem init: %zu joints, use_sim=%s, can_interface=%s",
@@ -353,9 +362,15 @@ void CanopenSystem::on_encoder_state(const sensor_msgs::msg::JointState::SharedP
   std::lock_guard<std::mutex> lock(encoder_mutex_);
   const size_t n = std::min(num_joints_, msg->position.size());
   for (size_t i = 0; i < n; ++i) {
-    encoder_position_[i] = msg->position[i];
-    if (i < msg->velocity.size()) {encoder_velocity_[i] = msg->velocity[i];}
-    if (i < msg->effort.size()) {encoder_effort_[i] = msg->effort[i];}
+    if (std::isfinite(msg->position[i])) {
+      encoder_position_[i] = msg->position[i];
+    }
+    if (i < msg->velocity.size() && std::isfinite(msg->velocity[i])) {
+      encoder_velocity_[i] = msg->velocity[i];
+    }
+    if (i < msg->effort.size() && std::isfinite(msg->effort[i])) {
+      encoder_effort_[i] = msg->effort[i];
+    }
   }
   encoder_received_ = true;
 }
@@ -390,7 +405,8 @@ hardware_interface::return_type CanopenSystem::write(
     std_msgs::msg::Float64MultiArray cmd;
     cmd.data.resize(num_joints_);
     for (size_t i = 0; i < num_joints_; ++i) {
-      cmd.data[i] = estop ? 0.0 : hw_cmd_effort_[i];
+      const double effort = std::isfinite(hw_cmd_effort_[i]) ? hw_cmd_effort_[i] : 0.0;
+      cmd.data[i] = estop ? 0.0 : effort;
     }
     if (pub_sim_effort_) {
       pub_sim_effort_->publish(cmd);
@@ -399,7 +415,8 @@ hardware_interface::return_type CanopenSystem::write(
   }
 
   for (size_t i = 0; i < num_joints_; ++i) {
-    const double torque = estop ? 0.0 : hw_cmd_effort_[i];
+    const double effort = std::isfinite(hw_cmd_effort_[i]) ? hw_cmd_effort_[i] : 0.0;
+    const double torque = estop ? 0.0 : effort;
     const auto payload = encode_rpdo_torque(torque);
     send_can_frame(kRpdoBase + node_ids_[i], payload.data(), static_cast<uint8_t>(payload.size()));
   }

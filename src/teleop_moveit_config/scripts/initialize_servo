@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Initialize MoveIt Servo for pose tracking with service waits and retries."""
+
+import argparse
+import sys
+import time
+
+import rclpy
+from moveit_msgs.srv import ServoCommandType
+from rclpy.node import Node
+from std_srvs.srv import SetBool
+
+
+def _service_name(node_name: str, service: str) -> str:
+    return f"{node_name.rstrip('/')}/{service}"
+
+
+def _remaining(deadline: float) -> float:
+    return max(0.0, deadline - time.monotonic())
+
+
+def _wait_for_publishers(node: Node, topic: str, timeout_s: float) -> bool:
+    deadline = time.monotonic() + timeout_s
+    while rclpy.ok() and time.monotonic() < deadline:
+        if node.get_publishers_info_by_topic(topic):
+            return True
+        rclpy.spin_once(node, timeout_sec=0.1)
+    return bool(node.get_publishers_info_by_topic(topic))
+
+
+def _call_service(node: Node, client, request, timeout_s: float):
+    if timeout_s <= 0.0:
+        return None
+    if not client.wait_for_service(timeout_sec=timeout_s):
+        return None
+
+    future = client.call_async(request)
+    deadline = time.monotonic() + timeout_s
+    while rclpy.ok() and time.monotonic() < deadline:
+        rclpy.spin_once(node, timeout_sec=0.1)
+        if future.done():
+            return future.result()
+    return future.result() if future.done() else None
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--servo-node", default="/servo_node")
+    parser.add_argument("--joint-target-topic", default="/joint_target")
+    parser.add_argument("--pose-input-topic", default="/safe_master_pose")
+    parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--retries", type=int, default=6)
+    args = parser.parse_args(argv)
+
+    rclpy.init()
+    node = Node("servo_startup_initializer")
+    deadline = time.monotonic() + args.timeout
+    pose_constant = getattr(ServoCommandType.Request, "POSE", 2)
+
+    try:
+        if args.pose_input_topic:
+            if _wait_for_publishers(node, args.pose_input_topic, min(5.0, _remaining(deadline))):
+                node.get_logger().info(f"Detected pose input publisher on {args.pose_input_topic}.")
+            else:
+                node.get_logger().warn(
+                    f"No publisher detected on {args.pose_input_topic} yet; "
+                    "Servo will still be switched to pose mode."
+                )
+
+        pause_client = node.create_client(SetBool, _service_name(args.servo_node, "pause_servo"))
+        switch_client = node.create_client(
+            ServoCommandType, _service_name(args.servo_node, "switch_command_type"))
+
+        last_switch_success = False
+        for attempt in range(1, max(1, args.retries) + 1):
+            remaining = _remaining(deadline)
+            if remaining <= 0.0:
+                break
+
+            pause_req = SetBool.Request()
+            pause_req.data = False
+            pause_res = _call_service(node, pause_client, pause_req, min(5.0, remaining))
+            if pause_res is None:
+                node.get_logger().warn(f"Attempt {attempt}: pause_servo service unavailable.")
+            elif not pause_res.success:
+                node.get_logger().warn(f"Attempt {attempt}: pause_servo returned: {pause_res.message}")
+
+            switch_req = ServoCommandType.Request()
+            switch_req.command_type = pose_constant
+            switch_res = _call_service(node, switch_client, switch_req, min(5.0, _remaining(deadline)))
+            last_switch_success = bool(switch_res is not None and switch_res.success)
+            if not last_switch_success:
+                node.get_logger().warn(f"Attempt {attempt}: switch_command_type did not succeed.")
+            else:
+                node.get_logger().info(f"Attempt {attempt}: Servo command type set to POSE.")
+
+            if _wait_for_publishers(node, args.joint_target_topic, min(2.0, _remaining(deadline))):
+                node.get_logger().info(
+                    f"Servo output publisher is available on {args.joint_target_topic}.")
+                return 0
+
+            node.get_logger().warn(
+                f"Attempt {attempt}: {args.joint_target_topic} publisher not visible yet.")
+            time.sleep(0.5)
+
+        if last_switch_success:
+            node.get_logger().warn(
+                "Servo services succeeded, but no joint target publisher was detected. "
+                "It should appear once pose commands are flowing."
+            )
+            return 0
+
+        node.get_logger().error("Failed to initialize MoveIt Servo pose mode.")
+        return 1
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

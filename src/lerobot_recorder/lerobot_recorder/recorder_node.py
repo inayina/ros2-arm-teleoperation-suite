@@ -104,7 +104,7 @@ class RecorderNode(Node):
         q = p.pose.position
         return [q.x, q.y, q.z, o.x, o.y, o.z, o.w]
 
-    def _on_frame(self, js, ee_msg: PoseStamped, ft_msg: WrenchStamped, color: Image, depth: Image):
+    def _on_frame(self, js, ee_msg: PoseStamped, ft_msg: WrenchStamped, color: Image, depth: Image, obj_msg: PoseStamped):
         if not self.recording:
             return
         ft = [
@@ -119,6 +119,7 @@ class RecorderNode(Node):
         frame = {
             "observation.state": _pad(list(js.position), 7),
             "observation.ee_pose": self._pose_vec(ee_msg),
+            "observation.object_pose": self._pose_vec(obj_msg),
             "observation.ft": ft,
             "observation.gripper": [float(self._grip)],
             "observation.images.scene": _img_to_np(color),

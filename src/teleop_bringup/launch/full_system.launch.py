@@ -40,6 +40,9 @@ def generate_launch_description():
     camera_width = LaunchConfiguration("camera_width")
     camera_height = LaunchConfiguration("camera_height")
     camera_rate = LaunchConfiguration("camera_rate")
+    enable_wrist_camera = LaunchConfiguration("enable_wrist_camera")
+    wrist_camera_width = LaunchConfiguration("wrist_camera_width")
+    wrist_camera_height = LaunchConfiguration("wrist_camera_height")
     start_teleop = LaunchConfiguration("start_teleop")
     teleop_driver = LaunchConfiguration("teleop_driver")
 
@@ -54,6 +57,9 @@ def generate_launch_description():
                               "camera_width": camera_width,
                               "camera_height": camera_height,
                               "camera_rate": camera_rate,
+                              "enable_wrist_camera": enable_wrist_camera,
+                              "wrist_camera_width": wrist_camera_width,
+                              "wrist_camera_height": wrist_camera_height,
                           })
     fieldbus = _include("teleop_bringup", "fieldbus.launch.py", common)
     ros2_control = _include(
@@ -88,6 +94,9 @@ def generate_launch_description():
         DeclareLaunchArgument("camera_width", default_value="640"),
         DeclareLaunchArgument("camera_height", default_value="480"),
         DeclareLaunchArgument("camera_rate", default_value="30.0"),
+        DeclareLaunchArgument("enable_wrist_camera", default_value="true"),
+        DeclareLaunchArgument("wrist_camera_width", default_value="320"),
+        DeclareLaunchArgument("wrist_camera_height", default_value="240"),
         DeclareLaunchArgument("start_teleop", default_value="true"),
         DeclareLaunchArgument("teleop_driver", default_value="keyboard"),
 

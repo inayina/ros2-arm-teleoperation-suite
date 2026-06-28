@@ -31,5 +31,6 @@ def generate_launch_description():
             executable="gripper_driver_node",
             name="gripper_driver",
             output="screen",
+            condition=IfCondition(not_sim),
         ),
     ])

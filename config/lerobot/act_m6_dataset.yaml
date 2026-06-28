@@ -21,6 +21,7 @@ observation:
     - observation.gripper
   image_keys:
     scene: observation.images.scene
+    wrist: observation.images.wrist
   depth_keys:
     scene: observation.depth.scene
 

@@ -106,9 +106,11 @@ class TestLeRobotRecorder(unittest.TestCase):
         # Create a dummy raw frame with various data types
         raw_frame = {
             "observation.images.scene": np.zeros((10, 10, 3), dtype=np.uint8),
+            "observation.images.wrist": np.zeros((5, 5, 3), dtype=np.uint8),
             "observation.depth.scene": np.zeros((10, 10), dtype=np.float32),
             "observation.state": [1, 2, 3, 4, 5, 6, 7],
             "observation.ee_pose": (1, 2, 3, 4, 5, 6, 7),
+            "observation.object_pose": (0, 0, 0, 0, 0, 0, 1),
             "observation.ft": np.array([1, 2, 3, 4, 5, 6]),
             "observation.gripper": [0.5],
             "action": [0.1] * 8,
@@ -125,6 +127,8 @@ class TestLeRobotRecorder(unittest.TestCase):
         
         assert isinstance(norm["observation.images.scene"], np.ndarray)
         assert norm["observation.images.scene"].dtype == np.uint8
+        assert isinstance(norm["observation.images.wrist"], np.ndarray)
+        assert norm["observation.images.wrist"].dtype == np.uint8
         assert isinstance(norm["observation.depth.scene"], np.ndarray)
         assert norm["observation.depth.scene"].dtype == np.float32
         
@@ -143,9 +147,11 @@ class TestLeRobotRecorder(unittest.TestCase):
         for i in range(3):
             frames.append({
                 "observation.images.scene": np.ones((5, 5, 3), dtype=np.uint8) * i,
+                "observation.images.wrist": np.ones((3, 3, 3), dtype=np.uint8) * i,
                 "observation.depth.scene": np.ones((5, 5), dtype=np.float32) * i,
                 "observation.state": [0.0] * 7,
                 "observation.ee_pose": [0.0] * 7,
+                "observation.object_pose": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
                 "observation.ft": [0.0] * 6,
                 "observation.gripper": [0.0],
                 "action": [0.0] * 8,

@@ -8,6 +8,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image, JointState
+from std_msgs.msg import Float64
 
 try:
     import mujoco
@@ -18,6 +19,8 @@ except Exception:  # pragma: no cover - exercised on systems without MuJoCo
     _HAS_MUJOCO = False
 
 JOINT_NAMES = [f"panda_joint{i}" for i in range(1, 8)]
+FINGER_JOINT_NAMES = ["panda_finger_joint1", "panda_finger_joint2"]
+MAX_GRIPPER_OPENING_M = 0.04
 
 
 class CameraBridgeNode(Node):
@@ -30,6 +33,9 @@ class CameraBridgeNode(Node):
         self.declare_parameter("rate", 30.0)
         self.declare_parameter("fovy_deg", 45.0)
         self.declare_parameter("frame_id", "scene_camera_optical_frame")
+        self.declare_parameter("color_topic", "/camera/color/image_raw")
+        self.declare_parameter("depth_topic", "/camera/depth/image_raw")
+        self.declare_parameter("camera_info_topic", "/camera/color/camera_info")
         self.declare_parameter("use_mujoco_renderer", True)
         self.declare_parameter("synthetic_fallback", True)
 
@@ -41,26 +47,36 @@ class CameraBridgeNode(Node):
 
         self._k = 0
         self._q = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785], dtype=float)
+        self._gripper_opening = 1.0
         self._model = None
         self._data = None
         self._joint_qposadr: list[int] = []
+        self._gripper_qposadr: list[int] = []
         self._camera = None
 
+        color_topic = str(self.get_parameter("color_topic").value)
+        depth_topic = str(self.get_parameter("depth_topic").value)
+        camera_info_topic = str(self.get_parameter("camera_info_topic").value)
         self.pub_color = self.create_publisher(
-            Image, "/camera/color/image_raw", qos_profile_sensor_data)
+            Image, color_topic, qos_profile_sensor_data)
         self.pub_depth = self.create_publisher(
-            Image, "/camera/depth/image_raw", qos_profile_sensor_data)
+            Image, depth_topic, qos_profile_sensor_data)
         self.pub_info = self.create_publisher(
-            CameraInfo, "/camera/color/camera_info", qos_profile_sensor_data)
+            CameraInfo, camera_info_topic, qos_profile_sensor_data)
         self.create_subscription(
             JointState, "/joint_states", self._on_joint_state, qos_profile_sensor_data)
+        self.create_subscription(
+            Float64, "/gripper/state", self._on_gripper_state, qos_profile_sensor_data)
 
         if bool(self.get_parameter("use_mujoco_renderer").value):
             self._try_init_mujoco()
 
         self.create_timer(1.0 / self.rate, self._tick)
         mode = "MuJoCo renderer" if self._camera is not None else "synthetic fallback"
-        self.get_logger().info(f"camera_bridge up ({self.w}x{self.h} @ {self.rate} Hz, {mode}).")
+        self.get_logger().info(
+            f"camera_bridge up ({self.w}x{self.h} @ {self.rate} Hz, {mode}, "
+            f"color={color_topic})."
+        )
 
     def _try_init_mujoco(self):
         if not _HAS_MUJOCO:
@@ -73,11 +89,16 @@ class CameraBridgeNode(Node):
             self._model = mujoco.MjModel.from_xml_path(path)
             self._data = mujoco.MjData(self._model)
             self._joint_qposadr = []
+            self._gripper_qposadr = []
             for name in JOINT_NAMES:
                 jid = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_JOINT, name)
                 if jid < 0:
                     raise RuntimeError(f"MuJoCo joint '{name}' not found")
                 self._joint_qposadr.append(int(self._model.jnt_qposadr[jid]))
+            for name in FINGER_JOINT_NAMES:
+                jid = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_JOINT, name)
+                if jid >= 0:
+                    self._gripper_qposadr.append(int(self._model.jnt_qposadr[jid]))
             self._set_model_joints(self._q)
 
             camera = CameraModel(
@@ -109,11 +130,17 @@ class CameraBridgeNode(Node):
                 values.append(float(self._q[i]))
         self._q = np.asarray(values, dtype=float)
 
+    def _on_gripper_state(self, msg: Float64):
+        self._gripper_opening = float(np.clip(msg.data, 0.0, 1.0))
+
     def _set_model_joints(self, q):
         if self._model is None or self._data is None:
             return
         for value, adr in zip(q, self._joint_qposadr):
             self._data.qpos[adr] = float(value)
+        gripper_qpos = self._gripper_opening * MAX_GRIPPER_OPENING_M
+        for adr in self._gripper_qposadr:
+            self._data.qpos[adr] = gripper_qpos
         self._data.qvel[:] = 0.0
         mujoco.mj_forward(self._model, self._data)
 

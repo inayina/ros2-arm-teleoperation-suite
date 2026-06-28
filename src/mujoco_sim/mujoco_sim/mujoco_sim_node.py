@@ -40,9 +40,11 @@ except Exception as exc:  # pragma: no cover
     _MUJOCO_IMPORT_ERROR = str(exc)
 
 JOINT_NAMES = [f"panda_joint{i}" for i in range(1, 8)]
+FINGER_JOINT_NAMES = ["panda_finger_joint1", "panda_finger_joint2"]
 JOINT_LOWER = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973])
 JOINT_UPPER = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973])
 MAX_SIM_TORQUE_NM = np.array([87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0])
+MAX_GRIPPER_OPENING_M = 0.04
 FALLBACK_JOINT_ORIGINS = (
     ((0.0, 0.0, 0.333), (0.0, 0.0, 0.0)),
     ((0.0, 0.0, 0.0), (-math.pi / 2.0, 0.0, 0.0)),
@@ -172,11 +174,13 @@ class MujocoSimNode(Node):
         self.data = None
         self.joint_qposadr = []
         self.joint_dofadr = []
+        self.gripper_qposadr = []
         self.actuator_ids = []
         self.ee_site_id = None
         self.target_body_id = None
         self.force_sensor_id = None
         self.torque_sensor_id = None
+        self.gripper_cmd = MAX_GRIPPER_OPENING_M
         self._try_load_model()
 
         self.sub_effort = self.create_subscription(
@@ -184,13 +188,13 @@ class MujocoSimNode(Node):
             qos_profile_sensor_data)
         self.sub_grip = self.create_subscription(
             Float64, "/teleop/gripper_cmd", self._on_grip, 10)
-        self.gripper_cmd = 0.04  # Open default
 
         self.pub_encoder = self.create_publisher(
             JointState, "/sim/encoder_state", qos_profile_sensor_data)
         self.pub_ft = self.create_publisher(WrenchStamped, "/ft_sensor", 10)
         self.pub_ee = self.create_publisher(PoseStamped, "/ee_pose", 10)
         self.pub_obj = self.create_publisher(PoseStamped, "/sim/object_pose", 10)
+        self.pub_gripper = self.create_publisher(Float64, "/gripper/state", 10)
 
         self.srv_reset = self.create_service(Trigger, "/sim/reset_scene", self._on_reset)
 
@@ -281,7 +285,11 @@ class MujocoSimNode(Node):
             self.actuator_ids.append(aid)
 
         self.gripper_aid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "gripper_motor")
-
+        self.gripper_qposadr = []
+        for name in FINGER_JOINT_NAMES:
+            jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            if jid >= 0:
+                self.gripper_qposadr.append(int(self.model.jnt_qposadr[jid]))
 
         site_name = self.get_parameter("ee_site").value
         sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, site_name)
@@ -299,6 +307,8 @@ class MujocoSimNode(Node):
         q0 = self._initial_positions()
         for i, adr in enumerate(self.joint_qposadr):
             self.data.qpos[adr] = q0[i]
+        for adr in self.gripper_qposadr:
+            self.data.qpos[adr] = self.gripper_cmd
         mujoco.mj_forward(self.model, self.data)
         self.q = np.array([self.data.qpos[adr] for adr in self.joint_qposadr])
         self.qd = np.array([self.data.qvel[adr] for adr in self.joint_dofadr])
@@ -309,7 +319,7 @@ class MujocoSimNode(Node):
             self.tau = self._finite_tau(d[: self.n])
 
     def _on_grip(self, msg: Float64):
-        self.gripper_cmd = float(np.clip(msg.data, 0.0, 1.0)) * 0.04
+        self.gripper_cmd = float(np.clip(msg.data, 0.0, 1.0)) * MAX_GRIPPER_OPENING_M
 
     def _finite_tau(self, tau):
         tau = np.nan_to_num(tau, nan=0.0, posinf=0.0, neginf=0.0)
@@ -420,6 +430,16 @@ class MujocoSimNode(Node):
             obj_pose.pose.orientation.y = float(oq[2])
             obj_pose.pose.orientation.z = float(oq[3])
             self.pub_obj.publish(obj_pose)
+
+        grip = Float64()
+        grip.data = self._gripper_opening_normalized()
+        self.pub_gripper.publish(grip)
+
+    def _gripper_opening_normalized(self):
+        if self.model is None or self.data is None or not self.gripper_qposadr:
+            return float(np.clip(self.gripper_cmd / MAX_GRIPPER_OPENING_M, 0.0, 1.0))
+        openings = [float(self.data.qpos[adr]) for adr in self.gripper_qposadr]
+        return float(np.clip(np.mean(openings) / MAX_GRIPPER_OPENING_M, 0.0, 1.0))
 
     def _read_sensor3(self, sensor_id):
         if sensor_id is None or sensor_id < 0:

@@ -41,7 +41,6 @@ trap 'cleanup "$@"' EXIT
 
 if [[ "${1:-}" == "--launch" ]]; then
   bash "${ROOT_DIR}/scripts/stop_stack.sh" >/dev/null 2>&1 || true
-  bash "${ROOT_DIR}/scripts/setup_vcan.sh" >/dev/null 2>&1 || true
   rm -rf "${OUT_DIR}"
   mkdir -p "${OUT_DIR}"
   log_info "Launching full_system.launch.py with record:=true ..."
@@ -79,6 +78,16 @@ else
   log_fail "Depth camera rate '${DEPTH_HZ:-none}' (need >= 25 Hz)"
 fi
 
+log_info "AC-1 — /camera/wrist/color/image_raw frequency (expect >= 25 Hz) ..."
+timeout 8s ros2 topic hz /camera/wrist/color/image_raw --window 50 \
+  > "${LOG_DIR}/wrist_color_hz.txt" 2>&1 || true
+WRIST_HZ=$(grep "average rate" "${LOG_DIR}/wrist_color_hz.txt" | tail -1 | awk '{print $3}' | tr -d ':' || true)
+if [[ -n "${WRIST_HZ}" && "${WRIST_HZ%.*}" -ge 25 ]]; then
+  log_pass "Wrist RGB camera @ ${WRIST_HZ} Hz"
+else
+  log_fail "Wrist RGB camera rate '${WRIST_HZ:-none}' (need >= 25 Hz)"
+fi
+
 log_info "AC-3 — record a short episode ..."
 timeout 6s ros2 topic pub --wait-matching-subscriptions 1 -r 5 \
   /teleop/record_trigger std_msgs/msg/String "{data: 'start'}" \
@@ -109,6 +118,7 @@ required = {
     "observation.ft",
     "observation.gripper",
     "observation.images.scene",
+    "observation.images.wrist",
     "observation.depth.scene",
     "action",
     "timestamp",

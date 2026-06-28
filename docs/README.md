@@ -9,6 +9,7 @@
 | 文档 | 说明 |
 |---|---|
 | [ARCHITECTURE_V2.md](./ARCHITECTURE_V2.md) | V2 工业级七层架构：系统图 / 节点图 / Topic 图 / Package 结构 / Launch 架构 |
+| [PROJECT_SCOPE_AND_ACCEPTANCE.md](./PROJECT_SCOPE_AND_ACCEPTANCE.md) | 项目边界、非目标、`use_sim`/CAN 模式说明与 M1-M7 验收入口 |
 | [ROADMAP.md](./ROADMAP.md) | 开发路线图、分支策略、逐里程碑检查清单（M1–M7） |
 | [MEDIA_CAPTURE_PLAN.md](./MEDIA_CAPTURE_PLAN.md) | 各里程碑媒体采集计划（截图/GIF/录屏），规定内容、命令、存放路径与嵌入位置 |
 
@@ -24,7 +25,7 @@
 | **M4** MoveIt Servo 运动层 | 🔧 进行中 | [SPEC_V2_M4_MOTION_LAYER.md](./SPEC_V2_M4_MOTION_LAYER.md) | MoveIt 2 Servo、笛卡尔→关节、奇异/限位规避、端到端 <50ms |
 | **M5** 安全层 + E-Stop | 🔲 待开始 | [SPEC_V2_M5_SAFETY_LAYER.md](./SPEC_V2_M5_SAFETY_LAYER.md) | 5 监视器、心跳看门狗、DS402 Quick Stop 闭环 |
 | **M6** 视觉 + LeRobot Recorder | 🔲 待开始 | [SPEC_V2_M6_PERCEPTION_RECORDER.md](./SPEC_V2_M6_PERCEPTION_RECORDER.md) | RGB/Depth @30Hz、多模态对齐、LeRobotDataset 导出 |
-| **M7** 遥操作设备 + 合成数据 | 📝 规划中 | *(SPEC_V2_M7 待撰写)* | TeleopDriverBase 可插拔接口、Domain Randomization、仿真数据生成 Pipeline |
+| **M7** 遥操作设备 + 合成数据 | ✅ 完成 | [SPEC_V2_M7_TELEOP_SYNTH.md](./SPEC_V2_M7_TELEOP_SYNTH.md) | TeleopDriverBase 可插拔接口、Domain Randomization、仿真数据生成 Pipeline |
 
 ---
 

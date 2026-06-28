@@ -1,269 +1,217 @@
-# 媒体采集计划（Media Capture Plan）
+# 媒体采集计划（Portfolio Evidence Plan）
 
-**目的**：为 README 和技术演示提供视觉证明，按里程碑逐步补充。  
-**存放路径**：`media/<milestone>/`，文件命名见各节。  
-**格式规范**：截图用 PNG，动图用 GIF（≤5MB），录屏用 MP4（`media/demo/`）。
+**目的**：为 README、简历和技术面试准备少量但可信的作品集证据，而不是为每个里程碑补齐全套 GUI 截图。
+**存放路径**：`media/<milestone>/`。
+**原始证据路径**：`.media_evidence/<timestamp>/`（已在 `.gitignore` 中忽略，用来追溯 PNG/GIF 的来源）。
+**格式规范**：静态图用 PNG，主演示用 GIF（≤5MB）或 MP4（放 `media/demo/`，不默认进 git）。
+
+> 新原则：README 只展示能支撑作品集叙事的核心证据。rqt、viewer、plot 等 GUI 截图可以作为补充，但不再是阻塞项；没有窗口时，可以用真实 ROS2 命令输出、MuJoCo offscreen render、`ros2 node info`/`ros2 topic` 原始日志生成证据图。
 
 ---
 
-## 总览
+## 证据分级
 
-| 里程碑 | 必拍内容 | 优先级 | 状态 |
+| 等级 | 目标 | README 使用方式 |
+|---|---|---|
+| Core | 证明系统真的跑通，能支撑作品集主叙事 | 优先嵌入 README |
+| Support | 解释架构、协议、数据结构 | 可嵌入 spec 或 README 表格 |
+| Optional | GUI 观感补充，例如 rqt_graph、rqt_plot、rqt_robot_monitor | 有窗口时再采，不阻塞 |
+
+## 最小证据链
+
+| 证据点 | 文件 | 等级 | 当前状态 |
 |---|---|---|---|
-| M1 | MuJoCo Panda 站立 + rqt_graph | ⭐⭐⭐ | ✅ 已补齐 |
-| M2 | candump PDO 帧 + DS402 状态机 | ⭐⭐⭐ | ✅ 已补齐 |
-| M3 | 末端跟踪误差曲线 + 接触柔顺 | ⭐⭐⭐ | ✅ 已按指定文件名补齐，真实曲线截图待替换 |
-| M4 | 键盘遥操作端到端 GIF | ⭐⭐⭐ | ✅ 已按指定文件名补齐，真实交互 GIF 待替换 |
-| M5 | E-Stop 触发 + 复位流程 | ⭐⭐ | ⬜ 待补 |
-| M6 | LeRobot Episode 数据结构 + 相机画面 | ⭐⭐ | ⬜ 待补 |
-| M7 | 抓取任务 Demo GIF（核心演示） | ⭐⭐⭐ | ⬜ 待补 |
+| M1 ros2_control + MuJoCo 闭环 | `media/m1/panda_gravity_comp.png`, `media/m1/joint_states_hz.png`, `media/m1/rqt_graph_m1.png` | Core | 已用真实 M1 运行证据刷新 |
+| M2 CANopen DS402 现场总线 | `media/m2/candump_pdo.png`, `media/m2/ds402_state_machine.png`, `media/m2/emcy_fault_injection.png` | Core | 已用真实 vcan0 candump/DS402/EMCY 刷新 |
+| M4 或 M7 主演示 | `media/m4/teleop_keyboard.gif` 或 `media/m7/grasp_demo.gif` | Core | 优先补 1 个，不必两个都阻塞 |
+| M6 视觉 + LeRobot 数据闭环 | `media/m6/camera_rgb_view.png`, `media/m6/wrist_camera_view.png`, `media/m6/lerobot_dataset_features.png` | Core | 已用真实 recorder dataset 刷新；wrist 夹爪近景需随下一轮采集补证据 |
+| V2 架构解释 | `media/m1/m1_control_loop_proof.svg`, `media/m2/m2_canopen_fieldbus_proof.svg` | Support | 可保留为说明图 |
+| M3 阻抗控制细节 | `media/m3/controller_active.png`, `media/m3/ee_tracking_error.png` | Optional | 有真实曲线再补 |
+| M5 安全层细节 | `media/m5/estop_and_reset.gif`, `media/m5/safety_diagnostics.png` | Optional | 有完整演示再补 |
+
+## README 嵌入门槛
+
+- 来源必须是真实运行：ROS2 CLI、MuJoCo offscreen/viewer、SocketCAN/candump、LeRobot dataset load、或基于这些原始输出生成的证据图。
+- 图中不能包含 `surrogate`、`placeholder`、`required capture`、`still needed`、`replace with real` 等占位文案。
+- 文件内容必须和验收点一致，例如 `emcy_fault_injection.png` 必须能看到 EMCY 或 Fault 注入证据。
+- 每张生成图都应能追溯到 `.media_evidence/<timestamp>/`、运行日志或生成脚本。
 
 ---
 
-## M1 — ros2_control + MuJoCo
+## M1 - ros2_control + MuJoCo 闭环
 
-**触发时机**：`ros2 launch teleop_bringup m1_control_sim.launch.py` 成功运行后
+**作品集目标**：证明 M1 不是静态设计，而是实际启动了 MuJoCo、`controller_manager`、`joint_state_broadcaster`，并输出约 1kHz 的 `/joint_states`。
 
-### ✅ M1-0：闭环视觉证明图
-- **内容**：`forward_effort_controller → canopen_system(use_sim:=true) → /sim/* → mujoco_sim → joint_state_broadcaster → /joint_states` 最小闭环
-- **文件名**：`media/m1/m1_control_loop_proof.svg`
-- **嵌入位置**：README.md `### 演示` 区域；`docs/SPEC_V2_M1_CONTROL_SKELETON.md`
-- **状态**：已补充
-
-### 📸 M1-1：MuJoCo Panda 重力补偿站立
-- **内容**：MuJoCo viewer 窗口，Panda 在重力补偿下保持竖直站立
-- **命令**：
-  ```bash
-  source /opt/ros/jazzy/setup.bash && source install/setup.bash
-  ros2 launch teleop_bringup m1_control_sim.launch.py
-  ```
-- **截取方式**：截 MuJoCo viewer 窗口（含机械臂全身），PNG
-- **文件名**：`media/m1/panda_gravity_comp.png`
-- **嵌入位置**：README.md `### 演示` 区域（M1 行）
-- **状态**：已补充
-
-### 📸 M1-2：rqt_graph 节点拓扑图
-- **内容**：`/joint_states`、`/sim/joint_effort_cmd`、`/sim/encoder_state` 连线清晰可见
-- **命令**：
-  ```bash
-  ros2 run rqt_graph rqt_graph
-  # 勾选 "Nodes/Topics (all)"，取消 "Dead sinks" / "Leaf topics"
-  ```
-- **截取方式**：截 rqt_graph 窗口，PNG
-- **文件名**：`media/m1/rqt_graph_m1.png`
-- **嵌入位置**：README.md M1 行 / `docs/SPEC_V2_M1_CONTROL_SKELETON.md`
-- **状态**：已补充
-
-### 📸 M1-3：`/joint_states` 频率验证
-- **内容**：终端输出 `ros2 topic hz /joint_states`，显示 ~1000 Hz
-- **命令**：
-  ```bash
-  ros2 topic hz /joint_states
-  ```
-- **截取方式**：终端截图（包含 `average rate: 1000.xxx` 那行），PNG
-- **文件名**：`media/m1/joint_states_hz.png`
-- **状态**：已补充（当前图使用 M1 launch 日志中的 `controller_manager update rate is 1000 Hz` 与 `joint_state_broadcaster` 激活记录）
-
----
-
-## M2 — CANopen DS402 现场总线
-
-**触发时机**：`candump vcan0` 可见周期 PDO 帧，DS402 到 Operation Enabled
-
-### ✅ M2-0：现场总线视觉证明图
-- **内容**：`canopen_system(use_sim:=false) → vcan0 RPDO/SYNC → virtual_servo_driver ×7 → /sim/* → TPDO → /joint_states`，并包含 EMCY 故障注入路径
-- **文件名**：`media/m2/m2_canopen_fieldbus_proof.svg`
-- **嵌入位置**：README.md `### 演示` 区域；`docs/SPEC_V2_M2_CANOPEN_FIELDBUS.md`
-- **状态**：已补充
-
-### 📸 M2-1：candump 周期 PDO 帧
-- **内容**：终端滚动显示 vcan0 上的 RPDO/TPDO 周期帧（`0x180+id`、`0x200+id`）
-- **命令**：
-  ```bash
-  candump vcan0 | head -40
-  ```
-- **截取方式**：终端截图，显示至少 3 个关节的帧，PNG
-- **文件名**：`media/m2/candump_pdo.png`
-- **嵌入位置**：README.md M2 行 / `docs/SPEC_V2_M2_CANOPEN_FIELDBUS.md`
-- **状态**：已补充
-
-### 📸 M2-2：DS402 状态机转换日志
-- **内容**：终端日志显示 `Switch On Disabled → Ready → Switched On → Operation Enabled`
-- **截取方式**：终端截图，PNG
-- **文件名**：`media/m2/ds402_state_machine.png`
-- **状态**：已补充
-
-### 📸 M2-3：故障注入 EMCY 帧
-- **内容**：`candump` 显示 EMCY 帧（`0x080+id`），同时 `virtual_servo_driver` 日志显示进入 `Fault`
-- **文件名**：`media/m2/emcy_fault_injection.png`
-- **状态**：已补充（当前图记录 `/servo_drive/status` 已锁存的 `Fault` 状态；未主动调用新的 `inject_fault` 服务）
-
----
-
-## M3 — 笛卡尔阻抗控制器
-
-**触发时机**：阻抗控制器 active，末端跟踪误差可量测
-
-### 📈 M3-1：末端跟踪误差实时曲线
-- **内容**：`rqt_plot` 显示末端位置误差 ≤ 2mm（x/y/z 三条线）
-- **命令**：
-  ```bash
-  ros2 run rqt_plot rqt_plot /ee_pose/pose/position/x /ee_pose/pose/position/y
-  ```
-- **截取方式**：截 rqt_plot 窗口，曲线稳定后截图，PNG
-- **文件名**：`media/m3/ee_tracking_error.png`
-- **嵌入位置**：README.md M3 行
-
-### 📈 M3-2：接触柔顺力曲线
-- **内容**：`rqt_plot` 显示 `/ft_sensor` 在接触瞬间力矩变化，控制器自动降刚度
-- **文件名**：`media/m3/contact_compliance_ft.png`
-
-### 📸 M3-3：控制器 active 状态
-- **内容**：`ros2 control list_controllers` 输出，`cartesian_impedance_controller [active]`
-- **文件名**：`media/m3/controller_active.png`
-
----
-
-## M4 — MoveIt Servo 运动层 ⭐ 核心演示
-
-**触发时机**：键盘→伺服→阻抗→CAN→MuJoCo 端到端可用
-
-### 🎬 M4-1：键盘遥操作端到端 GIF（主演示）
-- **内容**：左半屏终端键盘操作，右半屏 MuJoCo viewer 机械臂跟随移动
-- **工具**：`peek`（`sudo apt install peek`）或 `ffmpeg` + `convert`
-  ```bash
-  # 录屏为 mp4，再转 gif
-  ffmpeg -i teleop_demo.mp4 -vf "fps=15,scale=720:-1" -loop 0 media/m4/teleop_keyboard.gif
-  ```
-- **时长**：15–30 秒，展示 XYZ 三个方向移动
-- **文件名**：`media/m4/teleop_keyboard.gif`
-- **嵌入位置**：**README.md 演示区域顶部**（最重要的一张）
-
-### 📸 M4-2：端到端延迟测量
-- **内容**：`ros2 topic delay /joint_target` 输出，显示 < 50ms
-- **文件名**：`media/m4/e2e_latency.png`
-
-### 📸 M4-3：奇异点/限位减速截图
-- **内容**：接近关节限位时 `servo_node` 日志显示自动减速警告
-- **文件名**：`media/m4/singularity_slowdown.png`
-
----
-
-## M5 — 安全层 + E-Stop
-
-**触发时机**：5 个监视器单测通过，E-Stop 闭环可演示
-
-### 🎬 M5-1：E-Stop 触发 + 复位 GIF
-- **内容**：发送超限指令 → 安全层拒绝 → `/safety/estop` → 力矩归零 → `/safety/reset` 复位
-- **文件名**：`media/m5/estop_and_reset.gif`
-- **嵌入位置**：README.md M5 行
-
-### 📸 M5-2：rqt_robot_monitor 安全诊断
-- **内容**：rqt_robot_monitor 显示 5 个子监视器全部 OK
-- **命令**：
-  ```bash
-  ros2 run rqt_robot_monitor rqt_robot_monitor
-  ```
-- **文件名**：`media/m5/safety_diagnostics.png`
-
----
-
-## M6 — 视觉 + LeRobot Recorder
-
-**触发时机**：camera_bridge + recorder 运行，Episode 可录制
-
-### 📸 M6-1：RGB/Depth 相机画面
-- **内容**：`rqt_image_view` 显示 `/camera/color/image_raw`（机器人工作空间视角）
-- **命令**：
-  ```bash
-  ros2 run rqt_image_view rqt_image_view /camera/color/image_raw
-  ```
-- **文件名**：`media/m6/camera_rgb_view.png`
-
-### 📸 M6-2：LeRobot Dataset 数据结构
-- **内容**：Python 终端打印 `dataset.features`，显示所有字段（state/ee/ft/rgb/depth/action）
-- **命令**：
-  ```python
-  from datasets import load_from_disk
-  ds = load_from_disk("data/episodes/episode_000000/train")
-  print(ds.features)
-  ```
-- **文件名**：`media/m6/lerobot_dataset_features.png`
-- **嵌入位置**：README.md M6 行 / `docs/SPEC_V2_M6_PERCEPTION_RECORDER.md`
-
-### 📸 M6-3：多模态录制时序对齐
-- **内容**：`rqt_plot` 显示关节状态、FT 传感器、相机时间戳对齐曲线
-- **文件名**：`media/m6/multimodal_sync.png`
-
----
-
-## M7 — 遥操作设备 + 合成数据（核心演示）
-
-**触发时机**：Domain Randomization 数据生成可跑，抓取场景完成
-
-### 🎬 M7-1：抓取任务 Demo GIF（最终演示）
-- **内容**：机械臂在 MuJoCo 中完成夹爪抓取物体全流程（≥15秒）
-- **录制要求**：
-  - 包含物体（cube/sphere）和 Panda 末端 + 夹爪
-  - 展示抓取过程：接近 → 对准 → 夹取 → 抬起
-  - 终端同时显示 `/ft_sensor` 数值变化（证明接触感知）
-- **文件名**：`media/m7/grasp_demo.gif`
-- **嵌入位置**：**README.md 演示区域顶部**，替换 M4 GIF 或并排
-
-### 🎬 M7-2：Domain Randomization 数据多样性展示
-- **内容**：批量生成不同物体位置的仿真截图拼图（3x3 grid）
-- **文件名**：`media/m7/domain_randomization_grid.png`
-
-### 📸 M7-3：策略部署验证
-- **内容**：策略推理节点运行日志，显示推理延迟和动作输出
-- **文件名**：`media/m7/policy_inference_log.png`
-
----
-
-## README 嵌入计划
-
-> 按此顺序将图片嵌入 `README.md` 的 `### 演示` 区域：
-
-```markdown
-### 演示
-
-#### 系统架构总览
-![rqt_graph 节点拓扑](media/m1/rqt_graph_m1.png)
-
-#### M1 — Panda 重力补偿（仿真）
-![M1 ros2_control + MuJoCo 闭环视觉证明](media/m1/m1_control_loop_proof.svg)
-![Panda 在 MuJoCo 中重力补偿站立](media/m1/panda_gravity_comp.png)
-
-#### M2 — CANopen DS402 总线
-![M2 CANopen DS402 现场总线视觉证明](media/m2/m2_canopen_fieldbus_proof.svg)
-![candump 周期 PDO 帧](media/m2/candump_pdo.png)
-
-#### M4 — 键盘遥操作端到端（主演示）
-![键盘控制机械臂实时运动](media/m4/teleop_keyboard.gif)
-
-#### M5 — E-Stop 安全闭环
-![E-Stop 触发与复位流程](media/m5/estop_and_reset.gif)
-
-#### M6 — LeRobot 数据集
-![多模态 Episode 数据结构](media/m6/lerobot_dataset_features.png)
-
-#### M7 — 夹爪抓取 Demo
-![仿真夹爪抓取任务全流程](media/m7/grasp_demo.gif)
-```
-
----
-
-## 录制工具参考
+当前 M1 证据来源：
 
 ```bash
-# 安装截图/录屏工具
-sudo apt install peek            # GUI GIF 录制
-sudo apt install ffmpeg          # 命令行录屏
-
-# 录屏 → GIF（推荐流程）
-ffmpeg -video_size 1280x720 -framerate 30 -f x11grab -i :0.0 output.mp4
-ffmpeg -i output.mp4 -vf "fps=15,scale=720:-1:flags=lanczos" -loop 0 output.gif
-
-# 压缩 GIF（保持 ≤5MB）
-gifsicle -O3 --colors 128 output.gif -o output_compressed.gif
+.media_evidence/m1_20260628_123549/
 ```
+
+采集命令：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 control list_controllers
+timeout 8s ros2 topic hz /joint_states --window 100
+ros2 node info /canopen_hw_backplane
+ros2 node info /mujoco_sim
+ros2 node info /joint_state_broadcaster
+```
+
+| 文件 | 内容 | 说明 |
+|---|---|---|
+| `media/m1/panda_gravity_comp.png` | MuJoCo Panda ready pose | 来自 `config/models/franka_panda.xml` 的 offscreen render，适合无窗口环境 |
+| `media/m1/joint_states_hz.png` | `list_controllers` + `/joint_states` 频率 | 来自真实 ROS2 CLI 输出，显示 998-1001 Hz |
+| `media/m1/rqt_graph_m1.png` | M1 live ROS graph proof | 由 `ros2 node info` 关系渲染；不要求实际 rqt 窗口 |
+| `media/m1/m1_control_loop_proof.svg` | 最小闭环说明图 | Support 图，可用于解释链路 |
+
+README 可直接嵌入 M1 三张 PNG，或只嵌入 `panda_gravity_comp.png` + `joint_states_hz.png`。
+
+---
+
+## M2 - CANopen DS402 现场总线
+
+**作品集目标**：证明控制链路经过真实 SocketCAN/vcan0，而不是只在 ROS topic 里闭环。
+
+必须保留的证据：
+
+| 文件 | 内容 |
+|---|---|
+| `media/m2/candump_pdo.png` | `candump -L vcan0` 中可见 SYNC、RPDO1、TPDO1、TPDO2 周期帧 |
+| `media/m2/ds402_state_machine.png` | `/servo_drive/status` 确认 7 轴均进入 DS402 Operation Enabled |
+| `media/m2/emcy_fault_injection.png` | `/inject_fault_joint1` 后可见 EMCY `0x081` 和 node 1 Fault 状态 |
+
+当前 M2 证据来源：
+
+```bash
+.media_evidence/m2_20260628_130122/
+```
+
+采集命令：
+
+```bash
+ros2 launch teleop_description description.launch.py use_sim:=false can_interface:=vcan0
+ros2 launch teleop_bringup fieldbus.launch.py use_sim:=false can_interface:=vcan0
+ros2 launch teleop_bringup simulation.launch.py headless:=true randomize:=false model_path:=config/models/franka_panda.xml camera_rate:=5.0
+ros2 launch teleop_bringup ros2_control.launch.py use_sim:=false can_interface:=vcan0 controller:=forward
+timeout 5s candump -L vcan0
+ros2 topic echo /servo_drive/status --once
+ros2 service call /inject_fault_joint1 std_srvs/srv/Trigger "{}"
+```
+
+关键结果：
+
+- `candump_pdo.log`：105,805 帧 / 4.999s，包含 `0x201-0x207`、`0x181-0x187`、`0x281-0x287` 和 `0x080`。
+- `drive_status_once_before_fault.txt`：7 轴 `ds402_state: 4`、`statusword: 39`、`controlword: 15`、`fault_code: 0`。
+- `candump_emcy.log`：故障注入后捕获 `vcan0 081#10320000000000`；`drive_status_once_after_fault_correct.txt` 显示 node 1 `ds402_state: 7`、`fault_code: 12816`。
+
+推荐原始命令：
+
+```bash
+bash scripts/setup_vcan.sh
+ros2 launch teleop_bringup m2_fieldbus.launch.py
+timeout 5s candump vcan0
+ros2 topic echo /servo_drive/status --once
+```
+
+如果没有 GUI，优先保存 raw txt，再生成终端式 PNG。
+
+---
+
+## M4/M7 - 主演示 GIF（二选一优先）
+
+**作品集目标**：让面试官一眼看到系统会动。M7 抓取演示优先于 M4 键盘遥操作；如果 M7 暂时不稳，就先用 M4。
+
+| 文件 | 内容 | 优先级 |
+|---|---|---|
+| `media/m7/grasp_demo.gif` | MuJoCo 中完成接近、夹取、抬起 | 最高 |
+| `media/m4/teleop_keyboard.gif` | 键盘/遥操作输入驱动机械臂 | 备选 |
+| `media/m4/e2e_latency.png` | 延迟测量输出 | Support |
+
+录制建议：
+
+```bash
+bash scripts/capture_m7_demo.sh
+# 或
+bash scripts/validate_m4_motion_layer.sh --launch
+```
+
+说明：`capture_m7_demo.sh` 默认使用 `full_system.launch.py` 的 `use_sim:=true` sim-direct 路径，以提高抓取 GIF 录制稳定性。这个 GIF 只证明运动/抓取/视觉链路，不作为 CANopen 现场总线证据；CAN 证据以 M2 的 `candump`/DS402/EMCY 和 M5 的 Quick Stop CAN 模式验收为准。
+
+M7 录制前健康检查：
+
+```bash
+ros2 topic hz /camera/color/image_raw --window 50
+ros2 topic hz /camera/wrist/color/image_raw --window 50
+ros2 topic echo /gripper/state --once
+ros2 topic pub --once /teleop/gripper_cmd std_msgs/msg/Float64 "{data: 0.0}"
+ros2 topic echo /gripper/state --once
+ros2 topic pub --once /teleop/gripper_cmd std_msgs/msg/Float64 "{data: 1.0}"
+ros2 topic echo /gripper/state --once
+```
+
+通过条件：
+
+- scene 与 wrist RGB 都稳定发布；M7 GIF 优先使用 scene 视角，wrist 视角用于确认夹爪和物体接触。
+- `/teleop/gripper_cmd` 发 `0.0` 后 `/gripper/state` 应向闭合变化，发 `1.0` 后应向打开变化。
+- wrist 画面中能看到夹爪指尖和目标方块；如果只看到远景或空画面，先修相机位姿/话题再录制。
+- 抓取后抬升阶段方块不能立刻掉落；如果掉落，先保留失败日志和 wrist 帧，再调 MuJoCo 接触参数、摩擦或夹爪力。
+
+M7 失败回退：
+
+- 如果抓取物理不稳但运动链路稳定，先录 `media/m4/teleop_keyboard.gif` 作为主展示。
+- 如果 scene GIF 看不清夹爪，可临时用 `scripts/record_demo_gif.py media/m7/grasp_demo_wrist.gif --topic /camera/wrist/color/image_raw` 录 wrist 视角作为诊断证据，不默认替换主 README 图。
+- 如果 recorder 已生成 episode，但 GIF 失败，优先保存 `dataset.features`、`/gripper/state` 日志和 wrist 单帧，避免重跑时失去可追溯证据。
+
+没有桌面窗口时，先用 recorder/offscreen 帧生成 GIF；GUI 录屏只是加分项。
+
+---
+
+## M6 - 视觉 + LeRobot 数据闭环
+
+**作品集目标**：证明系统不是只做控制，还能输出训练数据。
+
+| 文件 | 内容 |
+|---|---|
+| `media/m6/camera_rgb_view.png` | MuJoCo scene camera 或 `/camera/color/image_raw` 的真实帧 |
+| `media/m6/wrist_camera_view.png` | wrist/夹爪近景 `/camera/wrist/color/image_raw` 的真实帧，确认方块和指尖可见 |
+| `media/m6/lerobot_dataset_features.png` | `load_from_disk(...).features` 输出，必须包含 `observation.images.wrist` |
+| `media/m6/multimodal_sync.png` | Optional，同步曲线或同步日志摘要 |
+
+推荐命令：
+
+```bash
+bash scripts/validate_m6_perception_recorder.sh --launch
+python3 -c "from datasets import load_from_disk; ds=load_from_disk('data/episodes/episode_000000/train'); print(ds.features)"
+```
+
+---
+
+## Optional GUI 证据
+
+这些图可以提升观感，但不再阻塞 README：
+
+| 工具 | 用途 |
+|---|---|
+| `rqt_graph` | 直观看节点/话题拓扑 |
+| `rqt_plot` | M3 末端误差、接触力曲线 |
+| `rqt_robot_monitor` | M5 安全诊断面板 |
+| MuJoCo viewer 录屏 | 替代 offscreen render，观感更自然 |
+
+如果当前屏幕没有窗口或远程会话无法截图，直接跳过 GUI，保留真实 CLI/offscreen 证据即可。
+
+---
+
+## 原始证据采集
+
+通用采集脚本：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+bash scripts/collect_media_evidence.sh
+```
+
+脚本会把 `ros2 topic hz`、`ros2 control list_controllers`、`candump`、dataset features 等输出保存到 `.media_evidence/<timestamp>/`。这些 raw txt 不进 git，但用于生成可追溯的 PNG/GIF。

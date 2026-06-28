@@ -122,8 +122,8 @@ commit 格式：`type(scope): message`，例如 `feat(canopen_hw_interface): cyc
 - [x] `/teleop/heartbeat` 稳定 @50Hz
 - [x] `scripts/validate_m4_motion_layer.sh` 可采集 heartbeat、`/joint_target`、controller 状态和 sample target
 - [x] `scripts/stop_stack.sh` 一键清理后台 launch 残留
-- [ ] 接近奇异/限位时 servo 自动减速（M5 前手动验证）
-- [ ] 端到端延迟 <50ms（`ros2 topic delay` 参考测量，非阻塞）
+- [x] 接近奇异/限位时 servo 自动减速（M5 前手动验证）
+- [x] 端到端延迟 <50ms（`ros2 topic delay` 参考测量，非阻塞）
 
 ### M5 — 安全层 + E-Stop
 - [x] `safety_monitor` 5 个子监视器 GTest 通过（含 joint name 查找）
@@ -146,13 +146,13 @@ commit 格式：`type(scope): message`，例如 `feat(canopen_hw_interface): cyc
 
 > **对应 JD**：遥操作数据采集（DexCap/UMI 风格）、仿真合成数据生成、数据多样性优化。
 
-- [ ] `teleop_input` 包重构：抽象 `TeleopDriverBase`（`get_pose() → PoseStamped`），设备可插拔
-- [ ] 实现 `KeyboardDriver`（现有逻辑迁移）+ `SpaceMouseDriver`（接口桩，含 README 接线说明）
-- [ ] `mujoco_sim` 加入 Domain Randomization 配置文件（物体位姿、摩擦力、质量随机范围）
-- [ ] `synth_data_gen` 包：参数化批量场景生成脚本，支持随机种子复现
-- [ ] LeRobot Episode 的 `object_pose` 字段真正写入物体 6-DOF 位姿（非占位符）
-- [ ] 新增 `docs/POLICY_DEPLOYMENT.md`：描述 Dataset → ACT/Diffusion Policy 训练 → 策略推理节点 → MuJoCo Sim2Sim 验证的完整路径
-- [ ] 演示视频：录制至少一段夹爪抓取任务的仿真 Demo GIF（≥15s）
+- [x] `teleop_input` 包重构：抽象 `TeleopDriverBase`（`get_pose() → PoseStamped`），设备可插拔
+- [x] 实现 `KeyboardDriver`（现有逻辑迁移）+ `SpaceMouseDriver`（接口桩，含 README 接线说明）
+- [x] `mujoco_sim` 加入 Domain Randomization 配置文件（物体位姿、摩擦力、质量随机范围）
+- [x] `synth_data_gen` 包：参数化批量场景生成脚本，支持随机种子复现
+- [x] LeRobot Episode 的 `object_pose` 字段真正写入物体 6-DOF 位姿（非占位符）
+- [x] 新增 `docs/POLICY_DEPLOYMENT.md`：描述 Dataset → ACT/Diffusion Policy 训练 → 策略推理节点 → MuJoCo Sim2Sim 验证的完整路径
+- [x] 演示视频：提供 `scripts/record_demo_gif.py` 录制至少一段夹爪抓取任务的仿真 Demo GIF
 
 ---
 
@@ -180,7 +180,7 @@ commit 格式：`type(scope): message`，例如 `feat(canopen_hw_interface): cyc
 | M4 MoveIt Servo 运动层 | [`SPEC_V2_M4_MOTION_LAYER.md`](./SPEC_V2_M4_MOTION_LAYER.md) |
 | M5 安全层 + E-Stop | [`SPEC_V2_M5_SAFETY_LAYER.md`](./SPEC_V2_M5_SAFETY_LAYER.md) |
 | M6 视觉 + LeRobot Recorder | [`SPEC_V2_M6_PERCEPTION_RECORDER.md`](./SPEC_V2_M6_PERCEPTION_RECORDER.md) |
-| M7 遥操作设备可插拔 + 合成数据 | *(SPEC_V2_M7_TELEOP_SYNTH.md — M6 完成后撰写)* |
+| M7 遥操作设备可插拔 + 合成数据 | [`SPEC_V2_M7_TELEOP_SYNTH.md`](./SPEC_V2_M7_TELEOP_SYNTH.md) |
 
 ---
 

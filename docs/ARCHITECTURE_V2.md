@@ -72,7 +72,7 @@ flowchart TB
         REC["lerobot_recorder<br/>多模态 → LeRobot Dataset"]
     end
 
-    GR["gripper_driver<br/>RS485 / Modbus (Python)"]
+    GR["gripper_driver<br/>RS485 / Modbus Mock (Python)"]
 
     TI -->|"/teleop/cmd_pose<br/>+ /teleop/heartbeat"| SM
     SM -->|"/safe_master_pose"| SV
@@ -157,7 +157,7 @@ flowchart LR
 | `/virtual_servo_driver` | `virtual_servo_driver` | Python | DS402 伺服仿真 ×7 | 1000 Hz | MultiThreaded |
 | `/mujoco_sim` | `mujoco_sim` | Python | 物理引擎 + 虚拟相机 | 1000 Hz 步进 / 100 Hz 发布 | 物理线程 |
 | `/camera_bridge` | `camera_bridge` | Python | RGB/Depth 发布 | 30 Hz | SingleThreaded |
-| `/gripper_driver` | `gripper_driver` | Python | RS485 Modbus 夹爪 | 20 Hz | SingleThreaded |
+| `/gripper_driver` | `gripper_driver` | Python | RS485 Modbus 夹爪 (Mock 仿真) | 20 Hz | SingleThreaded |
 | `/lerobot_recorder` | `lerobot_recorder` | Python | 多模态数据录制 | 30 Hz（对齐相机） | MultiThreaded |
 | `/diagnostic_aggregator` | (ros-jazzy-diagnostic-aggregator) | C++ | 诊断聚合 | 1 Hz | — |
 
@@ -236,6 +236,8 @@ flowchart TB
 | `/camera/depth/image_raw` | `sensor_msgs/Image` | camera_bridge | recorder | 30 Hz | Best Effort |
 | `/camera/color/camera_info` | `sensor_msgs/CameraInfo` | camera_bridge | recorder | 30 Hz | Best Effort |
 | `/gripper/state` | `std_msgs/Float64` | gripper_driver | recorder | 20 Hz | Best Effort |
+| [M6] 视觉感知与 Recorder | `camera_bridge` / `lerobot_recorder` | ✅ | 补齐视觉（RGB/Depth）；时间对齐多模态数据并按 LeRobot 格式落盘。 | Best Effort |
+| [M7] 遥操作设备抽象与合成数据 Pipeline | `synth_data_gen` / `teleop_input` | ✅ | 抽象 TeleopDriverBase；加入 Domain Randomization 和自动化批量采集脚本。 | Best Effort |
 
 ### 3.2 服务 / 总线（非 Topic）
 
@@ -320,7 +322,7 @@ ros2-arm-teleoperation-suite/
 │   ├── camera_bridge/              ← 【新】L6 视觉感知（Python）
 │   │   └── camera_bridge/camera_bridge_node.py
 │   │
-│   ├── gripper_driver/             ← L? RS485 Modbus 夹爪（Python，原 rs485_bridge）
+│   ├── gripper_driver/             ← L? RS485 Modbus 夹爪（Python, Mock 仿真）
 │   │   └── gripper_driver/gripper_modbus_node.py
 │   │
 │   └── lerobot_recorder/           ← L7 多模态录制（Python）
@@ -396,8 +398,8 @@ flowchart TB
     FULL -->|"record:=true"| REC
 
     DESC -.->|robot_description| RC
-    SIM -.->|/sim 背板就绪| FB
-    FB -.->|vcan0 + 驱动器在线| RC
+    SIM -.->|/sim 背板就绪| RC
+    FB -.->|use_sim:=false 时 vcan0 + 驱动器在线| RC
     RC -.->|controllers active| MO
     SAF -.->|safety OK| MO
 ```
@@ -406,7 +408,7 @@ flowchart TB
 
 1. `description` → 发布 `robot_description`（TF + URDF）。
 2. `simulation` → MuJoCo 物理就绪，开放 `/sim/*` 背板，相机出图。
-3. `fieldbus` → `setup_vcan.sh` 建 vcan0 → 拉起 7 路 `virtual_servo_driver`，DS402 进入 `Switch On Disabled`。
+3. `fieldbus` → 仅在 `use_sim:=false` 时拉起 `virtual_servo_driver`，由 SocketCAN `vcan0`/`can0` 承载 DS402 帧；`use_sim:=true` 时不启动虚拟驱动器，避免与 `canopen_system` 同时写 `/sim/*` 背板。
 4. `ros2_control` → `controller_manager` 加载 `canopen_system` 硬件接口；驱动器经 SDO 配置 → NMT Operational → DS402 `Operation Enabled`；spawner 激活：
    - `joint_state_broadcaster`
    - `cartesian_impedance_controller`（或 `joint_trajectory_controller`，二选一可热切）
@@ -418,8 +420,8 @@ flowchart TB
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `use_sim` | `true` | `true`=MuJoCo；`false`=接实体 can0 |
-| `can_interface` | `vcan0` | 切到 `can0` 即可上实体硬件 |
+| `use_sim` | `true` | `true`=sim-direct，`canopen_system` 直连 `/sim/*`；`false`=SocketCAN 后端，走 `vcan0`/`can0` |
+| `can_interface` | `vcan0` | `use_sim:=false` 时选择 SocketCAN 接口；`vcan0` 用于软件验收，`can0` 用于未来实体 CAN bring-up |
 | `controller` | `impedance` | `impedance` / `jtc`（运动层输出口适配） |
 | `record` | `false` | 是否拉起 Recorder |
 | `headless` | `false` | MuJoCo 无 GUI 模式（CI / 无 GPU） |
@@ -548,6 +550,7 @@ flowchart LR
     M3 --> M4["M4 MoveIt<br/>Servo"]
     M4 --> M5["M5 安全层<br/>+ E-Stop"]
     M5 --> M6["M6 视觉 +<br/>LeRobot Recorder"]
+    M6 --> M7["M7 遥操作设备抽象<br/>+ 合成数据 Pipeline"]
 ```
 
 ---

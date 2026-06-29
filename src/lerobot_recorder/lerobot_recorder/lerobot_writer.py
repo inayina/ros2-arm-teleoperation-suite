@@ -16,6 +16,8 @@ except Exception:
 def _episode_features(first_frame: dict) -> "Features":
     rgb = np.asarray(first_frame["observation.images.scene"])
     wrist_rgb = np.asarray(first_frame["observation.images.wrist"])
+    tactile_left = np.asarray(first_frame["observation.images.tactile_left"])
+    tactile_right = np.asarray(first_frame["observation.images.tactile_right"])
     depth = np.asarray(first_frame["observation.depth.scene"])
     return Features({
         "observation.state": Sequence(Value("float32"), length=7),
@@ -28,6 +30,12 @@ def _episode_features(first_frame: dict) -> "Features":
         ),
         "observation.images.wrist": Array3D(
             dtype="uint8", shape=(int(wrist_rgb.shape[0]), int(wrist_rgb.shape[1]), 3)
+        ),
+        "observation.images.tactile_left": Array3D(
+            dtype="uint8", shape=(int(tactile_left.shape[0]), int(tactile_left.shape[1]), 3)
+        ),
+        "observation.images.tactile_right": Array3D(
+            dtype="uint8", shape=(int(tactile_right.shape[0]), int(tactile_right.shape[1]), 3)
         ),
         "observation.depth.scene": Array2D(
             dtype="float32", shape=(int(depth.shape[0]), int(depth.shape[1]))
@@ -50,6 +58,12 @@ def _normalize_frame(frame: dict) -> dict:
     )
     normalized["observation.images.wrist"] = np.asarray(
         frame["observation.images.wrist"], dtype=np.uint8
+    )
+    normalized["observation.images.tactile_left"] = np.asarray(
+        frame["observation.images.tactile_left"], dtype=np.uint8
+    )
+    normalized["observation.images.tactile_right"] = np.asarray(
+        frame["observation.images.tactile_right"], dtype=np.uint8
     )
     normalized["observation.depth.scene"] = np.asarray(
         frame["observation.depth.scene"], dtype=np.float32

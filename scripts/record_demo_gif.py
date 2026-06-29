@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import time
 
 import imageio
 import numpy as np
@@ -10,13 +11,17 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 
 class GifRecorder(Node):
-    def __init__(self, filename, max_frames=60, fps=15, topic='/camera/color/image_raw'):
+    def __init__(self, filename, seconds=18.0, fps=15, topic='/camera/color/image_raw'):
         super().__init__('gif_recorder')
         self.filename = filename
-        self.max_frames = max_frames
+        self.seconds = seconds
         self.fps = fps
+        self.max_frames = max(1, int(seconds * fps))
         self.frames = []
         self.recording = False
+        self.start_time = None
+        self.last_frame_time = None
+        self.frame_period = 1.0 / max(1, fps)
         
         from std_msgs.msg import String
         self.sub_trig = self.create_subscription(
@@ -34,13 +39,17 @@ class GifRecorder(Node):
             qos_profile_sensor_data
         )
         self.get_logger().info(
-            f'Waiting for trigger to record {max_frames} frames from {topic} into {filename}...'
+            f'Waiting for trigger to record {seconds:.1f}s at {fps} fps '
+            f'from {topic} into {filename}...'
         )
 
     def trigger_callback(self, msg):
         if msg.data == 'start' and not self.recording:
             self.recording = True
             self.frames = []
+            now = time.monotonic()
+            self.start_time = now
+            self.last_frame_time = None
             self.get_logger().info('Recording started! Will save on stop or max frames.')
         elif msg.data == 'stop' and self.recording:
             self.recording = False
@@ -49,17 +58,25 @@ class GifRecorder(Node):
     def image_callback(self, msg):
         if not self.recording:
             return
-            
-        if len(self.frames) < self.max_frames:
-            # Convert RGB8 msg to numpy array
-            arr = np.frombuffer(msg.data, dtype=np.uint8).reshape((msg.height, msg.width, 3))
-            self.frames.append(arr)
-            if len(self.frames) % 10 == 0:
-                self.get_logger().info(f'Recorded {len(self.frames)}/{self.max_frames} frames...')
-                
-            if len(self.frames) >= self.max_frames:
-                self.recording = False
-                self.save_gif()
+
+        now = time.monotonic()
+        if self.start_time is None:
+            self.start_time = now
+
+        if now - self.start_time >= self.seconds or len(self.frames) >= self.max_frames:
+            self.recording = False
+            self.save_gif()
+            return
+
+        if self.last_frame_time is not None and now - self.last_frame_time < self.frame_period:
+            return
+
+        # Convert RGB8 msg to numpy array
+        arr = np.frombuffer(msg.data, dtype=np.uint8).reshape((msg.height, msg.width, 3))
+        self.frames.append(arr)
+        self.last_frame_time = now
+        if len(self.frames) % 10 == 0:
+            self.get_logger().info(f'Recorded {len(self.frames)}/{self.max_frames} frames...')
                 
     def save_gif(self):
         if not self.frames:
@@ -83,7 +100,7 @@ def main():
     rclpy.init()
     node = GifRecorder(
         args.filename,
-        max_frames=max(1, int(args.seconds * args.fps)),
+        seconds=args.seconds,
         fps=args.fps,
         topic=args.topic,
     )

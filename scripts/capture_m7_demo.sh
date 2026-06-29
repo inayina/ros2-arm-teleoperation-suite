@@ -4,6 +4,7 @@ source install/setup.bash
 set -euo pipefail
 
 HEADLESS="${M7_HEADLESS:-true}"
+CONTACT_DEBUG="${M7_CONTACT_DEBUG:-true}"
 CONTROLLER_TIMEOUT_S="${M7_CONTROLLER_TIMEOUT_S:-45}"
 BATCH_TIMEOUT_S="${M7_BATCH_TIMEOUT_S:-45}"
 RECORDER_TIMEOUT_S="${M7_RECORDER_TIMEOUT_S:-35}"
@@ -11,13 +12,18 @@ RECORDER_TIMEOUT_S="${M7_RECORDER_TIMEOUT_S:-35}"
 LAUNCH_PID=""
 HB_PID=""
 REC_PID=""
+REC_WRIST_PID=""
 BATCH_PID=""
 
 cleanup() {
   if [[ -n "${BATCH_PID}" ]]; then kill "${BATCH_PID}" 2>/dev/null || true; fi
+  if [[ -n "${REC_WRIST_PID}" ]]; then kill "${REC_WRIST_PID}" 2>/dev/null || true; fi
   if [[ -n "${REC_PID}" ]]; then kill "${REC_PID}" 2>/dev/null || true; fi
+  if [[ -n "${LAUNCH_PID}" ]]; then
+    kill -INT "${LAUNCH_PID}" 2>/dev/null || true
+    wait_with_timeout "${LAUNCH_PID}" 10 "ROS 2 launch shutdown" || true
+  fi
   if [[ -n "${HB_PID}" ]]; then kill "${HB_PID}" 2>/dev/null || true; fi
-  if [[ -n "${LAUNCH_PID}" ]]; then kill -INT "${LAUNCH_PID}" 2>/dev/null || true; fi
   sleep 2
   pkill -f "ros2 launch teleop_bringup full_system.launch.py" 2>/dev/null || true
   pkill -f "mujoco_sim_node" 2>/dev/null || true
@@ -56,6 +62,7 @@ wait_with_timeout() {
 
 request_safety_reset() {
   echo "Requesting safety latch reset..."
+  ros2 service wait /safety/reset --timeout 5 >/dev/null 2>&1 || true
   local attempt
   for attempt in 1 2 3 4 5; do
     local output
@@ -72,7 +79,11 @@ request_safety_reset() {
 
 echo "Starting full system (headless=${HEADLESS})..."
 echo "Mode: use_sim:=true (sim-direct). Use M2/M5 validation for CANopen fieldbus evidence."
-ros2 launch teleop_bringup full_system.launch.py use_sim:=true headless:="${HEADLESS}" &
+ros2 launch teleop_bringup full_system.launch.py \
+  use_sim:=true \
+  headless:="${HEADLESS}" \
+  contact_debug_enabled:="${CONTACT_DEBUG}" \
+  contact_debug_period_s:=0.5 &
 LAUNCH_PID=$!
 
 echo "Waiting for controllers to activate..."
@@ -98,8 +109,10 @@ sleep 1
 request_safety_reset
 
 echo "Starting GIF recorder..."
-python3 scripts/record_demo_gif.py media/m7/grasp_demo.gif --seconds 20 --fps 15 &
+python3 scripts/record_demo_gif.py media/m7/grasp_demo.gif --seconds 22 --fps 12 &
 REC_PID=$!
+python3 scripts/record_demo_gif.py media/m7/gripper_closeup.gif --seconds 28 --fps 12 --topic /camera/wrist/color/image_raw &
+REC_WRIST_PID=$!
 
 # Give recorder a moment to subscribe
 sleep 2
@@ -110,6 +123,7 @@ ros2 run synth_data_gen batch_generator --ros-args \
   -p hover_duration:=4.0 \
   -p descend_duration:=4.0 \
   -p grasp_pause:=2.0 \
+  -p pick_height_offset:=0.03 \
   -p lift_duration:=4.0 &
 BATCH_PID=$!
 
@@ -118,10 +132,13 @@ wait_with_timeout "${BATCH_PID}" "${BATCH_TIMEOUT_S}" "batch generator"
 BATCH_PID=""
 wait_with_timeout "${REC_PID}" "${RECORDER_TIMEOUT_S}" "GIF recorder"
 REC_PID=""
+wait_with_timeout "${REC_WRIST_PID}" "${RECORDER_TIMEOUT_S}" "wrist GIF recorder"
+REC_WRIST_PID=""
 
 echo "Killing ROS 2 launch..."
-kill -INT $LAUNCH_PID
-kill $HB_PID 2>/dev/null || true
+kill -INT "$LAUNCH_PID"
+wait_with_timeout "${LAUNCH_PID}" 10 "ROS 2 launch shutdown" || true
+kill "$HB_PID" 2>/dev/null || true
 LAUNCH_PID=""
 HB_PID=""
 

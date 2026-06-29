@@ -498,11 +498,15 @@ flowchart TB
 | **Fault State** | 过流/过速/跟随误差注入 → EMCY 帧 + 进入 `Fault` 态（测试用例可主动注入） |
 | **电流/力矩环** | `current_loop.py` 一阶环路，把 DS402 目标力矩转成施加到 MuJoCo 的 `/sim/joint_effort_cmd` |
 
-### 6.5 L6 视觉感知 `camera_bridge`（对应需求 4）
+### 6.5 L6 视觉与视触觉感知 `camera_bridge`（对应需求 4）
 
-- 数据源：MuJoCo 虚拟相机（在 `franka_panda.xml` 中加 `<camera>` + 渲染 depth buffer）。
-- 发布：`/camera/color/image_raw`、`/camera/depth/image_raw`、`/camera/color/camera_info`（含内参，便于点云/标定）。
-- 支持多机位（`hand_eye` 腕部相机 + `scene` 第三方位），为视觉遥操作 / VLA 数据采集就绪。
+- **多模态传感器源**：MuJoCo 虚拟相机（`scene_camera` 场景相机 + `wrist_camera` 腕部手眼 + 左右指爪 `left_tactile_camera` / `right_tactile_camera` 视触觉相机）。
+- **GelSight 视触觉模拟**：新增 `tactile_mode` 参数，能读取指尖近景深度图（depth buffer）计算形变法向量，结合红/绿/蓝偏振光源（Phong 光度立体模型）渲染出高仿真度的 GelSight-like 视触觉彩色图像。在无物理引擎 Fallback 模式下，支持动态金属球接触挤压动画以确保单测可验证。
+- **渲染状态同步**：`camera_bridge` 订阅 `/joint_states`、`/gripper/state`、`/sim/object_pose`，每帧渲染前同步本地 MuJoCo model 的机械臂、夹爪和 `target_object_joint`，保证 wrist/tactile 画面与主 `mujoco_sim` 物理状态一致。
+- **ROS 2 话题发布**：
+  - 场景视觉：`/camera/color/image_raw`, `/camera/depth/image_raw`
+  - 腕部手眼：`/camera/wrist/color/image_raw`, `/camera/wrist/depth/image_raw`
+  - 左/右视触觉指尖：`/camera/tactile_left/image_raw`, `/camera/tactile_right/image_raw`
 
 ### 6.6 L7 多模态 Recorder（对应需求 5）
 
@@ -510,15 +514,18 @@ flowchart TB
 
 ```python
 EPISODE_FEATURES = {
-    "observation.state":          (7,),  float32,  # /joint_states position
-    "observation.ee_pose":        (7,),  float32,  # /ee_pose (xyz + quat)
-    "observation.ft":             (6,),  float32,  # /ft_sensor wrench
-    "observation.gripper":        (1,),  float32,  # /gripper/state
-    "observation.images.scene":   (H,W,3), uint8,  # /camera/color/image_raw
-    "observation.images.wrist":   (H,W,3), uint8,  # 腕部相机（可选）
-    "observation.depth.scene":    (H,W),   uint16, # /camera/depth/image_raw
-    "action":                     (8,),  float32,  # teleop_action: ee_pose(7)+gripper(1)
-    "timestamp":                  float64,
+    "observation.state":                 (7,),  float32,  # /joint_states position
+    "observation.ee_pose":               (7,),  float32,  # /ee_pose (xyz + quat)
+    "observation.object_pose":           (7,),  float32,  # /sim/object_pose
+    "observation.ft":                    (6,),  float32,  # /ft_sensor wrench
+    "observation.gripper":               (1,),  float32,  # /gripper/state
+    "observation.images.scene":          (H,W,3), uint8,  # 场景相机
+    "observation.images.wrist":          (H,W,3), uint8,  # 腕部手眼相机
+    "observation.images.tactile_left":   (H,W,3), uint8,  # 左指尖视触觉 (GelSight 模拟)
+    "observation.images.tactile_right":  (H,W,3), uint8,  # 右指尖视触觉 (GelSight 模拟)
+    "observation.depth.scene":           (H,W),   uint16, # 场景深度图
+    "action":                            (8,),  float32,  # 遥操作动作：ee_pose(7) + gripper(1)
+    "timestamp":                         float64,
     "episode_index": int64, "frame_index": int64,
     "done": bool, "task": str,
 }

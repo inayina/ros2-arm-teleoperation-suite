@@ -239,13 +239,43 @@ private:
     std::shared_ptr<std_srvs::srv::Trigger::Response> res)
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    const bool safe = live_faults_.empty();
-    res->success = estop_.reset(safe);
-    if (res->success) {
+    std::string reset_blocker;
+    const bool safe = reset_allowed_locked(reset_blocker);
+    const bool was_active = estop_.active();
+    res->success = was_active ? estop_.reset(safe) : safe;
+    if (res->success && was_active) {
       publish_estop_locked();
     }
-    res->message = res->success ? "E-Stop reset" : "Cannot reset: faults present";
+    res->message = res->success ? (was_active ? "E-Stop reset" : "E-Stop already clear") :
+      ("Cannot reset: " + (reset_blocker.empty() ? "faults present" : reset_blocker));
     RCLCPP_INFO(get_logger(), "%s", res->message.c_str());
+  }
+
+  bool reset_allowed_locked(std::string & reset_blocker)
+  {
+    std::string fault;
+    if (!watchdog_.ok(now_s(), fault)) {
+      reset_blocker = fault;
+      return false;
+    }
+
+    if (have_js_ && !joint_limit_.check(last_js_, fault)) {
+      reset_blocker = fault;
+      return false;
+    }
+
+    if (have_js_) {
+      bool estop_flag = false;
+      if (!velocity_.check(last_js_, fault, estop_flag)) {
+        if (estop_flag && velocity_auto_estop_enabled_) {
+          reset_blocker = fault;
+          return false;
+        }
+        return true;
+      }
+    }
+
+    return true;
   }
 
   void on_timer()

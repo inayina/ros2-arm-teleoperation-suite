@@ -29,8 +29,10 @@ media/*.mkv
 
 # MuJoCo cache
 *.mjb
+MUJOCO_LOG.TXT
 
 # Local validation logs
 .m4_validation/
 .m5_validation/
 .m6_validation/
+.media_evidence/

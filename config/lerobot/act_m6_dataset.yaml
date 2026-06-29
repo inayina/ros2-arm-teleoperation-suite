@@ -22,6 +22,8 @@ observation:
   image_keys:
     scene: observation.images.scene
     wrist: observation.images.wrist
+    tactile_left: observation.images.tactile_left
+    tactile_right: observation.images.tactile_right
   depth_keys:
     scene: observation.depth.scene
 

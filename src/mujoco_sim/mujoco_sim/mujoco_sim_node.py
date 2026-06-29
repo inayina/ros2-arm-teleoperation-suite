@@ -139,6 +139,13 @@ class MujocoSimNode(Node):
         self.declare_parameter("base_frame", "panda_link0")
         self.declare_parameter("ee_site", "panda_ee")
         self.declare_parameter("gravity_compensation", True)
+        self.declare_parameter("grasp_assist_enabled", True)
+        self.declare_parameter("grasp_assist_close_threshold", 0.25)
+        self.declare_parameter("grasp_assist_release_threshold", 0.75)
+        self.declare_parameter("grasp_assist_capture_radius", 0.09)
+        self.declare_parameter("grasp_assist_hold_offset", [0.0, 0.0, -0.03])
+        self.declare_parameter("contact_debug_enabled", False)
+        self.declare_parameter("contact_debug_period_s", 1.0)
         self.declare_parameter(
             "initial_positions",
             [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785],
@@ -178,9 +185,27 @@ class MujocoSimNode(Node):
         self.actuator_ids = []
         self.ee_site_id = None
         self.target_body_id = None
+        self.target_geom_id = None
+        self.finger_body_ids = []
+        self.finger_geom_ids = set()
         self.force_sensor_id = None
         self.torque_sensor_id = None
+        self.target_joint_qposadr = None
+        self.target_joint_dofadr = None
         self.gripper_cmd = MAX_GRIPPER_OPENING_M
+        self.grasp_assist_enabled = bool(self.get_parameter("grasp_assist_enabled").value)
+        self.grasp_close_threshold = float(self.get_parameter("grasp_assist_close_threshold").value)
+        self.grasp_release_threshold = float(self.get_parameter("grasp_assist_release_threshold").value)
+        self.grasp_capture_radius = float(self.get_parameter("grasp_assist_capture_radius").value)
+        self.grasp_hold_offset = np.array(
+            self.get_parameter("grasp_assist_hold_offset").value, dtype=float)
+        self.grasp_attached = False
+        self.grasp_offset = self.grasp_hold_offset.copy()
+        self.grasp_quat_wxyz = np.array([1.0, 0.0, 0.0, 0.0])
+        self.contact_debug_enabled = bool(self.get_parameter("contact_debug_enabled").value)
+        self.contact_debug_period_s = max(
+            0.1, float(self.get_parameter("contact_debug_period_s").value))
+        self._last_contact_debug_time_s = -self.contact_debug_period_s
         self._try_load_model()
 
         self.sub_effort = self.create_subscription(
@@ -208,6 +233,7 @@ class MujocoSimNode(Node):
     def _on_reset(self, request, response):
         if self.model is not None and _HAS_MUJOCO:
             import mujoco
+            self._detach_grasp_assist()
             self._set_initial_pose(mujoco)
             self.randomizer.apply(self.model, self.data, mujoco)
             response.success = True
@@ -236,6 +262,8 @@ class MujocoSimNode(Node):
             self.model = mujoco.MjModel.from_xml_path(path)
             self.data = mujoco.MjData(self.model)
             self._build_mujoco_name_maps(mujoco)
+            if self.contact_debug_enabled:
+                self._log_grasp_model_params(mujoco)
             self._set_initial_pose(mujoco)
             self.randomizer.apply(self.model, self.data, mujoco)
 
@@ -297,6 +325,25 @@ class MujocoSimNode(Node):
             self.ee_site_id = sid
 
         self.target_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "target_object")
+        self.target_geom_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_object_geom")
+        target_joint_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_JOINT, "target_object_joint")
+        if target_joint_id >= 0:
+            self.target_joint_qposadr = int(self.model.jnt_qposadr[target_joint_id])
+            self.target_joint_dofadr = int(self.model.jnt_dofadr[target_joint_id])
+
+        self.finger_body_ids = [
+            bid for bid in (
+                mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "left_finger"),
+                mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "right_finger"),
+            )
+            if bid >= 0
+        ]
+        self.finger_geom_ids = {
+            gid for gid in range(self.model.ngeom)
+            if int(self.model.geom_bodyid[gid]) in self.finger_body_ids
+        }
 
         self.force_sensor_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_SENSOR, "ee_force")
@@ -320,6 +367,8 @@ class MujocoSimNode(Node):
 
     def _on_grip(self, msg: Float64):
         self.gripper_cmd = float(np.clip(msg.data, 0.0, 1.0)) * MAX_GRIPPER_OPENING_M
+        if self._gripper_opening_command_normalized() >= self.grasp_release_threshold:
+            self._detach_grasp_assist()
 
     def _finite_tau(self, tau):
         tau = np.nan_to_num(tau, nan=0.0, posinf=0.0, neginf=0.0)
@@ -350,6 +399,8 @@ class MujocoSimNode(Node):
             if getattr(self, 'gripper_aid', -1) >= 0:
                 self.data.ctrl[self.gripper_aid] = self.gripper_cmd
             mujoco.mj_step(self.model, self.data)
+            self._update_grasp_assist(mujoco)
+            self._maybe_log_contact_debug(mujoco)
 
             self.q = np.array([self.data.qpos[adr] for adr in self.joint_qposadr])
             self.qd = np.array([self.data.qvel[adr] for adr in self.joint_dofadr])
@@ -437,9 +488,169 @@ class MujocoSimNode(Node):
 
     def _gripper_opening_normalized(self):
         if self.model is None or self.data is None or not self.gripper_qposadr:
-            return float(np.clip(self.gripper_cmd / MAX_GRIPPER_OPENING_M, 0.0, 1.0))
+            return self._gripper_opening_command_normalized()
         openings = [float(self.data.qpos[adr]) for adr in self.gripper_qposadr]
         return float(np.clip(np.mean(openings) / MAX_GRIPPER_OPENING_M, 0.0, 1.0))
+
+    def _gripper_opening_command_normalized(self):
+        return float(np.clip(self.gripper_cmd / MAX_GRIPPER_OPENING_M, 0.0, 1.0))
+
+    def _detach_grasp_assist(self):
+        self.grasp_attached = False
+
+    def _target_object_pose(self):
+        if self.target_body_id is None or self.target_body_id < 0:
+            return None, None
+        pos = np.array(self.data.xpos[self.target_body_id], dtype=float)
+        quat = np.array(self.data.xquat[self.target_body_id], dtype=float)
+        return pos, quat
+
+    def _ee_position(self):
+        if self.ee_site_id is None:
+            return None
+        return np.array(self.data.site_xpos[self.ee_site_id], dtype=float)
+
+    def _set_target_object_pose(self, pos, quat, mujoco):
+        if self.target_joint_qposadr is None:
+            return
+        adr = self.target_joint_qposadr
+        self.data.qpos[adr: adr + 3] = np.asarray(pos, dtype=float)
+        self.data.qpos[adr + 3: adr + 7] = np.asarray(quat, dtype=float)
+        if self.target_joint_dofadr is not None:
+            dof = self.target_joint_dofadr
+            self.data.qvel[dof: dof + 6] = 0.0
+        mujoco.mj_forward(self.model, self.data)
+
+    def _update_grasp_assist(self, mujoco):
+        """Keep the synthetic-data cube attached once the closed gripper captures it."""
+        if (
+            not self.grasp_assist_enabled or
+            self.target_joint_qposadr is None or
+            self.ee_site_id is None or
+            self.target_body_id is None or
+            self.target_body_id < 0
+        ):
+            return
+
+        opening = self._gripper_opening_command_normalized()
+        if opening >= self.grasp_release_threshold:
+            self._detach_grasp_assist()
+            return
+
+        ee_pos = self._ee_position()
+        obj_pos, obj_quat = self._target_object_pose()
+        if ee_pos is None or obj_pos is None:
+            return
+
+        if not self.grasp_attached and opening <= self.grasp_close_threshold:
+            distance = float(np.linalg.norm(obj_pos - ee_pos))
+            if distance <= self.grasp_capture_radius:
+                self.grasp_attached = True
+                self.grasp_offset = self.grasp_hold_offset.copy()
+                self.grasp_quat_wxyz = obj_quat
+                self.get_logger().info(
+                    f"Grasp assist attached target_object at distance {distance:.3f} m.")
+
+        if self.grasp_attached:
+            self._set_target_object_pose(ee_pos + self.grasp_offset, self.grasp_quat_wxyz, mujoco)
+
+    def _maybe_log_contact_debug(self, mujoco):
+        if not self.contact_debug_enabled:
+            return
+        now_s = self.get_clock().now().nanoseconds * 1e-9
+        if now_s - self._last_contact_debug_time_s < self.contact_debug_period_s:
+            return
+        self._last_contact_debug_time_s = now_s
+
+        obj_pos, _ = self._target_object_pose()
+        ee_pos = self._ee_position()
+        if obj_pos is not None and ee_pos is not None:
+            dist = float(np.linalg.norm(obj_pos - ee_pos))
+        else:
+            dist = math.nan
+        gripper_qpos = [float(self.data.qpos[adr]) for adr in self.gripper_qposadr]
+        gripper_ctrl = (
+            float(self.data.ctrl[self.gripper_aid])
+            if getattr(self, "gripper_aid", -1) >= 0 else math.nan
+        )
+        arm_ctrl = [float(self.data.ctrl[aid]) for aid in self.actuator_ids]
+        total_contacts, object_contacts, finger_object_contacts, samples = (
+            self._contact_debug_summary(mujoco)
+        )
+
+        self.get_logger().info(
+            "M7 grasp debug "
+            f"object_pos={self._fmt_vec(obj_pos)} "
+            f"ee_pos={self._fmt_vec(ee_pos)} "
+            f"ee_object_dist={dist:.3f} "
+            f"gripper_qpos={self._fmt_vec(gripper_qpos)} "
+            f"gripper_cmd={self._gripper_opening_command_normalized():.3f} "
+            f"gripper_ctrl={gripper_ctrl:.4f} "
+            f"arm_ctrl={self._fmt_vec(arm_ctrl)} "
+            f"contacts_total={total_contacts} "
+            f"object_contacts={object_contacts} "
+            f"finger_object_contacts={finger_object_contacts} "
+            f"grasp_assist_attached={self.grasp_attached} "
+            f"contact_samples={samples}"
+        )
+
+    def _contact_debug_summary(self, mujoco):
+        total_contacts = int(self.data.ncon)
+        object_contacts = 0
+        finger_object_contacts = 0
+        samples = []
+        if self.target_geom_id is None or self.target_geom_id < 0:
+            return total_contacts, object_contacts, finger_object_contacts, samples
+
+        for idx in range(total_contacts):
+            contact = self.data.contact[idx]
+            geom1 = int(contact.geom1)
+            geom2 = int(contact.geom2)
+            has_object = self.target_geom_id in (geom1, geom2)
+            has_finger = geom1 in self.finger_geom_ids or geom2 in self.finger_geom_ids
+            if has_object:
+                object_contacts += 1
+                if len(samples) < 4:
+                    samples.append(
+                        f"{self._geom_name(mujoco, geom1)}:{self._geom_name(mujoco, geom2)}"
+                    )
+            if has_object and has_finger:
+                finger_object_contacts += 1
+        return total_contacts, object_contacts, finger_object_contacts, samples
+
+    def _log_grasp_model_params(self, mujoco):
+        target = self.target_geom_id
+        body = self.target_body_id
+        if target is not None and target >= 0 and body is not None and body >= 0:
+            self.get_logger().info(
+                "M7 grasp model target_object "
+                f"mass={self.model.body_mass[body]:.4f} "
+                f"inertia={self._fmt_vec(self.model.body_inertia[body], precision=6)} "
+                f"geom_size={self._fmt_vec(self.model.geom_size[target], precision=4)} "
+                f"friction={self._fmt_vec(self.model.geom_friction[target], precision=4)} "
+                f"condim={int(self.model.geom_condim[target])} "
+                f"solref={self._fmt_vec(self.model.geom_solref[target], precision=4)} "
+                f"solimp={self._fmt_vec(self.model.geom_solimp[target], precision=4)}"
+            )
+        if self.finger_geom_ids:
+            sample = sorted(self.finger_geom_ids)[0]
+            self.get_logger().info(
+                "M7 grasp model finger_geoms "
+                f"count={len(self.finger_geom_ids)} "
+                f"sample_friction={self._fmt_vec(self.model.geom_friction[sample], precision=4)} "
+                f"sample_condim={int(self.model.geom_condim[sample])} "
+                f"sample_solref={self._fmt_vec(self.model.geom_solref[sample], precision=4)} "
+                f"sample_solimp={self._fmt_vec(self.model.geom_solimp[sample], precision=4)}"
+            )
+
+    def _geom_name(self, mujoco, geom_id):
+        name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, geom_id)
+        return name if name else f"geom_{geom_id}"
+
+    def _fmt_vec(self, values, precision=3):
+        if values is None:
+            return "None"
+        return "[" + ", ".join(f"{float(v):.{precision}f}" for v in values) + "]"
 
     def _read_sensor3(self, sensor_id):
         if sensor_id is None or sensor_id < 0:

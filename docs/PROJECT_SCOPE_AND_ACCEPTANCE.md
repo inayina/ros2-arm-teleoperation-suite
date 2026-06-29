@@ -2,6 +2,8 @@
 
 This document is the single-page contract for what this repository claims, how it is accepted, and where the boundary is. Detailed design remains in `ARCHITECTURE_V2.md` and each `SPEC_V2_M*.md`.
 
+Cross-repository handoff contracts are defined in [`INTER_REPO_CONTRACTS.md`](INTER_REPO_CONTRACTS.md), covering the runtime -> dataset-lab episode interface and the training-lab -> runtime policy-export interface.
+
 ---
 
 ## Project Scope
@@ -13,8 +15,8 @@ In scope:
 - Layered teleoperation pipeline: input device -> safety -> MoveIt Servo -> ros2_control -> fieldbus/control backend -> MuJoCo physics.
 - `ros2_control` controller/hardware-interface integration, including a Cartesian impedance controller and CANopen DS402 hardware backend.
 - SocketCAN/vcan0 fieldbus validation with virtual DS402 servo drives, PDO/SDO/NMT/EMCY traffic, and fault injection.
-- MuJoCo physics, force/torque, end-effector/object pose, scene/wrist RGB, depth, and gripper state observability.
-- Multi-modal LeRobot-style episode recording for ACT / Diffusion Policy data pipelines.
+- MuJoCo physics, force/torque, end-effector/object pose, scene/wrist RGBD, left/right GelSight-like tactile RGB, and gripper state observability.
+- Multi-modal LeRobot-style episode recording for ACT / Diffusion Policy data pipelines, including scene/wrist/tactile image fields.
 - Portfolio evidence: CLI logs, candump traces, dataset feature dumps, screenshots, and GIFs that are traceable to real runs.
 
 Out of scope:
@@ -44,6 +46,7 @@ Rule of thumb:
 - If the claim is "the robot moves / records / produces a grasp GIF", sim-direct mode is acceptable.
 - If the claim is "the control path went through CANopen DS402", the run must use `use_sim:=false can_interface:=vcan0` and include `candump` or `/servo_drive/status` evidence.
 - M7 GIF is allowed to default to sim-direct mode so grasp recording does not depend on CAN timing. The CAN fieldbus claim is covered by M2 evidence.
+- M7 sim-direct demos use a MuJoCo-only grasp assist to keep the cube attached after closed-gripper contact. This improves synthetic-data/demo determinism and is not a claim of high-fidelity contact modeling.
 
 ---
 
@@ -56,7 +59,7 @@ Rule of thumb:
 | M3 impedance controller | Plugin loads active, effort interfaces are valid, tracking error target < 2 mm, 1 kHz update, controller hot-switch | `docs/SPEC_V2_M3_IMPEDANCE_CTRL.md` |
 | M4 motion layer | Teleop -> safety -> servo -> `/joint_target` -> controller -> MuJoCo is smooth, heartbeat stable, latency target < 50 ms | `scripts/validate_m4_motion_layer.sh --launch` |
 | M5 safety layer | 5 monitors pass, out-of-bounds commands rejected, heartbeat timeout latches E-Stop, reset works, CAN Quick Stop checked in CAN mode | `scripts/validate_m5_safety_layer.sh --launch`, optional `--can` mode |
-| M6 perception recorder | scene RGB/depth and wrist RGB publish, recorder writes loadable dataset with state/ee/ft/gripper/scene/wrist/depth/action/timestamps | `scripts/validate_m6_perception_recorder.sh --launch` |
+| M6 perception recorder | scene RGB/depth, wrist RGB, and left/right tactile RGB publish; recorder writes loadable dataset with state/ee/ft/gripper/scene/wrist/tactile/depth/action/timestamps | `scripts/validate_m6_perception_recorder.sh --launch` |
 | M7 teleop/synth data | Input driver abstraction works, domain randomization resets scene, object pose is real, batch generation runs, at least one grasp/demo GIF exists | `docs/SPEC_V2_M7_TELEOP_SYNTH.md`, `docs/MEDIA_CAPTURE_PLAN.md` |
 
 Acceptance evidence should be traceable to raw logs or generated artifacts. README media must follow `docs/MEDIA_CAPTURE_PLAN.md`.
@@ -65,8 +68,8 @@ Acceptance evidence should be traceable to raw logs or generated artifacts. READ
 
 ## Current Known Boundaries
 
-- M7 grasp GIF can fail because of contact/friction/gripper tuning. Before recording, check wrist camera visibility and `/gripper/state` as described in `MEDIA_CAPTURE_PLAN.md`.
-- Wrist camera data is now part of the recorder contract, but existing older datasets may not contain `observation.images.wrist`.
+- M7 grasp stability is deterministic in the default sim-direct demo via grasp assist. Before recording, still check wrist camera visibility and `/gripper/state` as described in `MEDIA_CAPTURE_PLAN.md`.
+- Wrist and tactile camera data are now part of the recorder contract, but existing older datasets may not contain `observation.images.wrist` or `observation.images.tactile_left/right`.
 - `use_sim:=true` does not exercise SocketCAN, by design.
 - `use_sim:=false can_interface:=vcan0` validates the CANopen protocol path, not real hardware electrical timing.
 - Real `can0`, real gripper hardware, and real robot safety validation are future bring-up work, not current acceptance.

@@ -1,0 +1,15 @@
+{
+  "generated_at_unix": 1782724302.069653,
+  "output_dir": "media/m6",
+  "dataset_path": ".m6_validation/episodes/episode_000000/train",
+  "fresh_files": [
+    "camera_rgb_view.png",
+    "lerobot_dataset_features.png",
+    "multimodal_sync.png",
+    "tactile_left_view.png",
+    "tactile_right_view.png",
+    "wrist_camera_view.png"
+  ],
+  "warnings": [],
+  "note": "Only fresh_files are valid for this capture run; pre-existing PNGs may be stale."
+}

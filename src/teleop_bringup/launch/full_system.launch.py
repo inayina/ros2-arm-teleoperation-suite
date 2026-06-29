@@ -34,6 +34,10 @@ def generate_launch_description():
     record = LaunchConfiguration("record")
     output_dir = LaunchConfiguration("output_dir")
     task = LaunchConfiguration("task")
+    sync_slop = LaunchConfiguration("sync_slop")
+    sync_queue_size = LaunchConfiguration("sync_queue_size")
+    auto_record_seconds = LaunchConfiguration("auto_record_seconds")
+    auto_record_delay_s = LaunchConfiguration("auto_record_delay_s")
     model_path = LaunchConfiguration("model_path")
     randomize = LaunchConfiguration("randomize")
     headless = LaunchConfiguration("headless")
@@ -43,6 +47,8 @@ def generate_launch_description():
     enable_wrist_camera = LaunchConfiguration("enable_wrist_camera")
     wrist_camera_width = LaunchConfiguration("wrist_camera_width")
     wrist_camera_height = LaunchConfiguration("wrist_camera_height")
+    contact_debug_enabled = LaunchConfiguration("contact_debug_enabled")
+    contact_debug_period_s = LaunchConfiguration("contact_debug_period_s")
     start_teleop = LaunchConfiguration("start_teleop")
     teleop_driver = LaunchConfiguration("teleop_driver")
 
@@ -60,6 +66,8 @@ def generate_launch_description():
                               "enable_wrist_camera": enable_wrist_camera,
                               "wrist_camera_width": wrist_camera_width,
                               "wrist_camera_height": wrist_camera_height,
+                              "contact_debug_enabled": contact_debug_enabled,
+                              "contact_debug_period_s": contact_debug_period_s,
                           })
     fieldbus = _include("teleop_bringup", "fieldbus.launch.py", common)
     ros2_control = _include(
@@ -76,7 +84,14 @@ def generate_launch_description():
         })
     recording = _include(
         "teleop_bringup", "recording.launch.py",
-        {"output_dir": output_dir, "task": task},
+        {
+            "output_dir": output_dir,
+            "task": task,
+            "sync_slop": sync_slop,
+            "sync_queue_size": sync_queue_size,
+            "auto_record_seconds": auto_record_seconds,
+            "auto_record_delay_s": auto_record_delay_s,
+        },
         condition=IfCondition(record))
 
     return LaunchDescription([
@@ -87,6 +102,10 @@ def generate_launch_description():
         DeclareLaunchArgument("record", default_value="false"),
         DeclareLaunchArgument("output_dir", default_value="data/episodes"),
         DeclareLaunchArgument("task", default_value="teleop"),
+        DeclareLaunchArgument("sync_slop", default_value="0.05"),
+        DeclareLaunchArgument("sync_queue_size", default_value="30"),
+        DeclareLaunchArgument("auto_record_seconds", default_value="0.0"),
+        DeclareLaunchArgument("auto_record_delay_s", default_value="0.0"),
         DeclareLaunchArgument("model_path", default_value="config/models/franka_panda.xml"),
         DeclareLaunchArgument("randomize", default_value="false"),
         DeclareLaunchArgument("headless", default_value="false",
@@ -97,6 +116,8 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_wrist_camera", default_value="true"),
         DeclareLaunchArgument("wrist_camera_width", default_value="320"),
         DeclareLaunchArgument("wrist_camera_height", default_value="240"),
+        DeclareLaunchArgument("contact_debug_enabled", default_value="false"),
+        DeclareLaunchArgument("contact_debug_period_s", default_value="1.0"),
         DeclareLaunchArgument("start_teleop", default_value="true"),
         DeclareLaunchArgument("teleop_driver", default_value="keyboard"),
 

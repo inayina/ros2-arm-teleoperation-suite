@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """L6 camera bridge: MuJoCo virtual camera to ROS Image topics."""
+import math
 import os
 
 import numpy as np
 
 import rclpy
+from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image, JointState
@@ -38,12 +40,18 @@ class CameraBridgeNode(Node):
         self.declare_parameter("camera_info_topic", "/camera/color/camera_info")
         self.declare_parameter("use_mujoco_renderer", True)
         self.declare_parameter("synthetic_fallback", True)
+        self.declare_parameter("tactile_mode", False)
+        self.declare_parameter("gel_depth_baseline", 0.0155)
+        self.declare_parameter("gel_scale", 300.0)
 
         self.w = int(self.get_parameter("width").value)
         self.h = int(self.get_parameter("height").value)
         self.rate = float(self.get_parameter("rate").value)
         self.frame_id = str(self.get_parameter("frame_id").value)
         self.synthetic_fallback = bool(self.get_parameter("synthetic_fallback").value)
+        self.tactile_mode = bool(self.get_parameter("tactile_mode").value)
+        self.gel_depth_baseline = float(self.get_parameter("gel_depth_baseline").value)
+        self.gel_scale = float(self.get_parameter("gel_scale").value)
 
         self._k = 0
         self._q = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785], dtype=float)
@@ -52,6 +60,9 @@ class CameraBridgeNode(Node):
         self._data = None
         self._joint_qposadr: list[int] = []
         self._gripper_qposadr: list[int] = []
+        self._target_qposadr = None
+        self._target_qveladr = None
+        self._object_pose = None
         self._camera = None
 
         color_topic = str(self.get_parameter("color_topic").value)
@@ -67,6 +78,8 @@ class CameraBridgeNode(Node):
             JointState, "/joint_states", self._on_joint_state, qos_profile_sensor_data)
         self.create_subscription(
             Float64, "/gripper/state", self._on_gripper_state, qos_profile_sensor_data)
+        self.create_subscription(
+            PoseStamped, "/sim/object_pose", self._on_object_pose, qos_profile_sensor_data)
 
         if bool(self.get_parameter("use_mujoco_renderer").value):
             self._try_init_mujoco()
@@ -99,6 +112,11 @@ class CameraBridgeNode(Node):
                 jid = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_JOINT, name)
                 if jid >= 0:
                     self._gripper_qposadr.append(int(self._model.jnt_qposadr[jid]))
+            target_jid = mujoco.mj_name2id(
+                self._model, mujoco.mjtObj.mjOBJ_JOINT, "target_object_joint")
+            if target_jid >= 0:
+                self._target_qposadr = int(self._model.jnt_qposadr[target_jid])
+                self._target_qveladr = int(self._model.jnt_dofadr[target_jid])
             self._set_model_joints(self._q)
 
             camera = CameraModel(
@@ -133,6 +151,19 @@ class CameraBridgeNode(Node):
     def _on_gripper_state(self, msg: Float64):
         self._gripper_opening = float(np.clip(msg.data, 0.0, 1.0))
 
+    def _on_object_pose(self, msg: PoseStamped):
+        p = msg.pose.position
+        o = msg.pose.orientation
+        pos = np.array([p.x, p.y, p.z], dtype=float)
+        quat = np.array([o.w, o.x, o.y, o.z], dtype=float)
+        norm = float(np.linalg.norm(quat))
+        if norm < 1e-9 or not np.all(np.isfinite(quat)):
+            quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+        else:
+            quat = quat / norm
+        if np.all(np.isfinite(pos)):
+            self._object_pose = (pos, quat)
+
     def _set_model_joints(self, q):
         if self._model is None or self._data is None:
             return
@@ -141,6 +172,13 @@ class CameraBridgeNode(Node):
         gripper_qpos = self._gripper_opening * MAX_GRIPPER_OPENING_M
         for adr in self._gripper_qposadr:
             self._data.qpos[adr] = gripper_qpos
+        if self._target_qposadr is not None and self._object_pose is not None:
+            pos, quat = self._object_pose
+            adr = self._target_qposadr
+            self._data.qpos[adr: adr + 3] = pos
+            self._data.qpos[adr + 3: adr + 7] = quat
+            if self._target_qveladr is not None:
+                self._data.qvel[self._target_qveladr: self._target_qveladr + 6] = 0.0
         self._data.qvel[:] = 0.0
         mujoco.mj_forward(self._model, self._data)
 
@@ -170,14 +208,67 @@ class CameraBridgeNode(Node):
             rgb, depth_arr = self._camera.render(self._data)
             rgb = np.ascontiguousarray(np.flipud(rgb))
             depth_arr = np.ascontiguousarray(np.flipud(depth_arr))
+            if self.tactile_mode:
+                rgb = self._simulate_gelsight(depth_arr)
         elif self.synthetic_fallback:
             rgb, depth_arr = self._synthetic_frame()
+            if self.tactile_mode:
+                rgb = self._simulate_gelsight(depth_arr)
         else:
             return
 
         self.pub_color.publish(self._image_msg(stamp, "rgb8", rgb))
         self.pub_depth.publish(self._image_msg(stamp, "32FC1", depth_arr.astype(np.float32)))
         self.pub_info.publish(self._camera_info(stamp))
+
+    def _simulate_gelsight(self, depth_arr: np.ndarray) -> np.ndarray:
+        # 1. Compute deformation from baseline
+        deformation = np.maximum(0.0, self.gel_depth_baseline - depth_arr)
+
+        # 2. Scale deformation for gradient calculation
+        def_scaled = deformation * self.gel_scale
+
+        # 3. Compute spatial gradients using central differences
+        dy, dx = np.gradient(def_scaled)
+
+        # 4. Compute normal vector
+        nx = -dx
+        ny = dy
+        nz = np.ones_like(nx)
+
+        norm = np.sqrt(nx**2 + ny**2 + nz**2)
+        nx = nx / norm
+        ny = ny / norm
+        nz = nz / norm
+
+        # 5. Define directional lights (Red from top/left, Green from top/right, Blue from bottom)
+        lr = np.array([-0.5, 0.866, 0.3])
+        lg = np.array([0.866, 0.5, 0.3])
+        lb = np.array([-0.3, -0.866, 0.3])
+
+        # Normalize lights
+        lr = lr / np.linalg.norm(lr)
+        lg = lg / np.linalg.norm(lg)
+        lb = lb / np.linalg.norm(lb)
+
+        # 6. Shading calculation (diffuse + ambient)
+        dot_r = nx * lr[0] + ny * lr[1] + nz * lr[2]
+        dot_g = nx * lg[0] + ny * lg[1] + nz * lg[2]
+        dot_b = nx * lb[0] + ny * lb[1] + nz * lb[2]
+
+        diffuse_r = np.maximum(0.0, dot_r)
+        diffuse_g = np.maximum(0.0, dot_g)
+        diffuse_b = np.maximum(0.0, dot_b)
+
+        ambient = 0.3
+        diffuse = 0.7
+
+        r = ambient + diffuse * diffuse_r
+        g = ambient + diffuse * diffuse_g
+        b = ambient + diffuse * diffuse_b
+
+        rgb_tactile = (np.clip(np.dstack([r, g, b]), 0.0, 1.0) * 255.0).astype(np.uint8)
+        return rgb_tactile
 
     def _synthetic_frame(self):
         xs = np.linspace(0, 255, self.w, dtype=np.uint8)
@@ -187,7 +278,25 @@ class CameraBridgeNode(Node):
             np.flipud(row),
             np.full((self.h, self.w), (self._k * 4) % 256, dtype=np.uint8),
         ])
+
+        # Default depth
         depth = np.full((self.h, self.w), 0.8, dtype=np.float32)
+
+        # If tactile mode, let's create a simulated indentation in the middle of the gel
+        if self.tactile_mode:
+            depth = np.full((self.h, self.w), self.gel_depth_baseline, dtype=np.float32)
+            cx, cy = self.w // 2, self.h // 2
+            r = min(self.w, self.h) // 6
+            Y, X = np.ogrid[:self.h, :self.w]
+            dist_sq = (X - cx)**2 + (Y - cy)**2
+            mask = dist_sq < r**2
+
+            # Oscillating indentation depth (max 2mm deep)
+            depth_oscillation = 0.002 * (0.5 + 0.5 * math.sin(self._k * 0.1))
+            # Sphere shape: depth is smaller in the middle
+            sphere_depth = self.gel_depth_baseline - depth_oscillation * np.sqrt(np.maximum(0.0, 1.0 - dist_sq / (r**2)))
+            depth[mask] = sphere_depth[mask]
+
         return rgb, depth
 
     def _image_msg(self, stamp, encoding: str, array: np.ndarray) -> Image:

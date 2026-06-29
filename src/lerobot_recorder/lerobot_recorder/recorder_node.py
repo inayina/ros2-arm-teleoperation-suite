@@ -46,6 +46,8 @@ class RecorderNode(Node):
         self.declare_parameter("task", "teleop")
         self.declare_parameter("sync_queue_size", 30)
         self.declare_parameter("sync_slop", 0.05)
+        self.declare_parameter("auto_record_seconds", 0.0)
+        self.declare_parameter("auto_record_delay_s", 0.0)
         self.out_dir = self.get_parameter("output_dir").value
         self.task = self.get_parameter("task").value
 
@@ -72,6 +74,16 @@ class RecorderNode(Node):
         )
 
         self.get_logger().info(f"lerobot_recorder up (output={self.out_dir}).")
+        auto_seconds = float(self.get_parameter("auto_record_seconds").value)
+        auto_delay = float(self.get_parameter("auto_record_delay_s").value)
+        self._auto_start_timer = None
+        self._auto_stop_timer = None
+        if auto_seconds > 0.0:
+            self._auto_record_seconds = auto_seconds
+            self._auto_start_timer = self.create_timer(
+                max(0.1, auto_delay),
+                self._auto_start_recording,
+            )
 
     def _on_grip(self, m): self._grip = m.data
     def _on_action(self, m): self._action = m
@@ -86,17 +98,43 @@ class RecorderNode(Node):
     def _on_trigger(self, msg: String):
         cmd = msg.data.strip().lower()
         if cmd == "start" and not self.recording:
-            self.frames = []
-            self.recording = True
-            self.get_logger().info(f"recording episode {self.episode_index} ...")
+            self._start_recording()
         elif cmd == "stop" and self.recording:
-            self.recording = False
-            if self.frames:
-                path = write_episode(self.out_dir, self.episode_index, self.frames, self.task)
-                self.get_logger().info(f"saved {len(self.frames)} frames -> {path}")
-                self.episode_index += 1
-            else:
-                self.get_logger().warn("recording stopped without synchronized frames")
+            self._stop_recording()
+
+    def _start_recording(self):
+        self.frames = []
+        self.recording = True
+        self.get_logger().info(f"recording episode {self.episode_index} ...")
+
+    def _stop_recording(self):
+        self.recording = False
+        if self.frames:
+            path = write_episode(self.out_dir, self.episode_index, self.frames, self.task)
+            self.get_logger().info(f"saved {len(self.frames)} frames -> {path}")
+            self.episode_index += 1
+        else:
+            self.get_logger().warn("recording stopped without synchronized frames")
+
+    def _auto_start_recording(self):
+        if self._auto_start_timer is not None:
+            self._auto_start_timer.cancel()
+            self.destroy_timer(self._auto_start_timer)
+            self._auto_start_timer = None
+        if not self.recording:
+            self._start_recording()
+        self._auto_stop_timer = self.create_timer(
+            max(0.1, self._auto_record_seconds),
+            self._auto_stop_recording,
+        )
+
+    def _auto_stop_recording(self):
+        if self._auto_stop_timer is not None:
+            self._auto_stop_timer.cancel()
+            self.destroy_timer(self._auto_stop_timer)
+            self._auto_stop_timer = None
+        if self.recording:
+            self._stop_recording()
 
     @staticmethod
     def _pose_vec(p: PoseStamped):
@@ -112,6 +150,8 @@ class RecorderNode(Node):
         color: Image,
         depth: Image,
         wrist_color: Image,
+        tactile_left: Image,
+        tactile_right: Image,
         obj_msg: PoseStamped,
     ):
         if not self.recording:
@@ -133,6 +173,8 @@ class RecorderNode(Node):
             "observation.gripper": [float(self._grip)],
             "observation.images.scene": _img_to_np(color),
             "observation.images.wrist": _img_to_np(wrist_color),
+            "observation.images.tactile_left": _img_to_np(tactile_left),
+            "observation.images.tactile_right": _img_to_np(tactile_right),
             "observation.depth.scene": _img_to_np(depth),
             "action": action_pose + [float(self._grip)],
             "timestamp": _stamp_sec(color),

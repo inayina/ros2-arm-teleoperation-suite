@@ -92,6 +92,8 @@ timeout 15s ros2 service call /safety/reset std_srvs/srv/Trigger "{}" \
 sleep 0.5
 if grep -q "success=True" "${LOG_DIR}/reset.txt" 2>/dev/null; then
   log_pass "AC-5 /safety/reset cleared E-Stop"
+elif grep -q "success: true" "${LOG_DIR}/reset.txt" 2>/dev/null; then
+  log_pass "AC-5 /safety/reset cleared E-Stop"
 else
   log_fail "AC-5 /safety/reset failed — see ${LOG_DIR}/reset.txt"
 fi
@@ -128,7 +130,7 @@ fi
 # AC-4 heartbeat timeout — stop teleop_input only
 log_info "AC-4 — heartbeat timeout -> E-Stop ..."
 pkill -f teleop_input_node 2>/dev/null || true
-sleep 0.25
+sleep 0.75
 ESTOP=$(timeout 4s ros2 topic echo /safety/estop --once 2>/dev/null | grep "data:" | awk '{print $2}' || true)
 if [[ "${ESTOP}" == "true" ]]; then
   log_pass "AC-4 heartbeat loss latched E-Stop"

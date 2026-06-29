@@ -1,18 +1,18 @@
 # SPEC V2-M6: 视觉感知 + 多模态 LeRobot Recorder + 收尾
 
-**分支**：`feat/v2-perception-recorder`  
-**依赖**：M5（`feat/v2-safety-layer` 已合入 main）  
-**核心目标**：实现 MuJoCo 虚拟相机 RGB/Depth 图像发布（`camera_bridge`），以及多模态时间对齐录制（`lerobot_recorder`），输出兼容 ACT/Diffusion Policy 训练管线的 `LeRobotDataset`；并完成整体收尾（README 更新、架构图刷新、演示视频）。  
+**分支**：`feat/v2-perception-recorder`
+**依赖**：M5（`feat/v2-safety-layer` 已合入 main）
+**核心目标**：实现 MuJoCo 虚拟相机 RGB/Depth 与左右指尖视触觉图像发布（`camera_bridge`），以及多模态时间对齐录制（`lerobot_recorder`），输出兼容 ACT/Diffusion Policy 训练管线的 `LeRobotDataset`；并完成整体收尾（README 更新、架构图刷新、演示视频）。
 **预计工作量**：6~8 天
 
-> V1 对照：V1 只录制 joint_state + ee_pose，无视觉数据。V2 新增 RGB/Depth 双路图像，用 `message_filters.ApproximateTimeSynchronizer` 对齐多模态，录制结果直接对接 LeRobot v2 格式。
+> V1 对照：V1 只录制 joint_state + ee_pose，无视觉数据。V2 新增 scene/wrist RGBD 与左右指尖 GelSight-like 视触觉图像，用 `message_filters.ApproximateTimeSynchronizer` 对齐多模态，录制结果直接对接 LeRobot v2 格式。
 
 ---
 
 ## 1. 目标
 
-1. 在 `franka_panda.xml` 中添加虚拟相机（`scene` 固定相机 + `wrist` 腕部相机）
-2. 实现 `camera_bridge_node`：从 MuJoCo offscreen renderer 读取 RGB/Depth，发布到 ROS2 @30Hz
+1. 在 `franka_panda.xml` 中添加虚拟相机（`scene` 固定相机 + `wrist` 腕部相机 + 左/右指尖 `left_tactile_camera` / `right_tactile_camera`）
+2. 实现 `camera_bridge_node`：从 MuJoCo offscreen renderer 读取 RGB/Depth，触觉模式下由深度形变合成 GelSight-like photometric-stereo 彩色触觉图，发布到 ROS2 @30Hz
 3. 实现 `lerobot_recorder_node`：多模态时间同步 + LeRobot v2 格式写盘
 4. `teleop/record_trigger` 控制录制开始/停止
 5. 录制结果可被 `LeRobotDataset.load()` 正常加载，字段完整
@@ -72,6 +72,14 @@ config/
   <camera name="wrist" pos="0 0 0" xyaxes="1 0 0 0 0 -1" fovy="80"/>
 </body>
 
+<!-- 左右指尖内侧触觉相机，朝向触觉垫 Pad 法向 -->
+<body name="left_finger">
+  <camera name="left_tactile_camera" pos="0 -0.01 0.0445" xyaxes="1 0 0 0 0 1" fovy="90"/>
+</body>
+<body name="right_finger">
+  <camera name="right_tactile_camera" pos="0 -0.01 0.0445" xyaxes="1 0 0 0 0 1" fovy="90"/>
+</body>
+
 <!-- 在 <sensor> 块添加 FT 传感器（如未添加） -->
 <sensor>
   <force  name="ee_force_sensor"  site="attachment_site"/>
@@ -95,7 +103,19 @@ K_scene = [f, 0, SCENE_WIDTH/2,
 # wrist 相机（腕部，320×240，fovy=80°）
 WRIST_WIDTH, WRIST_HEIGHT = 320, 240
 WRIST_FOV_DEG = 80.0
+
+# tactile 相机（左右指尖，320×240，fovy=90°，GelSight-like）
+TACTILE_WIDTH, TACTILE_HEIGHT = 320, 240
+TACTILE_FOV_DEG = 90.0
 ```
+
+### 3.3 视触觉建模边界
+
+当前实现是软件仿真中的 GelSight-like 视触觉链路：指尖相机从 MuJoCo 渲染深度图读取触觉垫附近形变，`camera_bridge` 计算深度梯度得到局部法向量，再用红/绿/蓝三方向光源做简化光度立体彩色渲染。无 MuJoCo renderer 时，fallback 会生成动态球形压痕，保证单测和演示仍能看到触觉图像变化。
+
+`camera_bridge` 为每个虚拟相机维护独立的 MuJoCo renderer/model。为了避免 wrist/tactile 图像与主 `mujoco_sim` 物理状态脱节，节点订阅 `/sim/object_pose` 并在每次渲染前同步本地 `target_object_joint`，同时用 `/joint_states` 与 `/gripper/state` 同步机械臂和夹爪状态。
+
+这不声明真实触觉硬件的 10 微米级分辨率或力重建精度；它用于验证“视触觉图像 → ROS2 topic → 多模态数据集”的产品化软件链路。
 
 ---
 
@@ -193,7 +213,9 @@ EPISODE_FEATURES = Features({
 
     # 视觉观测
     "observation.images.scene":    Array3D(dtype="uint8", shape=(480, 640, 3)),   # /camera/color
-    "observation.images.wrist":    Array3D(dtype="uint8", shape=(240, 320, 3)),   # 腕部相机（可选）
+    "observation.images.wrist":    Array3D(dtype="uint8", shape=(240, 320, 3)),   # 腕部相机
+    "observation.images.tactile_left":  Array3D(dtype="uint8", shape=(240, 320, 3)), # 左指尖视触觉
+    "observation.images.tactile_right": Array3D(dtype="uint8", shape=(240, 320, 3)), # 右指尖视触觉
     "observation.depth.scene":     Array2D(dtype="float32", shape=(480, 640)),    # /camera/depth
 
     # 动作（遥操作指令）
@@ -230,10 +252,14 @@ class MultiModalSync:
         self._ft_sub     = message_filters.Subscriber(node, WrenchStamped, "/ft_sensor")
         self._rgb_sub    = message_filters.Subscriber(node, Image, "/camera/color/image_raw")
         self._depth_sub  = message_filters.Subscriber(node, Image, "/camera/depth/image_raw")
+        self._wrist_sub  = message_filters.Subscriber(node, Image, "/camera/wrist/color/image_raw")
+        self._tl_sub     = message_filters.Subscriber(node, Image, "/camera/tactile_left/image_raw")
+        self._tr_sub     = message_filters.Subscriber(node, Image, "/camera/tactile_right/image_raw")
 
         self._sync = message_filters.ApproximateTimeSynchronizer(
             [self._joint_sub, self._ee_sub, self._ft_sub,
-             self._rgb_sub, self._depth_sub],
+             self._rgb_sub, self._depth_sub, self._wrist_sub,
+             self._tl_sub, self._tr_sub],
             queue_size=30,
             slop=self.SLOP_SEC,
         )
@@ -320,6 +346,11 @@ class LeRobotRecorderNode(rclpy.node.Node):
 | `/camera/color/image_raw` | `sensor_msgs/Image` (rgb8) | 30 Hz | scene 相机 RGB |
 | `/camera/depth/image_raw` | `sensor_msgs/Image` (32FC1) | 30 Hz | scene 相机深度（m） |
 | `/camera/color/camera_info` | `sensor_msgs/CameraInfo` | 30 Hz | 相机内参 |
+| `/camera/wrist/color/image_raw` | `sensor_msgs/Image` (rgb8) | 30 Hz | wrist 腕部相机 RGB |
+| `/camera/tactile_left/image_raw` | `sensor_msgs/Image` (rgb8) | 30 Hz | 左指尖 GelSight-like 视触觉 |
+| `/camera/tactile_right/image_raw` | `sensor_msgs/Image` (rgb8) | 30 Hz | 右指尖 GelSight-like 视触觉 |
+
+`camera_bridge` 还订阅 `/joint_states`、`/gripper/state`、`/sim/object_pose`，用于在独立 renderer 中复现当前机械臂、夹爪和目标物体位姿。
 
 ### 6.2 `lerobot_recorder` 订阅话题
 
@@ -330,6 +361,9 @@ class LeRobotRecorderNode(rclpy.node.Node):
 | `/ft_sensor` | `geometry_msgs/WrenchStamped` | 100 Hz | 接触力 |
 | `/camera/color/image_raw` | `sensor_msgs/Image` | 30 Hz | RGB 图像（时间同步主频） |
 | `/camera/depth/image_raw` | `sensor_msgs/Image` | 30 Hz | 深度图像 |
+| `/camera/wrist/color/image_raw` | `sensor_msgs/Image` | 30 Hz | 腕部图像 |
+| `/camera/tactile_left/image_raw` | `sensor_msgs/Image` | 30 Hz | 左指尖视触觉图像 |
+| `/camera/tactile_right/image_raw` | `sensor_msgs/Image` | 30 Hz | 右指尖视触觉图像 |
 | `/gripper/state` | `std_msgs/Float64` | 20 Hz | 夹爪状态 |
 | `/safety/status` | `teleop_interfaces/SafetyStatus` | 50 Hz | 安全元数据 |
 | `/servo_drive/status` | `teleop_interfaces/DriveStatus` | 50 Hz | 驱动器故障元数据 |
@@ -344,10 +378,10 @@ class LeRobotRecorderNode(rclpy.node.Node):
 
 | # | 验收项 | 验证命令 |
 |---|---|---|
-| AC-1 | `/camera/color/image_raw` + `/camera/depth/image_raw` @30Hz 稳定发布 | `ros2 topic hz /camera/color/image_raw` |
+| AC-1 | scene RGB/depth、wrist RGB、左右 tactile RGB @30Hz 稳定发布 | `ros2 topic hz /camera/tactile_left/image_raw` |
 | AC-2 | MuJoCo viewer 中相机画面与 `/camera/color/image_raw` 内容一致（rqt_image_view 确认） | `ros2 run rqt_image_view rqt_image_view` |
 | AC-3 | 录制 30 秒 Episode（发 `"start"` → 操作 → 发 `"stop"`），生成 `data/episodes/episode_000000/train/` | 按步骤录制 |
-| AC-4 | `LeRobotDataset.load("data/episodes/episode_000000/train")` 成功加载，字段完整（state/ee/ft/gripper/rgb/depth/action/ts） | `python -c "from datasets import load_from_disk; ds=load_from_disk('...'); print(ds.features)"` |
+| AC-4 | `LeRobotDataset.load("data/episodes/episode_000000/train")` 成功加载，字段完整（state/ee/ft/gripper/scene/wrist/tactile/depth/action/ts） | `python -c "from datasets import load_from_disk; ds=load_from_disk('...'); print(ds.features)"` |
 | AC-5 | `ApproximateTimeSynchronizer` 对齐率 > 90%（30 秒录制不少于 800 帧） | 计算 `len(ds)` |
 | AC-6 | `safety_estop` / `drive_fault` 字段在 E-Stop 片段中正确标记 `True` | 触发 E-Stop 录制后检查字段 |
 | AC-7 | 录制数据可被 ACT 配置直接消费（或 `LeRobotDataset.from_preloaded()` 无报错） | 运行 ACT dataloader 验证 |
@@ -355,7 +389,8 @@ class LeRobotRecorderNode(rclpy.node.Node):
 
 ### 加分项
 
-- [ ] 腕部相机（wrist）图像同时录制（`observation.images.wrist`）
+- [x] 腕部相机（wrist）图像同时录制（`observation.images.wrist`）
+- [x] 左/右指尖视触觉图像同时录制（`observation.images.tactile_left/right`）
 - [ ] Episode 可视化脚本（逐帧播放 RGB + joint_states）
 - [ ] HuggingFace Hub 上传脚本（`ds.push_to_hub()`）
 - [ ] 演示视频 GIF（MuJoCo viewer + 遥操作 + 录制流程）
@@ -378,6 +413,11 @@ ros2 run rqt_image_view rqt_image_view /camera/color/image_raw
 # 查看深度图（伪彩色）
 ros2 run rqt_image_view rqt_image_view /camera/depth/image_raw
 
+# 查看左右指尖视触觉图
+ros2 topic hz /camera/tactile_left/image_raw --window 50
+ros2 topic hz /camera/tactile_right/image_raw --window 50
+ros2 run rqt_image_view rqt_image_view /camera/tactile_left/image_raw
+
 # 启动录制节点
 ros2 run lerobot_recorder recorder_node
 
@@ -393,6 +433,7 @@ print(f"帧数: {len(ds)}")
 print(f"字段: {list(ds.features.keys())}")
 print(f"第一帧 state: {ds[0]['observation.state']}")
 print(f"图像形状: {ds[0]['observation.images.scene'].shape}")
+print(f"左触觉图像形状: {ds[0]['observation.images.tactile_left'].shape}")
 EOF
 
 # 全链路启动（含 Recorder）

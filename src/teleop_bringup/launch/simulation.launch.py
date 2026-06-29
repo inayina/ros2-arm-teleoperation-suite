@@ -16,6 +16,8 @@ def generate_launch_description():
     enable_wrist_camera = LaunchConfiguration("enable_wrist_camera")
     wrist_camera_width = LaunchConfiguration("wrist_camera_width")
     wrist_camera_height = LaunchConfiguration("wrist_camera_height")
+    contact_debug_enabled = LaunchConfiguration("contact_debug_enabled")
+    contact_debug_period_s = LaunchConfiguration("contact_debug_period_s")
     return LaunchDescription([
         DeclareLaunchArgument(
             "model_path",
@@ -31,6 +33,9 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_wrist_camera", default_value="true"),
         DeclareLaunchArgument("wrist_camera_width", default_value="320"),
         DeclareLaunchArgument("wrist_camera_height", default_value="240"),
+        DeclareLaunchArgument("enable_tactile", default_value="true"),
+        DeclareLaunchArgument("contact_debug_enabled", default_value="false"),
+        DeclareLaunchArgument("contact_debug_period_s", default_value="1.0"),
         Node(
             package="mujoco_sim",
             executable="mujoco_sim_node",
@@ -40,6 +45,8 @@ def generate_launch_description():
                 "model_path": model_path,
                 "headless": LaunchConfiguration("headless"),
                 "randomize": randomize,
+                "contact_debug_enabled": contact_debug_enabled,
+                "contact_debug_period_s": contact_debug_period_s,
             }],
         ),
         Node(
@@ -78,5 +85,49 @@ def generate_launch_description():
                 "camera_info_topic": "/camera/wrist/color/camera_info",
             }],
             condition=IfCondition(enable_wrist_camera),
+        ),
+        Node(
+            package="camera_bridge",
+            executable="camera_bridge_node",
+            name="left_tactile_bridge",
+            output="screen",
+            parameters=[{
+                "model_path": model_path,
+                "camera_name": "left_tactile_camera",
+                "width": 320,
+                "height": 240,
+                "rate": camera_rate,
+                "fovy_deg": 90.0,
+                "frame_id": "left_tactile_optical_frame",
+                "color_topic": "/camera/tactile_left/image_raw",
+                "depth_topic": "/camera/tactile_left/depth/image_raw",
+                "camera_info_topic": "/camera/tactile_left/camera_info",
+                "tactile_mode": True,
+                "gel_depth_baseline": 0.0155,
+                "gel_scale": 300.0,
+            }],
+            condition=IfCondition(LaunchConfiguration("enable_tactile")),
+        ),
+        Node(
+            package="camera_bridge",
+            executable="camera_bridge_node",
+            name="right_tactile_bridge",
+            output="screen",
+            parameters=[{
+                "model_path": model_path,
+                "camera_name": "right_tactile_camera",
+                "width": 320,
+                "height": 240,
+                "rate": camera_rate,
+                "fovy_deg": 90.0,
+                "frame_id": "right_tactile_optical_frame",
+                "color_topic": "/camera/tactile_right/image_raw",
+                "depth_topic": "/camera/tactile_right/depth/image_raw",
+                "camera_info_topic": "/camera/tactile_right/camera_info",
+                "tactile_mode": True,
+                "gel_depth_baseline": 0.0155,
+                "gel_scale": 300.0,
+            }],
+            condition=IfCondition(LaunchConfiguration("enable_tactile")),
         ),
     ])

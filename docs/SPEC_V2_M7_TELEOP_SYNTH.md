@@ -143,6 +143,17 @@ domain_randomization:
 - 提取真实的全局坐标和四元数。
 - 以 100Hz 频率发布到 `/sim/object_pose` (`geometry_msgs/PoseStamped`)。
 
+### 4.3 MuJoCo Grasp Assist（sim-direct Demo）
+
+M7 的作品集 GIF 和合成数据 smoke run 默认走 `use_sim:=true` sim-direct 路径。为避免小方块在简化接触模型中因为摩擦/接触参数抖动而掉落，`mujoco_sim_node.py` 提供可参数化的 grasp assist：
+
+- `grasp_assist_enabled`：默认 `true`。
+- `grasp_assist_close_threshold`：夹爪闭合到该阈值以下时允许捕获目标。
+- `grasp_assist_release_threshold`：夹爪打开到该阈值以上时释放目标。
+- `grasp_assist_capture_radius`：末端与目标物体的捕获半径。
+
+该机制仅用于仿真数据和作品集演示的确定性，不声明高保真接触物理。CANopen 与 E-Stop 证据仍由 M2/M5 验收覆盖。
+
 ---
 
 ## 5. 合成数据生成流水线 (`synth_data_gen`)
@@ -184,7 +195,7 @@ domain_randomization:
 | AC-3 | `mujoco_sim` 稳定发布 `/sim/object_pose`，录制得到的 LeRobot Dataset 的 `observation.object_pose` 有效且包含正确位移。 | 录制后运行 dataset 检查脚本，确认 object_pose 非零且变化。 |
 | AC-4 | `batch_generator.py` 能无人值守连续生成 10 个 Episode 的数据集。 | 运行 `ros2 run synth_data_gen batch_generator --episodes 10`。 |
 | AC-5 | `docs/POLICY_DEPLOYMENT.md` 包含清晰的（1）模型训练命令、（2）策略推理节点挂载方式。 | 代码审查 / 个人走读验证。 |
-| AC-6 | 提供至少一段夹爪在仿真中完成完整抓取任务的演示 GIF（包含在 README 中）。 | 检查 `media/` 目录下新增的文件及 README 引用。 |
+| AC-6 | 提供至少一段夹爪在仿真中完成完整抓取任务的演示 GIF，并提供夹爪近景（包含在 README 中）。 | 检查 `media/m7/grasp_demo.gif`、`media/m7/gripper_closeup.gif` 及 README 引用。 |
 
 ---
 

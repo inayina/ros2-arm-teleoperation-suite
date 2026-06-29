@@ -340,7 +340,7 @@ forward_command_controller:
 
 ## 6. 视觉证明与采集产物
 
-M1 的 README 可见证明图已补到 `media/m1/m1_control_loop_proof.svg`，运行证据 PNG 也已补齐，覆盖本里程碑的核心闭环：
+M1 的 README 可见说明图已补到 `media/m1/m1_control_loop_proof.svg`，并已按 [`MEDIA_CAPTURE_PLAN.md`](./MEDIA_CAPTURE_PLAN.md) 的作品集证据标准刷新三张 PNG。当前 M1 PNG 来自真实 M1 运行证据：MuJoCo offscreen render、`ros2 control list_controllers`、`ros2 topic hz /joint_states` 和 `ros2 node info` 拓扑关系；不再要求必须打开 rqt 或 MuJoCo viewer 窗口。目标闭环如下：
 
 ```text
 forward_effort_controller
@@ -356,9 +356,9 @@ forward_effort_controller
 
 | 文件 | 证明内容 | 对应验收 |
 |---|---|---|
-| `media/m1/rqt_graph_m1.png` | `ros2_control`、`mujoco_sim`、`/sim/*`、`/joint_states` 拓扑贯通 | AC-2/AC-3/AC-6 |
-| `media/m1/panda_gravity_comp.png` | Panda 在 MuJoCo viewer 中重力补偿站立、不坍塌 | AC-5 |
-| `media/m1/joint_states_hz.png` | `ros2 topic hz /joint_states` 显示 ≥ 950 Hz | AC-4 |
+| `media/m1/rqt_graph_m1.png` | `ros2_control`、`mujoco_sim`、`/sim/*`、`/joint_states` 拓扑贯通（由 live `ros2 node info` 渲染） | AC-2/AC-3/AC-6 |
+| `media/m1/panda_gravity_comp.png` | Panda 在 MuJoCo 模型中保持 ready pose，不坍塌 | AC-5 |
+| `media/m1/joint_states_hz.png` | `ros2 topic hz /joint_states` 显示约 1kHz | AC-4 |
 
 ---
 

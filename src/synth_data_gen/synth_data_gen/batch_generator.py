@@ -17,6 +17,9 @@ class BatchGenerator(Node):
         self.declare_parameter('descend_duration', 2.5)
         self.declare_parameter('grasp_pause', 1.0)
         self.declare_parameter('lift_duration', 2.0)
+        self.declare_parameter('hover_height', 0.45)
+        self.declare_parameter('pick_height_offset', 0.05)
+        self.declare_parameter('reset_timeout', 5.0)
         
         self.episodes = self.get_parameter('episodes').value
         self.seed = self.get_parameter('seed').value
@@ -24,8 +27,12 @@ class BatchGenerator(Node):
         self.descend_duration = float(self.get_parameter('descend_duration').value)
         self.grasp_pause = float(self.get_parameter('grasp_pause').value)
         self.lift_duration = float(self.get_parameter('lift_duration').value)
+        self.hover_height = float(self.get_parameter('hover_height').value)
+        self.pick_height_offset = float(self.get_parameter('pick_height_offset').value)
+        self.reset_timeout = float(self.get_parameter('reset_timeout').value)
         
         self.initial_pose = None
+        self.latest_object_pose = None
         
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
@@ -34,6 +41,8 @@ class BatchGenerator(Node):
         self.pub_rec = self.create_publisher(String, '/teleop/record_trigger', 10)
         self.pub_pose = self.create_publisher(PoseStamped, '/teleop/cmd_pose', 10)
         self.pub_grip = self.create_publisher(Float64, '/teleop/gripper_cmd', 10)
+        self.sub_object = self.create_subscription(
+            PoseStamped, '/sim/object_pose', self._on_object_pose, 10)
         
         # Start run_batch thread
         self.get_logger().info(f'Batch generator ready. Running {self.episodes} episodes.')
@@ -60,11 +69,11 @@ class BatchGenerator(Node):
             self.get_logger().info(f'--- Starting Episode {i+1}/{self.episodes} ---')
             
             # 1. Reset Scene
-            req = Trigger.Request()
-            self.cli_reset.call(req)
+            self._reset_scene(timeout=self.reset_timeout)
             
             # Let the scene settle
             time.sleep(1.0)
+            object_pose = self._wait_for_object_pose(timeout=3.0)
             
             # Update initial pose after reset
             try:
@@ -86,15 +95,18 @@ class BatchGenerator(Node):
             
             down_q = [0.0, 1.0, 0.0, 0.0]  # W, X, Y, Z
             
-            # 1. Move to hover pose and orient straight down over 3 seconds
-            hover_p = [0.4, 0.0, 0.5]
+            # 1. Move to hover pose and orient straight down over the randomized object.
+            object_x = object_pose.pose.position.x if object_pose else 0.4
+            object_y = object_pose.pose.position.y if object_pose else 0.0
+            object_z = object_pose.pose.position.z if object_pose else 0.05
+            hover_p = [object_x, object_y, max(0.35, object_z + self.hover_height)]
             self._move_arm_smooth(
                 start_p, hover_p, duration=self.hover_duration,
                 start_ori=start_q, end_ori=down_q
             )
             
             # 2. Move down to object
-            pick_p = [0.4, 0.0, 0.05]
+            pick_p = [object_x, object_y, max(0.04, object_z + self.pick_height_offset)]
             self._move_arm_smooth(
                 hover_p, pick_p, duration=self.descend_duration,
                 start_ori=down_q, end_ori=down_q
@@ -119,6 +131,46 @@ class BatchGenerator(Node):
         self.get_logger().info('Batch generation completed successfully.')
         import os
         os._exit(0)
+
+    def _reset_scene(self, timeout=5.0):
+        if not self.cli_reset.wait_for_service(timeout_sec=timeout):
+            self.get_logger().warn('/sim/reset_scene unavailable; continuing without scene reset.')
+            return False
+
+        future = self.cli_reset.call_async(Trigger.Request())
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if future.done():
+                try:
+                    result = future.result()
+                    if result and result.success:
+                        self.get_logger().info(f'/sim/reset_scene: {result.message}')
+                    elif result:
+                        self.get_logger().warn(f'/sim/reset_scene failed: {result.message}')
+                    return bool(result and result.success)
+                except Exception as exc:
+                    self.get_logger().warn(f'/sim/reset_scene call failed: {exc}')
+                    return False
+            time.sleep(0.02)
+
+        self.get_logger().warn('/sim/reset_scene timed out; continuing with current scene.')
+        return False
+
+    def _on_object_pose(self, msg):
+        self.latest_object_pose = msg
+
+    def _wait_for_object_pose(self, timeout=3.0):
+        deadline = time.monotonic() + timeout
+        last_pose = self.latest_object_pose
+        while time.monotonic() < deadline:
+            if self.latest_object_pose is not None and self.latest_object_pose is not last_pose:
+                return self.latest_object_pose
+            if self.latest_object_pose is not None and last_pose is None:
+                return self.latest_object_pose
+            time.sleep(0.05)
+        if self.latest_object_pose is None:
+            self.get_logger().warn('No /sim/object_pose received; falling back to nominal pick pose.')
+        return self.latest_object_pose
 
     def _move_arm_smooth(self, start_pos, end_pos, duration=1.0, start_ori=None, end_ori=None):
         steps = int(duration * 100)

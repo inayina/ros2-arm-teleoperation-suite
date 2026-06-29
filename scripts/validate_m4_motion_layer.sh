@@ -47,7 +47,6 @@ trap cleanup EXIT
 
 if [[ "${1:-}" == "--launch" ]]; then
   bash "${ROOT_DIR}/scripts/stop_stack.sh" >/dev/null 2>&1 || true
-  bash "${ROOT_DIR}/scripts/setup_vcan.sh" >/dev/null 2>&1 || true
   log_info "Launching full_system.launch.py in background (new session)..."
   setsid ros2 launch teleop_bringup full_system.launch.py headless:=true \
     > "${LOG_DIR}/full_system.log" 2>&1 &

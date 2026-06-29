@@ -349,11 +349,13 @@ hardware_interface::return_type CanopenSystem::read(
 | `/gripper/state` | `std_msgs/Float64` | 发布 | 当前开合度反馈 |
 
 ```python
-# Modbus 寄存器映射（pymodbus TCP 仿真）
+# Modbus 寄存器映射（Mock 内存仿真，未启用真实 Modbus TCP 端口/服务）
 GRIPPER_TARGET_REG = 0x0040   # Holding: 目标开合度（0~1000 → 0%~100%）
 GRIPPER_STATE_REG  = 0x0041   # Holding: 实际开合度反馈
 GRIPPER_ERROR_REG  = 0x0042   # Holding: 错误状态（0=正常）
 ```
+
+> **注**：当前 `gripper_driver` 仅使用 `MockModbusClient` 在进程内（In-process）进行寄存器 Mock 仿真，并由独立线程模拟一阶物理响应。该实现默认不拉起真实 Modbus TCP 服务或端口，以简化测试依赖。
 
 ---
 
@@ -383,7 +385,7 @@ GRIPPER_ERROR_REG  = 0x0042   # Holding: 错误状态（0=正常）
 
 ## 7. 视觉证明与采集产物
 
-M2 的 README 可见证明图已补到 `media/m2/m2_canopen_fieldbus_proof.svg`，运行证据 PNG 也已补齐，覆盖本里程碑的正常现场总线路径和故障注入路径：
+M2 的 README 可见说明图保留在 `media/m2/m2_canopen_fieldbus_proof.svg`，真实运行证据已刷新到下列 PNG。原始日志保存在 `.media_evidence/m2_20260628_130122/`，用于追溯每张图的来源：
 
 ```text
 canopen_system(use_sim:=false)
@@ -400,13 +402,13 @@ inject_fault()
   → /servo_drive/status = Fault
 ```
 
-运行证据产物如下，采集要求见 [`MEDIA_CAPTURE_PLAN.md`](./MEDIA_CAPTURE_PLAN.md)：
+当前运行证据产物如下，采集要求见 [`MEDIA_CAPTURE_PLAN.md`](./MEDIA_CAPTURE_PLAN.md)：
 
 | 文件 | 证明内容 | 对应验收 |
 |---|---|---|
-| `media/m2/candump_pdo.png` | `candump vcan0` 显示 RPDO/TPDO 周期帧 | AC-2/AC-3 |
-| `media/m2/ds402_state_machine.png` | DS402 状态从 `Switch On Disabled` 进入 `Operation Enabled` | AC-4 |
-| `media/m2/emcy_fault_injection.png` | `/servo_drive/status` 已锁存 `Fault` 状态；当前补图未主动调用新的 `inject_fault` 服务 | AC-6/AC-7 |
+| `media/m2/candump_pdo.png` | `candump -L vcan0` 抓到 105,805 帧 / 4.999s，包含 RPDO1 `0x201-0x207`、TPDO1 `0x181-0x187`、TPDO2 `0x281-0x287` 和 SYNC `0x080` | AC-2/AC-3 |
+| `media/m2/ds402_state_machine.png` | `/servo_drive/status` 显示 7 轴 `ds402_state: 4`、`statusword: 39`、`controlword: 15`、`fault_code: 0` | AC-4 |
+| `media/m2/emcy_fault_injection.png` | `/inject_fault_joint1` 返回成功；`candump` 捕获 `0x081` EMCY 帧 `081#10320000000000`；node 1 进入 `Fault` 且 `fault_code: 12816` (`0x3210`) | AC-6/AC-7 |
 
 ---
 

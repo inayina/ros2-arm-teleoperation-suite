@@ -107,6 +107,8 @@ class TestLeRobotRecorder(unittest.TestCase):
         raw_frame = {
             "observation.images.scene": np.zeros((10, 10, 3), dtype=np.uint8),
             "observation.images.wrist": np.zeros((5, 5, 3), dtype=np.uint8),
+            "observation.images.tactile_left": np.zeros((3, 3, 3), dtype=np.uint8),
+            "observation.images.tactile_right": np.zeros((3, 3, 3), dtype=np.uint8),
             "observation.depth.scene": np.zeros((10, 10), dtype=np.float32),
             "observation.state": [1, 2, 3, 4, 5, 6, 7],
             "observation.ee_pose": (1, 2, 3, 4, 5, 6, 7),
@@ -129,13 +131,17 @@ class TestLeRobotRecorder(unittest.TestCase):
         assert norm["observation.images.scene"].dtype == np.uint8
         assert isinstance(norm["observation.images.wrist"], np.ndarray)
         assert norm["observation.images.wrist"].dtype == np.uint8
+        assert isinstance(norm["observation.images.tactile_left"], np.ndarray)
+        assert norm["observation.images.tactile_left"].dtype == np.uint8
+        assert isinstance(norm["observation.images.tactile_right"], np.ndarray)
+        assert norm["observation.images.tactile_right"].dtype == np.uint8
         assert isinstance(norm["observation.depth.scene"], np.ndarray)
         assert norm["observation.depth.scene"].dtype == np.float32
-        
+
         assert isinstance(norm["observation.state"], list)
         assert isinstance(norm["observation.ee_pose"], list)
         assert isinstance(norm["observation.ft"], list)
-        
+
         assert isinstance(norm["episode_index"], int)
         assert norm["episode_index"] == 5
         assert isinstance(norm["done"], bool)
@@ -148,6 +154,8 @@ class TestLeRobotRecorder(unittest.TestCase):
             frames.append({
                 "observation.images.scene": np.ones((5, 5, 3), dtype=np.uint8) * i,
                 "observation.images.wrist": np.ones((3, 3, 3), dtype=np.uint8) * i,
+                "observation.images.tactile_left": np.ones((2, 2, 3), dtype=np.uint8) * i,
+                "observation.images.tactile_right": np.ones((2, 2, 3), dtype=np.uint8) * i,
                 "observation.depth.scene": np.ones((5, 5), dtype=np.float32) * i,
                 "observation.state": [0.0] * 7,
                 "observation.ee_pose": [0.0] * 7,

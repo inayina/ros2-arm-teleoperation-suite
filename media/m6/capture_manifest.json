@@ -1,7 +1,7 @@
 {
-  "generated_at_unix": 1782724302.069653,
-  "output_dir": "media/m6",
-  "dataset_path": ".m6_validation/episodes/episode_000000/train",
+  "generated_at_unix": 1783237551.663226,
+  "output_dir": "/home/ina/dev/ros2-arm-teleoperation-suite/media/m6",
+  "dataset_path": "/tmp/e2e_integration/e2e_20260705_154427/upstream_raw/episode_000000/train",
   "fresh_files": [
     "camera_rgb_view.png",
     "lerobot_dataset_features.png",

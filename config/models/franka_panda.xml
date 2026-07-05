@@ -18,19 +18,19 @@
       <default class="collision">
         <geom type="mesh" group="3" />
         <default class="fingertip_pad_collision_1">
-          <geom type="box" size="0.0085 0.004 0.0085" pos="0 0.0055 0.0445" friction="2.5 0.02 0.002" condim="6" solref="0.01 1" solimp="0.95 0.99 0.001" />
+          <geom type="box" size="0.018 0.0065 0.020" pos="0 0.0055 0.043" friction="8.0 0.1 0.02" condim="6" solref="0.005 1" solimp="0.98 0.995 0.0005" />
         </default>
         <default class="fingertip_pad_collision_2">
-          <geom type="box" size="0.003 0.002 0.003" pos="0.0055 0.002 0.05" friction="2.5 0.02 0.002" condim="6" solref="0.01 1" solimp="0.95 0.99 0.001" />
+          <geom type="box" size="0.0055 0.003 0.0045" pos="0.009 0.002 0.052" friction="8.0 0.1 0.02" condim="6" solref="0.005 1" solimp="0.98 0.995 0.0005" />
         </default>
         <default class="fingertip_pad_collision_3">
-          <geom type="box" size="0.003 0.002 0.003" pos="-0.0055 0.002 0.05" friction="2.5 0.02 0.002" condim="6" solref="0.01 1" solimp="0.95 0.99 0.001" />
+          <geom type="box" size="0.0055 0.003 0.0045" pos="-0.009 0.002 0.052" friction="8.0 0.1 0.02" condim="6" solref="0.005 1" solimp="0.98 0.995 0.0005" />
         </default>
         <default class="fingertip_pad_collision_4">
-          <geom type="box" size="0.003 0.002 0.0035" pos="0.0055 0.002 0.0395" friction="2.5 0.02 0.002" condim="6" solref="0.01 1" solimp="0.95 0.99 0.001" />
+          <geom type="box" size="0.0055 0.003 0.0055" pos="0.009 0.002 0.034" friction="8.0 0.1 0.02" condim="6" solref="0.005 1" solimp="0.98 0.995 0.0005" />
         </default>
         <default class="fingertip_pad_collision_5">
-          <geom type="box" size="0.003 0.002 0.0035" pos="-0.0055 0.002 0.0395" friction="2.5 0.02 0.002" condim="6" solref="0.01 1" solimp="0.95 0.99 0.001" />
+          <geom type="box" size="0.0055 0.003 0.0055" pos="-0.009 0.002 0.034" friction="8.0 0.1 0.02" condim="6" solref="0.005 1" solimp="0.98 0.995 0.0005" />
         </default>
       </default>
     </default>
@@ -242,7 +242,7 @@
         </body>
       </body>
     </body>
-  <body name="target_object" pos="0.4 0 0.05"><freejoint name="target_object_joint" /><geom name="target_object_geom" type="box" size="0.02 0.02 0.02" rgba="0.1 0.8 0.1 1" mass="0.1" friction="2.5 0.02 0.002" condim="6" solref="0.01 1" solimp="0.95 0.99 0.001" /></body><geom name="floor" type="plane" size="2 2 0.02" material="floor" contype="1" conaffinity="1" /></worldbody>
+  <body name="target_object" pos="0.4 0 0.05"><freejoint name="target_object_joint" /><geom name="target_object_geom" type="box" size="0.028 0.028 0.025" rgba="0.1 0.8 0.1 1" mass="0.04" friction="5.0 0.08 0.01" condim="6" solref="0.005 1" solimp="0.98 0.995 0.0005" /></body><geom name="floor" type="plane" size="2 2 0.02" material="floor" contype="1" conaffinity="1" /></worldbody>
 
   <tendon>
     <fixed name="split">
@@ -256,7 +256,7 @@
   </equality>
 
   <actuator>
-    <motor name="panda_joint1_motor" joint="panda_joint1" gear="1" ctrlrange="-87 87" /><motor name="panda_joint2_motor" joint="panda_joint2" gear="1" ctrlrange="-87 87" /><motor name="panda_joint3_motor" joint="panda_joint3" gear="1" ctrlrange="-87 87" /><motor name="panda_joint4_motor" joint="panda_joint4" gear="1" ctrlrange="-87 87" /><motor name="panda_joint5_motor" joint="panda_joint5" gear="1" ctrlrange="-12 12" /><motor name="panda_joint6_motor" joint="panda_joint6" gear="1" ctrlrange="-12 12" /><motor name="panda_joint7_motor" joint="panda_joint7" gear="1" ctrlrange="-12 12" /><position name="gripper_motor" tendon="split" kp="1000" ctrlrange="0 0.04" /></actuator>
+    <motor name="panda_joint1_motor" joint="panda_joint1" gear="1" ctrlrange="-87 87" /><motor name="panda_joint2_motor" joint="panda_joint2" gear="1" ctrlrange="-87 87" /><motor name="panda_joint3_motor" joint="panda_joint3" gear="1" ctrlrange="-87 87" /><motor name="panda_joint4_motor" joint="panda_joint4" gear="1" ctrlrange="-87 87" /><motor name="panda_joint5_motor" joint="panda_joint5" gear="1" ctrlrange="-12 12" /><motor name="panda_joint6_motor" joint="panda_joint6" gear="1" ctrlrange="-12 12" /><motor name="panda_joint7_motor" joint="panda_joint7" gear="1" ctrlrange="-12 12" /><position name="gripper_motor" tendon="split" kp="4000" ctrlrange="0 0.04" forcerange="-30 30" /></actuator>
 
   <keyframe>
     <key name="home" qpos="0 0 0 -1.57079 0 1.57079 -0.7853 0.04 0.04" ctrl="0 0 0 -1.57079 0 1.57079 -0.7853 255" />

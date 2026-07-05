@@ -49,6 +49,9 @@ def generate_launch_description():
     wrist_camera_height = LaunchConfiguration("wrist_camera_height")
     contact_debug_enabled = LaunchConfiguration("contact_debug_enabled")
     contact_debug_period_s = LaunchConfiguration("contact_debug_period_s")
+    grasp_assist_enabled = LaunchConfiguration("grasp_assist_enabled")
+    watchdog_timeout = LaunchConfiguration("watchdog_timeout")
+    enable_grasp_monitor = LaunchConfiguration("enable_grasp_monitor")
     start_teleop = LaunchConfiguration("start_teleop")
     teleop_driver = LaunchConfiguration("teleop_driver")
 
@@ -68,12 +71,15 @@ def generate_launch_description():
                               "wrist_camera_height": wrist_camera_height,
                               "contact_debug_enabled": contact_debug_enabled,
                               "contact_debug_period_s": contact_debug_period_s,
+                              "grasp_assist_enabled": grasp_assist_enabled,
                           })
     fieldbus = _include("teleop_bringup", "fieldbus.launch.py", common)
     ros2_control = _include(
         "teleop_bringup", "ros2_control.launch.py",
         {**common, "controller": controller})
-    safety = _include("safety_monitor", "safety.launch.py")
+    safety = _include(
+        "safety_monitor", "safety.launch.py",
+        {"watchdog_timeout": watchdog_timeout})
     motion = _include(
         "teleop_bringup", "motion.launch.py",
         {
@@ -93,6 +99,9 @@ def generate_launch_description():
             "auto_record_delay_s": auto_record_delay_s,
         },
         condition=IfCondition(record))
+    grasp_monitor = _include(
+        "teleop_bringup", "grasp_monitor.launch.py",
+        condition=IfCondition(enable_grasp_monitor))
 
     return LaunchDescription([
         DeclareLaunchArgument("use_sim", default_value="true"),
@@ -118,6 +127,17 @@ def generate_launch_description():
         DeclareLaunchArgument("wrist_camera_height", default_value="240"),
         DeclareLaunchArgument("contact_debug_enabled", default_value="false"),
         DeclareLaunchArgument("contact_debug_period_s", default_value="1.0"),
+        DeclareLaunchArgument(
+            "grasp_assist_enabled",
+            default_value="true",
+            description="Enable synthetic grasp assist in MuJoCo. Set false for physics-only grasp validation.",
+        ),
+        DeclareLaunchArgument(
+            "watchdog_timeout",
+            default_value="0.5",
+            description="Teleop heartbeat timeout passed to safety_monitor.",
+        ),
+        DeclareLaunchArgument("enable_grasp_monitor", default_value="false"),
         DeclareLaunchArgument("start_teleop", default_value="true"),
         DeclareLaunchArgument("teleop_driver", default_value="keyboard"),
 
@@ -128,4 +148,5 @@ def generate_launch_description():
         TimerAction(period=6.0, actions=[safety]),
         TimerAction(period=9.0, actions=[motion]),
         TimerAction(period=10.0, actions=[recording]),
+        TimerAction(period=10.0, actions=[grasp_monitor]),
     ])

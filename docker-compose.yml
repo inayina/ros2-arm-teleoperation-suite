@@ -1,0 +1,34 @@
+# Docker Compose for upstream teleoperation suite.
+# Usage:
+#   docker compose run --rm verify
+#   docker compose run --rm teleop-sim
+
+services:
+  teleop-base:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    environment:
+      ROS2_WS_ROOT: /ws
+
+  verify:
+    extends:
+      service: teleop-base
+    working_dir: /ws/src/ros2-arm-teleoperation-suite
+    command:
+      - python3
+      - -m
+      - pytest
+      - tests/
+      - -v
+
+  teleop-sim:
+    extends:
+      service: teleop-base
+    working_dir: /ws/src/ros2-arm-teleoperation-suite
+    command:
+      - ros2
+      - launch
+      - teleop_bringup
+      - m1_control_sim.launch.py
+      - headless:=true

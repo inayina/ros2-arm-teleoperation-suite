@@ -92,6 +92,20 @@ def write_episode(out_dir: str, episode_index: int, frames: list, task: str = "t
     if not frames:
         raise ValueError("cannot write an empty episode")
 
+    # Filter frames to ensure shape consistency across all modalities (discard transient DDS history shapes)
+    from collections import Counter
+    scene_shapes = [np.asarray(f["observation.images.scene"]).shape for f in frames]
+    most_common_scene = Counter(scene_shapes).most_common(1)[0][0]
+    
+    filtered_frames = []
+    for f in frames:
+        if np.asarray(f["observation.images.scene"]).shape == most_common_scene:
+            filtered_frames.append(f)
+    frames = filtered_frames
+
+    if not frames:
+        raise ValueError("no frames left after shape consistency filtering")
+
     os.makedirs(out_dir, exist_ok=True)
     ep_dir = os.path.join(out_dir, f"episode_{episode_index:06d}")
     os.makedirs(ep_dir, exist_ok=True)

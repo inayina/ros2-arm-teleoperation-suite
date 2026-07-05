@@ -35,4 +35,7 @@ MUJOCO_LOG.TXT
 .m4_validation/
 .m5_validation/
 .m6_validation/
+.m7_validation/
+.m7_run_home/
+.m7_run_logs/
 .media_evidence/

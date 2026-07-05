@@ -22,7 +22,8 @@
 
 from ament_index_python.packages import get_package_prefix, PackageNotFoundError
 from launch import LaunchDescription
-from launch.substitutions import PathJoinSubstitution
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -30,14 +31,20 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     pkg = FindPackageShare('safety_monitor')
     safety_params = PathJoinSubstitution([pkg, 'config', 'safety_limits.yaml'])
+    watchdog_timeout = LaunchConfiguration('watchdog_timeout')
 
     actions = [
+        DeclareLaunchArgument(
+            'watchdog_timeout',
+            default_value='0.5',
+            description='Teleop heartbeat timeout in seconds.',
+        ),
         Node(
             package='safety_monitor',
             executable='safety_monitor_node',
             name='safety_monitor',
             output='screen',
-            parameters=[safety_params],
+            parameters=[safety_params, {'watchdog_timeout': watchdog_timeout}],
         ),
     ]
 

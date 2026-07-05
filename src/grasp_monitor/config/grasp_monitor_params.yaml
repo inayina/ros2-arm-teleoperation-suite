@@ -1,0 +1,13 @@
+grasp_monitor:
+  ros__parameters:
+    ready_distance_threshold: 0.08
+    success_distance_threshold: 0.10
+    slip_distance_threshold: 0.12
+    object_drop_threshold: 0.03
+    lift_start_threshold: 0.03
+    success_lift_delta: 0.06
+    success_hold_time: 1.0
+    force_threshold: 2.0
+    open_threshold: 0.6
+    closed_threshold: 0.25
+    debug_publish_rate: 10.0

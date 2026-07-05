@@ -18,6 +18,7 @@ def generate_launch_description():
     wrist_camera_height = LaunchConfiguration("wrist_camera_height")
     contact_debug_enabled = LaunchConfiguration("contact_debug_enabled")
     contact_debug_period_s = LaunchConfiguration("contact_debug_period_s")
+    grasp_assist_enabled = LaunchConfiguration("grasp_assist_enabled")
     return LaunchDescription([
         DeclareLaunchArgument(
             "model_path",
@@ -36,6 +37,11 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_tactile", default_value="true"),
         DeclareLaunchArgument("contact_debug_enabled", default_value="false"),
         DeclareLaunchArgument("contact_debug_period_s", default_value="1.0"),
+        DeclareLaunchArgument(
+            "grasp_assist_enabled",
+            default_value="true",
+            description="Enable synthetic grasp assist that attaches target_object to the end-effector.",
+        ),
         Node(
             package="mujoco_sim",
             executable="mujoco_sim_node",
@@ -47,6 +53,7 @@ def generate_launch_description():
                 "randomize": randomize,
                 "contact_debug_enabled": contact_debug_enabled,
                 "contact_debug_period_s": contact_debug_period_s,
+                "grasp_assist_enabled": grasp_assist_enabled,
             }],
         ),
         Node(

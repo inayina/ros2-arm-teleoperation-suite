@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container:
+      image: osrf/ros:jazzy-desktop
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          apt-get update && apt-get install -y \
+            python3-pip \
+            python3-pytest \
+            python3-colcon-common-extensions \
+            libglfw3-dev \
+            libxxf86vm-dev \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev
+
+      - name: Install python dependencies
+        run: |
+          pip3 install -r requirements.txt --break-system-packages
+
+      - name: Build workspace
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          colcon build
+
+      - name: Run tests
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          . install/setup.sh
+          python3 -m pytest tests/ -v

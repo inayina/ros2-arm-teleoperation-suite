@@ -29,6 +29,7 @@ mkdir -p "${LOG_DIR}"
 export HOME="${M6_HOME:-${LOG_DIR}/home}"
 export ROS_LOG_DIR="${ROS_LOG_DIR:-${LOG_DIR}/ros_logs}"
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
+export ROS_DOMAIN_ID=$((1 + RANDOM % 200))
 if [[ -d "${USER_SITE}" ]]; then
   export PYTHONPATH="${USER_SITE}${PYTHONPATH:+:${PYTHONPATH}}"
 fi
@@ -63,6 +64,7 @@ if [[ "${1:-}" == "--launch" ]]; then
   rm -rf "${OUT_DIR}"
   mkdir -p "${OUT_DIR}"
   log_info "Launching full_system.launch.py with record:=true ..."
+  cd "${ROOT_DIR}"
   setsid ros2 launch teleop_bringup full_system.launch.py \
     headless:=true record:=true output_dir:="${OUT_DIR}" task:="m6_validation" \
     sync_slop:="${M6_SYNC_SLOP:-0.12}" sync_queue_size:="${M6_SYNC_QUEUE_SIZE:-120}" \

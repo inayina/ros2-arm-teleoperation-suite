@@ -31,6 +31,7 @@ def _include(pkg, rel, args=None):
 def generate_launch_description():
     model_path = LaunchConfiguration("model_path")
     can_interface = LaunchConfiguration("can_interface")
+    headless = LaunchConfiguration("headless")
 
     description = _include(
         "teleop_description",
@@ -43,7 +44,10 @@ def generate_launch_description():
     simulation = _include(
         "teleop_bringup",
         "simulation.launch.py",
-        {"model_path": model_path},
+        {
+            "model_path": model_path,
+            "headless": headless,
+        },
     )
     ros2_control = _include(
         "teleop_bringup",
@@ -58,6 +62,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument("model_path", default_value="config/models/franka_panda.xml"),
         DeclareLaunchArgument("can_interface", default_value="vcan0"),
+        DeclareLaunchArgument("headless", default_value="true"),
         description,
         simulation,
         TimerAction(period=2.0, actions=[ros2_control]),

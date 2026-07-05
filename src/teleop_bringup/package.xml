@@ -32,6 +32,7 @@
   <exec_depend>mujoco_sim</exec_depend>
   <exec_depend>camera_bridge</exec_depend>
   <exec_depend>gripper_driver</exec_depend>
+  <exec_depend>grasp_monitor</exec_depend>
   <exec_depend>lerobot_recorder</exec_depend>
   <exec_depend>teleop_moveit_config</exec_depend>
 

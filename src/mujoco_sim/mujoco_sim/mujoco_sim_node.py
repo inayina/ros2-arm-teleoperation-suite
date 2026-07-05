@@ -16,6 +16,7 @@ and actuator name, matching the ros2_control interfaces.
 """
 import math
 import os
+import json
 
 import numpy as np
 
@@ -24,7 +25,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import PoseStamped, WrenchStamped
-from std_msgs.msg import Float64MultiArray, Float64
+from std_msgs.msg import Float64MultiArray, Float64, String
 
 import yaml
 from std_srvs.srv import Trigger
@@ -45,6 +46,7 @@ JOINT_LOWER = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2
 JOINT_UPPER = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973])
 MAX_SIM_TORQUE_NM = np.array([87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0])
 MAX_GRIPPER_OPENING_M = 0.04
+GRIPPER_COMMAND_EPS_M = 1e-5
 FALLBACK_JOINT_ORIGINS = (
     ((0.0, 0.0, 0.333), (0.0, 0.0, 0.0)),
     ((0.0, 0.0, 0.0), (-math.pi / 2.0, 0.0, 0.0)),
@@ -144,8 +146,25 @@ class MujocoSimNode(Node):
         self.declare_parameter("grasp_assist_release_threshold", 0.75)
         self.declare_parameter("grasp_assist_capture_radius", 0.09)
         self.declare_parameter("grasp_assist_hold_offset", [0.0, 0.0, -0.03])
+        self.declare_parameter("gripper_contact_hold_enabled", True)
+        self.declare_parameter("gripper_contact_hold_margin", 0.006)
+        self.declare_parameter("gripper_contact_hold_release_margin", 0.004)
+        self.declare_parameter("gripper_adaptive_force_enabled", True)
+        self.declare_parameter("gripper_force_min_n", 4.0)
+        self.declare_parameter("gripper_force_max_n", 30.0)
+        self.declare_parameter("gripper_force_contact_gain_n", 0.5)
+        self.declare_parameter("gripper_force_lift_gain_n_per_m", 180.0)
+        self.declare_parameter("gripper_force_slip_boost_n", 8.0)
+        self.declare_parameter("gripper_slip_velocity_threshold", 0.002)
+        self.declare_parameter("gripper_contact_drop_boost_threshold", 4)
+        self.declare_parameter("gripper_regrip_rate_mps", 0.006)
+        self.declare_parameter("gripper_force_to_position_enabled", True)
+        self.declare_parameter("gripper_force_position_kp_n_per_m", 4000.0)
+        self.declare_parameter("gripper_force_squeeze_margin_max", 0.006)
+        self.declare_parameter("gripper_force_squeeze_rate_mps", 0.003)
         self.declare_parameter("contact_debug_enabled", False)
         self.declare_parameter("contact_debug_period_s", 1.0)
+        self.declare_parameter("contact_debug_publish_rate", 10.0)
         self.declare_parameter(
             "initial_positions",
             [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785],
@@ -182,6 +201,8 @@ class MujocoSimNode(Node):
         self.joint_qposadr = []
         self.joint_dofadr = []
         self.gripper_qposadr = []
+        self.gripper_dofadr = []
+        self.gripper_joint_ranges = []
         self.actuator_ids = []
         self.ee_site_id = None
         self.target_body_id = None
@@ -193,6 +214,18 @@ class MujocoSimNode(Node):
         self.target_joint_qposadr = None
         self.target_joint_dofadr = None
         self.gripper_cmd = MAX_GRIPPER_OPENING_M
+        self.gripper_effective_cmd = MAX_GRIPPER_OPENING_M
+        self.gripper_contact_hold_target = None
+        self.gripper_force_limit_n = 0.0
+        self.gripper_force_mode = "uninitialized"
+        self.gripper_contact_object_z = None
+        self.object_z_velocity = 0.0
+        self.gripper_contact_drop = 0
+        self.gripper_squeeze_m = 0.0
+        self._last_finger_object_contacts = 0
+        self._gripper_peak_contact_count = 0
+        self._last_object_z = None
+        self._last_object_time_s = None
         self.grasp_assist_enabled = bool(self.get_parameter("grasp_assist_enabled").value)
         self.grasp_close_threshold = float(self.get_parameter("grasp_assist_close_threshold").value)
         self.grasp_release_threshold = float(self.get_parameter("grasp_assist_release_threshold").value)
@@ -202,9 +235,48 @@ class MujocoSimNode(Node):
         self.grasp_attached = False
         self.grasp_offset = self.grasp_hold_offset.copy()
         self.grasp_quat_wxyz = np.array([1.0, 0.0, 0.0, 0.0])
+        self.gripper_contact_hold_enabled = bool(
+            self.get_parameter("gripper_contact_hold_enabled").value)
+        self.gripper_contact_hold_margin = max(
+            0.0, float(self.get_parameter("gripper_contact_hold_margin").value))
+        self.gripper_contact_hold_release_margin = max(
+            GRIPPER_COMMAND_EPS_M,
+            float(self.get_parameter("gripper_contact_hold_release_margin").value))
+        self.gripper_adaptive_force_enabled = bool(
+            self.get_parameter("gripper_adaptive_force_enabled").value)
+        self.gripper_force_min_n = max(
+            0.0, float(self.get_parameter("gripper_force_min_n").value))
+        self.gripper_force_max_n = max(
+            self.gripper_force_min_n,
+            float(self.get_parameter("gripper_force_max_n").value))
+        self.gripper_force_contact_gain_n = max(
+            0.0, float(self.get_parameter("gripper_force_contact_gain_n").value))
+        self.gripper_force_lift_gain_n_per_m = max(
+            0.0, float(self.get_parameter("gripper_force_lift_gain_n_per_m").value))
+        self.gripper_force_slip_boost_n = max(
+            0.0, float(self.get_parameter("gripper_force_slip_boost_n").value))
+        self.gripper_slip_velocity_threshold = max(
+            0.0, float(self.get_parameter("gripper_slip_velocity_threshold").value))
+        self.gripper_contact_drop_boost_threshold = max(
+            1,
+            int(self.get_parameter("gripper_contact_drop_boost_threshold").value))
+        self.gripper_regrip_rate_mps = max(
+            0.0, float(self.get_parameter("gripper_regrip_rate_mps").value))
+        self.gripper_force_to_position_enabled = bool(
+            self.get_parameter("gripper_force_to_position_enabled").value)
+        self.gripper_force_position_kp_n_per_m = max(
+            1.0, float(self.get_parameter("gripper_force_position_kp_n_per_m").value))
+        self.gripper_force_squeeze_margin_max = max(
+            self.gripper_contact_hold_margin,
+            float(self.get_parameter("gripper_force_squeeze_margin_max").value))
+        self.gripper_force_squeeze_rate_mps = max(
+            0.0, float(self.get_parameter("gripper_force_squeeze_rate_mps").value))
+        self.gripper_force_limit_n = self.gripper_force_min_n
         self.contact_debug_enabled = bool(self.get_parameter("contact_debug_enabled").value)
         self.contact_debug_period_s = max(
             0.1, float(self.get_parameter("contact_debug_period_s").value))
+        self.contact_debug_publish_rate = max(
+            0.0, float(self.get_parameter("contact_debug_publish_rate").value))
         self._last_contact_debug_time_s = -self.contact_debug_period_s
         self._try_load_model()
 
@@ -220,10 +292,14 @@ class MujocoSimNode(Node):
         self.pub_ee = self.create_publisher(PoseStamped, "/ee_pose", 10)
         self.pub_obj = self.create_publisher(PoseStamped, "/sim/object_pose", 10)
         self.pub_gripper = self.create_publisher(Float64, "/gripper/state", 10)
+        self.pub_contact_debug = self.create_publisher(String, "/grasp/contact_debug", 10)
 
         self.srv_reset = self.create_service(Trigger, "/sim/reset_scene", self._on_reset)
 
         self.create_timer(1.0 / self.physics_rate, self._step)
+        if self.contact_debug_publish_rate > 0.0:
+            self.create_timer(
+                1.0 / self.contact_debug_publish_rate, self._publish_contact_debug)
         self._pub_decim = max(1, int(self.physics_rate / self.publish_rate))
         self._k = 0
 
@@ -234,6 +310,7 @@ class MujocoSimNode(Node):
         if self.model is not None and _HAS_MUJOCO:
             import mujoco
             self._detach_grasp_assist()
+            self._release_gripper_contact_hold()
             self._set_initial_pose(mujoco)
             self.randomizer.apply(self.model, self.data, mujoco)
             response.success = True
@@ -314,10 +391,18 @@ class MujocoSimNode(Node):
 
         self.gripper_aid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "gripper_motor")
         self.gripper_qposadr = []
+        self.gripper_dofadr = []
+        self.gripper_joint_ranges = []
         for name in FINGER_JOINT_NAMES:
             jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
             if jid >= 0:
                 self.gripper_qposadr.append(int(self.model.jnt_qposadr[jid]))
+                self.gripper_dofadr.append(int(self.model.jnt_dofadr[jid]))
+                self.gripper_joint_ranges.append((
+                    float(self.model.jnt_range[jid][0]),
+                    float(self.model.jnt_range[jid][1]),
+                ))
+        self._set_gripper_force_limit(self.gripper_force_min_n, mode="free")
 
         site_name = self.get_parameter("ee_site").value
         sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, site_name)
@@ -356,6 +441,10 @@ class MujocoSimNode(Node):
             self.data.qpos[adr] = q0[i]
         for adr in self.gripper_qposadr:
             self.data.qpos[adr] = self.gripper_cmd
+        self.gripper_effective_cmd = self.gripper_cmd
+        self._release_gripper_contact_hold()
+        self._reset_object_tracking()
+        self._set_gripper_force_limit(self.gripper_force_min_n, mode="free")
         mujoco.mj_forward(self.model, self.data)
         self.q = np.array([self.data.qpos[adr] for adr in self.joint_qposadr])
         self.qd = np.array([self.data.qvel[adr] for adr in self.joint_dofadr])
@@ -369,6 +458,7 @@ class MujocoSimNode(Node):
         self.gripper_cmd = float(np.clip(msg.data, 0.0, 1.0)) * MAX_GRIPPER_OPENING_M
         if self._gripper_opening_command_normalized() >= self.grasp_release_threshold:
             self._detach_grasp_assist()
+            self._release_gripper_contact_hold()
 
     def _finite_tau(self, tau):
         tau = np.nan_to_num(tau, nan=0.0, posinf=0.0, neginf=0.0)
@@ -397,8 +487,9 @@ class MujocoSimNode(Node):
             for i, aid in enumerate(self.actuator_ids):
                 self.data.ctrl[aid] = self.tau[i]
             if getattr(self, 'gripper_aid', -1) >= 0:
-                self.data.ctrl[self.gripper_aid] = self.gripper_cmd
+                self.data.ctrl[self.gripper_aid] = self._effective_gripper_ctrl()
             mujoco.mj_step(self.model, self.data)
+            self._enforce_gripper_joint_limits(mujoco)
             self._update_grasp_assist(mujoco)
             self._maybe_log_contact_debug(mujoco)
 
@@ -489,11 +580,251 @@ class MujocoSimNode(Node):
     def _gripper_opening_normalized(self):
         if self.model is None or self.data is None or not self.gripper_qposadr:
             return self._gripper_opening_command_normalized()
+        return float(np.clip(self._gripper_opening_m() / MAX_GRIPPER_OPENING_M, 0.0, 1.0))
+
+    def _gripper_opening_m(self):
+        if self.model is None or self.data is None or not self.gripper_qposadr:
+            return float(self.gripper_cmd)
         openings = [float(self.data.qpos[adr]) for adr in self.gripper_qposadr]
-        return float(np.clip(np.mean(openings) / MAX_GRIPPER_OPENING_M, 0.0, 1.0))
+        return float(np.mean(openings))
 
     def _gripper_opening_command_normalized(self):
         return float(np.clip(self.gripper_cmd / MAX_GRIPPER_OPENING_M, 0.0, 1.0))
+
+    def _gripper_effective_command_normalized(self):
+        return float(np.clip(self.gripper_effective_cmd / MAX_GRIPPER_OPENING_M, 0.0, 1.0))
+
+    def _release_gripper_contact_hold(self):
+        self.gripper_contact_hold_target = None
+        self.gripper_contact_object_z = None
+        self.gripper_contact_drop = 0
+        self.gripper_squeeze_m = 0.0
+        self._last_finger_object_contacts = 0
+        self._gripper_peak_contact_count = 0
+
+    def _set_gripper_effective_cmd(self, cmd, opening=None):
+        self.gripper_effective_cmd = float(np.clip(cmd, 0.0, MAX_GRIPPER_OPENING_M))
+        if opening is None:
+            opening = self.gripper_effective_cmd
+        self.gripper_squeeze_m = max(0.0, float(opening) - self.gripper_effective_cmd)
+        return self.gripper_effective_cmd
+
+    def _effective_gripper_ctrl(self):
+        target = float(np.clip(self.gripper_cmd, 0.0, MAX_GRIPPER_OPENING_M))
+        self._set_gripper_effective_cmd(target, target)
+        object_z = self._update_object_tracking()
+        if (
+            not self.gripper_contact_hold_enabled or
+            self.model is None or
+            self.data is None or
+            not self.gripper_qposadr
+        ):
+            self._update_gripper_force_limit(target, target, 0, object_z)
+            return self._set_gripper_effective_cmd(target, target)
+
+        opening = self._gripper_opening_m()
+        contact_count = self._finger_object_contact_count()
+        if contact_count > 0:
+            self._gripper_peak_contact_count = max(
+                self._gripper_peak_contact_count, contact_count)
+        elif self.gripper_contact_hold_target is None:
+            self._gripper_peak_contact_count = 0
+        self.gripper_contact_drop = max(
+            0, self._gripper_peak_contact_count - contact_count)
+        self._last_finger_object_contacts = contact_count
+        self._update_gripper_force_limit(
+            target, opening, contact_count, object_z, self.gripper_contact_drop)
+        hold_target = self.gripper_contact_hold_target
+        if hold_target is not None:
+            if target > hold_target + self.gripper_contact_hold_release_margin:
+                self._release_gripper_contact_hold()
+                self._set_gripper_force_limit(self.gripper_force_min_n, mode="opening")
+                return self._set_gripper_effective_cmd(target, opening)
+            if contact_count > 0:
+                hold_target = self._force_adjusted_gripper_hold_target(
+                    target, opening, hold_target)
+                self.gripper_contact_hold_target = hold_target
+            if (
+                target < hold_target - GRIPPER_COMMAND_EPS_M and
+                contact_count <= 0
+            ):
+                hold_target = max(target, hold_target - self._gripper_regrip_step_m())
+                self.gripper_contact_hold_target = hold_target
+                self._set_gripper_force_limit(
+                    self.gripper_force_max_n,
+                    mode="regrip")
+            return self._set_gripper_effective_cmd(max(target, hold_target), opening)
+
+        if target >= opening - GRIPPER_COMMAND_EPS_M:
+            return self._set_gripper_effective_cmd(target, opening)
+
+        if contact_count <= 0:
+            return self._set_gripper_effective_cmd(target, opening)
+
+        self.gripper_contact_hold_target = max(
+            0.0, opening - self.gripper_contact_hold_margin)
+        self.gripper_contact_hold_target = self._force_adjusted_gripper_hold_target(
+            target, opening, self.gripper_contact_hold_target)
+        return self._set_gripper_effective_cmd(
+            max(target, self.gripper_contact_hold_target), opening)
+
+    def _gripper_regrip_step_m(self):
+        rate = self.gripper_regrip_rate_mps
+        if rate <= 0.0:
+            return 0.0
+        return rate / max(1.0, float(self.physics_rate))
+
+    def _gripper_force_squeeze_step_m(self):
+        rate = self.gripper_force_squeeze_rate_mps
+        if rate <= 0.0:
+            return self.gripper_force_squeeze_margin_max
+        return rate / max(1.0, float(self.physics_rate))
+
+    def _gripper_position_kp_n_per_m(self):
+        if (
+            self.model is not None and
+            getattr(self, "gripper_aid", -1) >= 0 and
+            hasattr(self.model, "actuator_gainprm")
+        ):
+            kp = float(self.model.actuator_gainprm[self.gripper_aid][0])
+            if math.isfinite(kp) and kp > 0.0:
+                return kp
+        return self.gripper_force_position_kp_n_per_m
+
+    def _force_adjusted_gripper_hold_target(self, target, opening, hold_target):
+        if (
+            not self.gripper_force_to_position_enabled or
+            opening <= target + GRIPPER_COMMAND_EPS_M or
+            self.gripper_force_limit_n <= 0.0
+        ):
+            return hold_target
+
+        kp = self._gripper_position_kp_n_per_m()
+        desired_squeeze = self.gripper_force_limit_n / kp
+        desired_squeeze = float(np.clip(
+            desired_squeeze,
+            0.0,
+            self.gripper_force_squeeze_margin_max,
+        ))
+        desired_target = max(target, opening - desired_squeeze)
+        step = self._gripper_force_squeeze_step_m()
+        if desired_target < hold_target:
+            return max(desired_target, hold_target - step)
+        if desired_target > hold_target:
+            return min(desired_target, hold_target + step)
+        return hold_target
+
+    def _reset_object_tracking(self):
+        self.gripper_contact_object_z = None
+        self.object_z_velocity = 0.0
+        self.gripper_contact_drop = 0
+        self.gripper_squeeze_m = 0.0
+        self._last_finger_object_contacts = 0
+        self._gripper_peak_contact_count = 0
+        self._last_object_z = None
+        self._last_object_time_s = None
+
+    def _update_object_tracking(self):
+        obj_pos, _ = self._target_object_pose()
+        if obj_pos is None:
+            return None
+        now_s = self.get_clock().now().nanoseconds * 1e-9
+        object_z = float(obj_pos[2])
+        if self._last_object_z is not None and self._last_object_time_s is not None:
+            dt = now_s - self._last_object_time_s
+            if dt > 1e-6:
+                self.object_z_velocity = (object_z - self._last_object_z) / dt
+        self._last_object_z = object_z
+        self._last_object_time_s = now_s
+        return object_z
+
+    def _update_gripper_force_limit(
+        self, target, opening, contact_count, object_z, contact_drop=0):
+        if not self.gripper_adaptive_force_enabled:
+            self._set_gripper_force_limit(self.gripper_force_max_n, mode="fixed")
+            return
+
+        closing = target < opening - GRIPPER_COMMAND_EPS_M
+        opening_cmd = target > opening + self.gripper_contact_hold_release_margin
+        if opening_cmd or not closing:
+            if opening_cmd:
+                self.gripper_contact_object_z = None
+            self._set_gripper_force_limit(self.gripper_force_min_n, mode="opening" if opening_cmd else "idle")
+            return
+
+        if contact_count <= 0:
+            if self.gripper_contact_hold_target is not None and closing:
+                force = max(
+                    self.gripper_force_limit_n,
+                    self.gripper_force_min_n + self.gripper_force_slip_boost_n,
+                )
+                self._set_gripper_force_limit(force, mode="lost_contact")
+                return
+            self._set_gripper_force_limit(self.gripper_force_min_n, mode="approach")
+            return
+
+        if object_z is not None and self.gripper_contact_object_z is None:
+            self.gripper_contact_object_z = object_z
+
+        lifted = 0.0
+        if object_z is not None and self.gripper_contact_object_z is not None:
+            lifted = max(0.0, object_z - self.gripper_contact_object_z)
+
+        force = (
+            self.gripper_force_min_n +
+            self.gripper_force_contact_gain_n * float(contact_count) +
+            self.gripper_force_lift_gain_n_per_m * lifted
+        )
+        if self.gripper_contact_hold_target is not None:
+            force = max(force, self.gripper_force_limit_n)
+        mode = "hold"
+        if (
+            self.gripper_contact_hold_target is not None and
+            lifted > 0.005 and
+            contact_drop >= self.gripper_contact_drop_boost_threshold
+        ):
+            force += self.gripper_force_slip_boost_n
+            mode = "contact_drop_boost"
+        elif self.object_z_velocity < -self.gripper_slip_velocity_threshold:
+            force += self.gripper_force_slip_boost_n
+            mode = "slip_boost"
+        elif lifted > 0.01:
+            mode = "lift_hold"
+
+        self._set_gripper_force_limit(force, mode=mode)
+
+    def _set_gripper_force_limit(self, limit_n, mode=None):
+        limit = float(np.clip(limit_n, self.gripper_force_min_n, self.gripper_force_max_n))
+        self.gripper_force_limit_n = limit
+        if mode is not None:
+            self.gripper_force_mode = str(mode)
+        if (
+            self.model is None or
+            getattr(self, "gripper_aid", -1) < 0 or
+            not hasattr(self.model, "actuator_forcerange")
+        ):
+            return
+        self.model.actuator_forcerange[self.gripper_aid][0] = -limit
+        self.model.actuator_forcerange[self.gripper_aid][1] = limit
+        if hasattr(self.model, "actuator_forcelimited"):
+            self.model.actuator_forcelimited[self.gripper_aid] = 1
+
+    def _enforce_gripper_joint_limits(self, mujoco):
+        changed = False
+        for idx, adr in enumerate(self.gripper_qposadr):
+            if idx < len(self.gripper_joint_ranges):
+                lower, upper = self.gripper_joint_ranges[idx]
+            else:
+                lower, upper = 0.0, MAX_GRIPPER_OPENING_M
+            q = float(self.data.qpos[adr])
+            clamped = float(np.clip(q, lower, upper))
+            if abs(clamped - q) > 1e-9:
+                self.data.qpos[adr] = clamped
+                if idx < len(self.gripper_dofadr):
+                    self.data.qvel[self.gripper_dofadr[idx]] = 0.0
+                changed = True
+        if changed:
+            mujoco.mj_forward(self.model, self.data)
 
     def _detach_grasp_assist(self):
         self.grasp_attached = False
@@ -562,37 +893,109 @@ class MujocoSimNode(Node):
             return
         self._last_contact_debug_time_s = now_s
 
+        payload = self._contact_debug_payload(mujoco)
         obj_pos, _ = self._target_object_pose()
         ee_pos = self._ee_position()
-        if obj_pos is not None and ee_pos is not None:
-            dist = float(np.linalg.norm(obj_pos - ee_pos))
-        else:
-            dist = math.nan
         gripper_qpos = [float(self.data.qpos[adr]) for adr in self.gripper_qposadr]
         gripper_ctrl = (
             float(self.data.ctrl[self.gripper_aid])
             if getattr(self, "gripper_aid", -1) >= 0 else math.nan
         )
         arm_ctrl = [float(self.data.ctrl[aid]) for aid in self.actuator_ids]
-        total_contacts, object_contacts, finger_object_contacts, samples = (
-            self._contact_debug_summary(mujoco)
-        )
+        dist_text = self._fmt_json_number(payload["ee_object_dist"])
+        opening_text = self._fmt_json_number(payload["gripper_opening"])
+        cmd_text = self._fmt_json_number(payload["gripper_cmd"])
 
         self.get_logger().info(
             "M7 grasp debug "
             f"object_pos={self._fmt_vec(obj_pos)} "
             f"ee_pos={self._fmt_vec(ee_pos)} "
-            f"ee_object_dist={dist:.3f} "
+            f"ee_object_dist={dist_text} "
             f"gripper_qpos={self._fmt_vec(gripper_qpos)} "
-            f"gripper_cmd={self._gripper_opening_command_normalized():.3f} "
+            f"gripper_opening={opening_text} "
+            f"gripper_cmd={cmd_text} "
+            f"gripper_effective_cmd={self._fmt_json_number(payload['gripper_effective_cmd'])} "
+            f"gripper_contact_hold_target={self._fmt_json_number(payload['gripper_contact_hold_target'])} "
+            f"gripper_force_limit_n={self._fmt_json_number(payload['gripper_force_limit_n'])} "
+            f"gripper_force_mode={payload['gripper_force_mode']} "
+            f"object_z_velocity={self._fmt_json_number(payload['object_z_velocity'])} "
+            f"gripper_contact_drop={payload['gripper_contact_drop']} "
+            f"gripper_squeeze_m={self._fmt_json_number(payload['gripper_squeeze_m'])} "
             f"gripper_ctrl={gripper_ctrl:.4f} "
             f"arm_ctrl={self._fmt_vec(arm_ctrl)} "
-            f"contacts_total={total_contacts} "
-            f"object_contacts={object_contacts} "
-            f"finger_object_contacts={finger_object_contacts} "
-            f"grasp_assist_attached={self.grasp_attached} "
-            f"contact_samples={samples}"
+            f"contacts_total={payload['contacts_total']} "
+            f"object_contacts={payload['object_contacts']} "
+            f"finger_object_contacts={payload['finger_object_contacts']} "
+            f"grasp_assist_attached={payload['grasp_assist_attached']} "
+            f"contact_samples={payload['contact_samples']}"
         )
+
+    def _publish_contact_debug(self):
+        msg = String()
+        if self.model is None or self.data is None:
+            msg.data = json.dumps(
+                self._fallback_contact_debug_payload(), sort_keys=True,
+                allow_nan=False)
+            self.pub_contact_debug.publish(msg)
+            return
+        import mujoco
+        msg.data = json.dumps(
+            self._contact_debug_payload(mujoco), sort_keys=True, allow_nan=False)
+        self.pub_contact_debug.publish(msg)
+
+    def _fallback_contact_debug_payload(self):
+        return {
+            "timestamp": self.get_clock().now().nanoseconds * 1e-9,
+            "ee_object_dist": None,
+            "gripper_opening": self._json_number(
+                self._gripper_opening_command_normalized()),
+            "gripper_cmd": self._json_number(self._gripper_opening_command_normalized()),
+            "gripper_effective_cmd": self._json_number(
+                self._gripper_effective_command_normalized()),
+            "gripper_contact_hold_target": None,
+            "gripper_force_limit_n": self._json_number(self.gripper_force_limit_n),
+            "gripper_force_mode": str(self.gripper_force_mode),
+            "object_z_velocity": self._json_number(self.object_z_velocity),
+            "gripper_contact_drop": int(self.gripper_contact_drop),
+            "gripper_squeeze_m": self._json_number(self.gripper_squeeze_m),
+            "contacts_total": 0,
+            "object_contacts": 0,
+            "finger_object_contacts": 0,
+            "grasp_assist_attached": False,
+            "contact_samples": [],
+        }
+
+    def _contact_debug_payload(self, mujoco):
+        obj_pos, _ = self._target_object_pose()
+        ee_pos = self._ee_position()
+        if obj_pos is not None and ee_pos is not None:
+            dist = float(np.linalg.norm(obj_pos - ee_pos))
+        else:
+            dist = math.nan
+        total_contacts, object_contacts, finger_object_contacts, samples = (
+            self._contact_debug_summary(mujoco)
+        )
+        return {
+            "timestamp": self.get_clock().now().nanoseconds * 1e-9,
+            "ee_object_dist": self._json_number(dist),
+            "gripper_opening": self._json_number(self._gripper_opening_normalized()),
+            "gripper_cmd": self._json_number(self._gripper_opening_command_normalized()),
+            "gripper_effective_cmd": self._json_number(
+                self._gripper_effective_command_normalized()),
+            "gripper_contact_hold_target": self._json_number(
+                self.gripper_contact_hold_target / MAX_GRIPPER_OPENING_M)
+            if self.gripper_contact_hold_target is not None else None,
+            "gripper_force_limit_n": self._json_number(self.gripper_force_limit_n),
+            "gripper_force_mode": str(self.gripper_force_mode),
+            "object_z_velocity": self._json_number(self.object_z_velocity),
+            "gripper_contact_drop": int(self.gripper_contact_drop),
+            "gripper_squeeze_m": self._json_number(self.gripper_squeeze_m),
+            "contacts_total": total_contacts,
+            "object_contacts": object_contacts,
+            "finger_object_contacts": finger_object_contacts,
+            "grasp_assist_attached": bool(self.grasp_attached),
+            "contact_samples": samples,
+        }
 
     def _contact_debug_summary(self, mujoco):
         total_contacts = int(self.data.ncon)
@@ -610,13 +1013,35 @@ class MujocoSimNode(Node):
             has_finger = geom1 in self.finger_geom_ids or geom2 in self.finger_geom_ids
             if has_object:
                 object_contacts += 1
-                if len(samples) < 4:
-                    samples.append(
-                        f"{self._geom_name(mujoco, geom1)}:{self._geom_name(mujoco, geom2)}"
-                    )
+                sample = f"{self._geom_name(mujoco, geom1)}:{self._geom_name(mujoco, geom2)}"
+                if has_finger:
+                    if sample not in samples:
+                        samples.insert(0, sample)
+                        samples = samples[:4]
+                elif len(samples) < 4:
+                    samples.append(sample)
             if has_object and has_finger:
                 finger_object_contacts += 1
         return total_contacts, object_contacts, finger_object_contacts, samples
+
+    def _finger_object_contact_count(self):
+        if (
+            self.target_geom_id is None or
+            self.target_geom_id < 0 or
+            self.data is None
+        ):
+            return 0
+        count = 0
+        for idx in range(int(self.data.ncon)):
+            contact = self.data.contact[idx]
+            geom1 = int(contact.geom1)
+            geom2 = int(contact.geom2)
+            if (
+                self.target_geom_id in (geom1, geom2) and
+                (geom1 in self.finger_geom_ids or geom2 in self.finger_geom_ids)
+            ):
+                count += 1
+        return count
 
     def _log_grasp_model_params(self, mujoco):
         target = self.target_geom_id
@@ -651,6 +1076,15 @@ class MujocoSimNode(Node):
         if values is None:
             return "None"
         return "[" + ", ".join(f"{float(v):.{precision}f}" for v in values) + "]"
+
+    def _json_number(self, value):
+        value = float(value)
+        return value if math.isfinite(value) else None
+
+    def _fmt_json_number(self, value, precision=3):
+        if value is None:
+            return "nan"
+        return f"{float(value):.{precision}f}"
 
     def _read_sensor3(self, sensor_id):
         if sensor_id is None or sensor_id < 0:

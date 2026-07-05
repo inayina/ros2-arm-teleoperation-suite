@@ -15,8 +15,11 @@ class BatchGenerator(Node):
         self.declare_parameter('seed', 42)
         self.declare_parameter('hover_duration', 3.0)
         self.declare_parameter('descend_duration', 2.5)
+        self.declare_parameter('close_duration', 1.0)
         self.declare_parameter('grasp_pause', 1.0)
         self.declare_parameter('lift_duration', 2.0)
+        self.declare_parameter('lift_target_z', 0.0)
+        self.declare_parameter('post_lift_hold', 0.0)
         self.declare_parameter('hover_height', 0.45)
         self.declare_parameter('pick_height_offset', 0.05)
         self.declare_parameter('reset_timeout', 5.0)
@@ -25,8 +28,11 @@ class BatchGenerator(Node):
         self.seed = self.get_parameter('seed').value
         self.hover_duration = float(self.get_parameter('hover_duration').value)
         self.descend_duration = float(self.get_parameter('descend_duration').value)
+        self.close_duration = float(self.get_parameter('close_duration').value)
         self.grasp_pause = float(self.get_parameter('grasp_pause').value)
         self.lift_duration = float(self.get_parameter('lift_duration').value)
+        self.lift_target_z = float(self.get_parameter('lift_target_z').value)
+        self.post_lift_hold = float(self.get_parameter('post_lift_hold').value)
         self.hover_height = float(self.get_parameter('hover_height').value)
         self.pick_height_offset = float(self.get_parameter('pick_height_offset').value)
         self.reset_timeout = float(self.get_parameter('reset_timeout').value)
@@ -86,6 +92,7 @@ class BatchGenerator(Node):
                 pass
             
             # 2. Start Recording
+            self.pub_grip.publish(Float64(data=1.0))
             self.pub_rec.publish(String(data='start'))
             time.sleep(0.5)
 
@@ -112,15 +119,21 @@ class BatchGenerator(Node):
                 start_ori=down_q, end_ori=down_q
             )
             
-            # 3. Close gripper
-            self.pub_grip.publish(Float64(data=0.0))
+            # 3. Close gripper smoothly while holding the pick pose.
+            self._move_gripper_smooth(1.0, 0.0, duration=self.close_duration)
             time.sleep(self.grasp_pause)
             
-            # 4. Move up
+            # 4. Move up. A positive lift_target_z lets physics-only demos stop
+            # below the high hover pose after a stable lift.
+            lift_p = hover_p
+            if self.lift_target_z > 0.0:
+                lift_p = [object_x, object_y, self.lift_target_z]
             self._move_arm_smooth(
-                pick_p, hover_p, duration=self.lift_duration,
+                pick_p, lift_p, duration=self.lift_duration,
                 start_ori=down_q, end_ori=down_q
             )
+            if self.post_lift_hold > 0.0:
+                time.sleep(self.post_lift_hold)
             
             # 4. Stop Recording
             self.pub_rec.publish(String(data='stop'))
@@ -220,6 +233,16 @@ class BatchGenerator(Node):
             msg.pose.orientation.x = 1.0
             msg.pose.orientation.w = 0.0
         self.pub_pose.publish(msg)
+
+    def _move_gripper_smooth(self, start, end, duration=1.0):
+        duration = max(0.01, float(duration))
+        steps = max(1, int(duration * 50))
+        dt = duration / steps
+        for i in range(steps):
+            alpha = (i + 1) / float(steps)
+            cmd = float(start) * (1.0 - alpha) + float(end) * alpha
+            self.pub_grip.publish(Float64(data=cmd))
+            time.sleep(dt)
 
 def main(args=None):
     rclpy.init(args=args)

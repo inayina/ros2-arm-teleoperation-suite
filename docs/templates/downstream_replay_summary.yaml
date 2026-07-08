@@ -1,0 +1,49 @@
+# Downstream replay/deployment summary that can safely flow back upstream.
+schema_version: downstream_replay_summary_v0
+summary_id: replay_YYYYMMDD_short_name
+created_at: YYYY-MM-DDTHH:MM:SSZ
+source_repo: ros2-moveit-pybullet-bridge
+target_repos:
+  - ros2-arm-teleoperation-suite
+  - robot-arm-episode-data-lab
+
+handoff:
+  handoff_id: example_handoff_id
+  dataset_release_id: example_release_id
+  policy_id: example_policy_id
+  schema_id: panda_ee_delta_gripper_v0
+  action_type: ee_delta_gripper
+
+runtime_io:
+  command_topic: /bridge/command
+  control_rate_hz: 50
+  action_dim: 7
+  frame_convention: ROS xyzw quaternion
+  gripper_range_m: [0.0, 0.08]
+
+result:
+  status: pass  # pass | watch | fail
+  replayed_steps: 0
+  planning_failures: 0
+  action_limit_violations: 0
+  e_stop_or_hold_events: 0
+  max_tracking_error_rad: null
+  mean_tracking_error_rad: null
+
+failure_modes:
+  - type: example_failure
+    count: 0
+    likely_owner: upstream  # upstream | middle | downstream | unknown
+    evidence: Short evidence summary.
+
+feedback_requests:
+  upstream: []
+  middle: []
+
+artifact_policy:
+  attach_only_small_reports: true
+  do_not_attach:
+    - full replay logs
+    - videos
+    - rollout datasets
+    - checkpoint binaries

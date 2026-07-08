@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Initialize MoveIt Servo for pose tracking with service waits and retries."""
+"""Initialize MoveIt Servo for pose or twist tracking with service waits and retries."""
 
 import argparse
 import sys
@@ -9,6 +9,11 @@ import rclpy
 from moveit_msgs.srv import ServoCommandType
 from rclpy.node import Node
 from std_srvs.srv import SetBool
+
+COMMAND_TYPES = {
+    "twist": getattr(ServoCommandType.Request, "TWIST", 1),
+    "pose": getattr(ServoCommandType.Request, "POSE", 2),
+}
 
 
 def _service_name(node_name: str, service: str) -> str:
@@ -48,6 +53,8 @@ def main(argv=None) -> int:
     parser.add_argument("--servo-node", default="/servo_node")
     parser.add_argument("--joint-target-topic", default="/joint_target")
     parser.add_argument("--pose-input-topic", default="/safe_master_pose")
+    parser.add_argument("--twist-input-topic", default="/safe_master_twist")
+    parser.add_argument("--command-type", default="pose", choices=sorted(COMMAND_TYPES))
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--retries", type=int, default=6)
     args = parser.parse_args(argv)
@@ -55,16 +62,19 @@ def main(argv=None) -> int:
     rclpy.init()
     node = Node("servo_startup_initializer")
     deadline = time.monotonic() + args.timeout
-    pose_constant = getattr(ServoCommandType.Request, "POSE", 2)
+    command_constant = COMMAND_TYPES[args.command_type]
+    input_topic = (
+        args.twist_input_topic if args.command_type == "twist" else args.pose_input_topic
+    )
 
     try:
-        if args.pose_input_topic:
-            if _wait_for_publishers(node, args.pose_input_topic, min(5.0, _remaining(deadline))):
-                node.get_logger().info(f"Detected pose input publisher on {args.pose_input_topic}.")
+        if input_topic:
+            if _wait_for_publishers(node, input_topic, min(5.0, _remaining(deadline))):
+                node.get_logger().info(f"Detected input publisher on {input_topic}.")
             else:
                 node.get_logger().warn(
-                    f"No publisher detected on {args.pose_input_topic} yet; "
-                    "Servo will still be switched to pose mode."
+                    f"No publisher detected on {input_topic} yet; "
+                    f"Servo will still be switched to {args.command_type} mode."
                 )
 
         pause_client = node.create_client(SetBool, _service_name(args.servo_node, "pause_servo"))
@@ -86,13 +96,15 @@ def main(argv=None) -> int:
                 node.get_logger().warn(f"Attempt {attempt}: pause_servo returned: {pause_res.message}")
 
             switch_req = ServoCommandType.Request()
-            switch_req.command_type = pose_constant
+            switch_req.command_type = command_constant
             switch_res = _call_service(node, switch_client, switch_req, min(5.0, _remaining(deadline)))
             last_switch_success = bool(switch_res is not None and switch_res.success)
             if not last_switch_success:
                 node.get_logger().warn(f"Attempt {attempt}: switch_command_type did not succeed.")
             else:
-                node.get_logger().info(f"Attempt {attempt}: Servo command type set to POSE.")
+                node.get_logger().info(
+                    f"Attempt {attempt}: Servo command type set to {args.command_type.upper()}."
+                )
 
             if _wait_for_publishers(node, args.joint_target_topic, min(2.0, _remaining(deadline))):
                 node.get_logger().info(
@@ -106,11 +118,11 @@ def main(argv=None) -> int:
         if last_switch_success:
             node.get_logger().warn(
                 "Servo services succeeded, but no joint target publisher was detected. "
-                "It should appear once pose commands are flowing."
+                "It should appear once commands are flowing."
             )
             return 0
 
-        node.get_logger().error("Failed to initialize MoveIt Servo pose mode.")
+        node.get_logger().error(f"Failed to initialize MoveIt Servo {args.command_type} mode.")
         return 1
     finally:
         node.destroy_node()

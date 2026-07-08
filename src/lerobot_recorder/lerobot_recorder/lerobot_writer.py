@@ -46,6 +46,8 @@ def _episode_features(first_frame: dict) -> "Features":
         "frame_index": Value("int64"),
         "done": Value("bool"),
         "task": Value("string"),
+        "language_instruction": Value("string"),
+        "success": Value("bool"),
         "safety_estop": Value("bool"),
         "drive_fault": Value("bool"),
     })
@@ -82,12 +84,21 @@ def _normalize_frame(frame: dict) -> dict:
     normalized["frame_index"] = int(frame["frame_index"])
     normalized["done"] = bool(frame["done"])
     normalized["task"] = str(frame["task"])
+    normalized["language_instruction"] = str(frame["language_instruction"])
+    normalized["success"] = bool(frame.get("success", True))
     normalized["safety_estop"] = bool(frame["safety_estop"])
     normalized["drive_fault"] = bool(frame["drive_fault"])
     return normalized
 
 
-def write_episode(out_dir: str, episode_index: int, frames: list, task: str = "teleop") -> str:
+def write_episode(
+    out_dir: str,
+    episode_index: int,
+    frames: list,
+    task: str = "teleop",
+    success: bool = True,
+    metadata: dict | None = None,
+) -> str:
     """Write one episode and return the loadable dataset path."""
     if not frames:
         raise ValueError("cannot write an empty episode")
@@ -111,6 +122,8 @@ def write_episode(out_dir: str, episode_index: int, frames: list, task: str = "t
     os.makedirs(ep_dir, exist_ok=True)
     train_dir = os.path.join(ep_dir, "train")
 
+    for frame in frames:
+        frame["success"] = bool(success)
     frames[-1]["done"] = True
     normalized = [_normalize_frame(frame) for frame in frames]
 
@@ -128,6 +141,8 @@ def write_episode(out_dir: str, episode_index: int, frames: list, task: str = "t
         np.savez_compressed(os.path.join(train_dir, "frames.npz"), **flat)
 
     with open(os.path.join(ep_dir, "meta.json"), "w", encoding="utf-8") as fh:
+        episode_metadata = dict(metadata or {})
+        upstream_gate = str(episode_metadata.pop("upstream_gate", "teleop"))
         json.dump(
             {
                 "task": task,
@@ -136,6 +151,9 @@ def write_episode(out_dir: str, episode_index: int, frames: list, task: str = "t
                 "dataset_path": train_dir,
                 "saved_unix_time": time.time(),
                 "format": "huggingface_dataset" if _HAS_DATASETS else "npz_fallback",
+                "success": bool(success),
+                "upstream_gate": upstream_gate,
+                "metadata": episode_metadata,
             },
             fh,
             indent=2,

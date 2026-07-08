@@ -133,6 +133,7 @@ class MujocoSimNode(Node):
     def __init__(self):
         super().__init__("mujoco_sim")
         self.declare_parameter("model_path", "config/models/franka_panda.xml")
+        self.declare_parameter("target_object_name", "object_red_box")
         self.declare_parameter("headless", True)
         self.declare_parameter("randomize", True)
         self.declare_parameter("randomization_path", "config/randomization.yaml")
@@ -216,6 +217,8 @@ class MujocoSimNode(Node):
         self.gripper_cmd = MAX_GRIPPER_OPENING_M
         self.gripper_effective_cmd = MAX_GRIPPER_OPENING_M
         self.gripper_contact_hold_target = None
+        # Opening at first finger contact; hold must not chase a shrinking measured opening.
+        self.gripper_contact_opening_m = None
         self.gripper_force_limit_n = 0.0
         self.gripper_force_mode = "uninitialized"
         self.gripper_contact_object_z = None
@@ -278,6 +281,7 @@ class MujocoSimNode(Node):
         self.contact_debug_publish_rate = max(
             0.0, float(self.get_parameter("contact_debug_publish_rate").value))
         self._last_contact_debug_time_s = -self.contact_debug_period_s
+        self._last_target_object_name = ""
         self._try_load_model()
 
         self.sub_effort = self.create_subscription(
@@ -314,7 +318,7 @@ class MujocoSimNode(Node):
             self._set_initial_pose(mujoco)
             self.randomizer.apply(self.model, self.data, mujoco)
             response.success = True
-            response.message = "Scene reset and randomized."
+            response.message = "Scene reset; objects restored to table."
             self.get_logger().info("Reset scene triggered.")
         else:
             response.success = False
@@ -372,6 +376,23 @@ class MujocoSimNode(Node):
         self.qd = np.zeros(self.n)
         self.tau = np.zeros(self.n)
 
+    def _update_target_ids(self, target_name):
+        if self.model is None:
+            return
+        import mujoco
+        self.target_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, target_name)
+        geom_name = target_name.replace("object_", "") + "_geom"
+        self.target_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, geom_name)
+        joint_name = target_name.replace("object_", "") + "_joint"
+        target_joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+        if target_joint_id >= 0:
+            self.target_joint_qposadr = int(self.model.jnt_qposadr[target_joint_id])
+            self.target_joint_dofadr = int(self.model.jnt_dofadr[target_joint_id])
+        else:
+            self.target_joint_qposadr = None
+            self.target_joint_dofadr = None
+        self.get_logger().info(f"Target object mapping updated: name={target_name}, body={self.target_body_id}, geom={self.target_geom_id}, joint={target_joint_id}")
+
     def _build_mujoco_name_maps(self, mujoco):
         self.joint_qposadr = []
         self.joint_dofadr = []
@@ -409,14 +430,9 @@ class MujocoSimNode(Node):
         if sid >= 0:
             self.ee_site_id = sid
 
-        self.target_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "target_object")
-        self.target_geom_id = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_GEOM, "target_object_geom")
-        target_joint_id = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_JOINT, "target_object_joint")
-        if target_joint_id >= 0:
-            self.target_joint_qposadr = int(self.model.jnt_qposadr[target_joint_id])
-            self.target_joint_dofadr = int(self.model.jnt_dofadr[target_joint_id])
+        target_name = self.get_parameter("target_object_name").value
+        self._last_target_object_name = target_name
+        self._update_target_ids(target_name)
 
         self.finger_body_ids = [
             bid for bid in (
@@ -455,8 +471,15 @@ class MujocoSimNode(Node):
             self.tau = self._finite_tau(d[: self.n])
 
     def _on_grip(self, msg: Float64):
+        previous_cmd = float(self.gripper_cmd)
         self.gripper_cmd = float(np.clip(msg.data, 0.0, 1.0)) * MAX_GRIPPER_OPENING_M
-        if self._gripper_opening_command_normalized() >= self.grasp_release_threshold:
+        # Only clear contact-hold when the operator is opening (rising cmd). Clearing on
+        # any open-ish command drops the latch mid-close and lets fingers crush/eject.
+        opening_intent = self.gripper_cmd >= previous_cmd - GRIPPER_COMMAND_EPS_M
+        if (
+            opening_intent and
+            self._gripper_opening_command_normalized() >= self.grasp_release_threshold
+        ):
             self._detach_grasp_assist()
             self._release_gripper_contact_hold()
 
@@ -473,6 +496,11 @@ class MujocoSimNode(Node):
         self.qd = np.nan_to_num(self.qd, nan=0.0, posinf=0.0, neginf=0.0)
 
     def _step(self):
+        current_target = self.get_parameter("target_object_name").value
+        if current_target != self._last_target_object_name:
+            self._last_target_object_name = current_target
+            self._update_target_ids(current_target)
+
         dt = 1.0 / self.physics_rate
         self.tau = self._finite_tau(self.tau)
         if self.model is not None:
@@ -596,6 +624,7 @@ class MujocoSimNode(Node):
 
     def _release_gripper_contact_hold(self):
         self.gripper_contact_hold_target = None
+        self.gripper_contact_opening_m = None
         self.gripper_contact_object_z = None
         self.gripper_contact_drop = 0
         self.gripper_squeeze_m = 0.0
@@ -641,26 +670,39 @@ class MujocoSimNode(Node):
                 self._set_gripper_force_limit(self.gripper_force_min_n, mode="opening")
                 return self._set_gripper_effective_cmd(target, opening)
             if contact_count > 0:
+                if self.gripper_contact_opening_m is None:
+                    self.gripper_contact_opening_m = float(opening)
                 hold_target = self._force_adjusted_gripper_hold_target(
                     target, opening, hold_target)
                 self.gripper_contact_hold_target = hold_target
-            if (
-                target < hold_target - GRIPPER_COMMAND_EPS_M and
-                contact_count <= 0
-            ):
-                hold_target = max(target, hold_target - self._gripper_regrip_step_m())
-                self.gripper_contact_hold_target = hold_target
+            # On brief contact loss keep the last hold opening. Continuous
+            # regrip-closing ejects the object (M7 lesson: contact_drop may
+            # boost force, must not keep squeezing shut).
+            if contact_count <= 0 and self.gripper_contact_drop > 0:
                 self._set_gripper_force_limit(
                     self.gripper_force_max_n,
-                    mode="regrip")
+                    mode="lost_contact")
             return self._set_gripper_effective_cmd(max(target, hold_target), opening)
 
         if target >= opening - GRIPPER_COMMAND_EPS_M:
+            # Still latch first contact while mostly-open command settles, otherwise the
+            # hold never engages until the fingers have already under-shot the cube.
+            if contact_count > 0 and self.gripper_contact_hold_target is None:
+                self.gripper_contact_opening_m = float(opening)
+                self.gripper_contact_hold_target = max(
+                    0.0, opening - self.gripper_contact_hold_margin)
+                self.gripper_contact_hold_target = self._force_adjusted_gripper_hold_target(
+                    target, opening, self.gripper_contact_hold_target)
+                return self._set_gripper_effective_cmd(
+                    max(target, self.gripper_contact_hold_target), opening)
             return self._set_gripper_effective_cmd(target, opening)
 
         if contact_count <= 0:
             return self._set_gripper_effective_cmd(target, opening)
 
+        # Latch the measured opening at first contact so subsequent squeeze uses a
+        # stable reference instead of the fingers' current (shrinking) opening.
+        self.gripper_contact_opening_m = float(opening)
         self.gripper_contact_hold_target = max(
             0.0, opening - self.gripper_contact_hold_margin)
         self.gripper_contact_hold_target = self._force_adjusted_gripper_hold_target(
@@ -699,6 +741,15 @@ class MujocoSimNode(Node):
         ):
             return hold_target
 
+        # Prefer the first-contact opening. Using the live opening lets hold_target
+        # chase shrinking qpos and eject the cube sideways.
+        contact_opening = self.gripper_contact_opening_m
+        if contact_opening is None:
+            contact_opening = float(opening)
+            self.gripper_contact_opening_m = contact_opening
+        else:
+            contact_opening = float(contact_opening)
+
         kp = self._gripper_position_kp_n_per_m()
         desired_squeeze = self.gripper_force_limit_n / kp
         desired_squeeze = float(np.clip(
@@ -706,7 +757,10 @@ class MujocoSimNode(Node):
             0.0,
             self.gripper_force_squeeze_margin_max,
         ))
-        desired_target = max(target, opening - desired_squeeze)
+        floor = max(0.0, contact_opening - self.gripper_force_squeeze_margin_max)
+        desired_target = max(target, contact_opening - desired_squeeze, floor)
+        # Never close past the contact-based floor while still in contact.
+        desired_target = max(desired_target, floor)
         step = self._gripper_force_squeeze_step_m()
         if desired_target < hold_target:
             return max(desired_target, hold_target - step)

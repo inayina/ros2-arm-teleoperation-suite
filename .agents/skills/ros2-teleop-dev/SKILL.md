@@ -13,7 +13,10 @@ description: Development assistant for ros2-arm-teleoperation-suite. Provides pr
 - **ROS2 发行版**：Jazzy（含 ros2_control / MoveIt 2 Servo）
 - **Python 环境**：ROS2/Jazzy 主运行环境使用系统 Python 3.12（`/usr/bin/python3` + `/opt/ros/jazzy`）；conda 仅用于 LeRobot 数据处理、训练或 notebook，不用于 `ros2 launch`
 - **项目路径**：`/home/ina/dev/ros2-arm-teleoperation-suite`
-- **兄弟项目**：`/home/ina/robot-sim-lab/robot-arm-episode-data-lab`（LeRobot 数据预处理）
+- **三仓边界**：
+  - 上游（本仓）：ROS2/MuJoCo 运行时、批量采集、raw HF episodes、仿真验证；不做数据清洗发布或策略训练质量声明。
+  - 中游：`/home/ina/robot-sim-lab/robot-arm-episode-data-lab` 负责 raw import、schema 适配、过滤、splits、release manifest、ACT/Diffusion 训练、checkpoint/export；不跑 ROS 节点或采集 raw episode。
+  - 下游：`/home/ina/ros2_ws/src/ros2-moveit-pybullet-bridge` 负责 MoveIt/PyBullet bridge、策略回放/部署验证、运行时监控；不录制 raw episode、清洗数据或训练策略。
 - **主分支**：`main`
 
 ---
@@ -70,6 +73,19 @@ L7 lerobot_recorder    Python  多模态对齐 → LeRobot Dataset
 | `/gripper/state` | `std_msgs/Float64` | gripper_driver | recorder | Best Effort |
 
 > CAN 帧（vcan0）不是 ROS Topic：RPDO `0x200+id` / TPDO `0x180+id` / SDO `0x600·0x580+id` / NMT `0x000` / SYNC `0x080` / EMCY `0x080+id`。用 `candump vcan0` 抓帧。
+
+---
+
+## 三仓交接规则
+
+- 本仓录制的上游 raw episode 使用 `episode_*/train` HuggingFace Dataset 目录；关键字段包括 `observation.state[7]`、`observation.gripper[1]`、`observation.ee_pose[7]`、`observation.object_pose[7]`、RGBD/触觉图像、`action[8]`、`task`、`language_instruction`、`success`、时间戳和帧索引。
+- 只有 `scripts/validate_dataset.py <episode_root> --min-frames 5` 通过，并且批采预飞成功率达标的数据，才交给中游 data lab。
+- 中游 data lab 可以把上游 `state[7] + gripper[1]` 适配成训练 schema 的 `state[8]`，也可以派生 `ee_delta_gripper[7]` 动作，并负责 ACT/Diffusion 训练与 checkpoint/export；不要在本仓静默截断 `action[8]`。
+- 中游默认 ACT/Diffusion 训练 split 必须排除 `success=false`、`safety_estop=true`、`drive_fault=true`、空 `language_instruction` 的样本。
+- 下游 bridge 消费中游 release 或 checkpoint artifact 做 MoveIt/PyBullet 回放、部署验证和监控；不要把下游 bridge 当成 raw 数据清洗、批量采集或训练入口。
+- 中游/下游必须能把质量报告、失败统计、采集配置建议、接口契约和极小回归 fixtures 回流到本仓，用于逐步优化采集器、仿真参数、recorder 和验证脚本；不要把完整 dataset release、训练缓存、checkpoint 大文件或 replay 大日志回流进本仓。
+
+详细字段表、命令和常见边界错误见 `references/three_repo_handoff.md`。
 
 ---
 
@@ -206,6 +222,60 @@ PY
 - `contacts_total == 0` 且 `ee_object_dist` 很大：先查 `/sim/object_pose` 是否更新、Servo 是否跟踪到 hover/pick pose。
 - `gripper_cmd=0` 但 `gripper_qpos` 不收敛：查 `gripper_motor` actuator、`panda_finger_joint*` 映射和 joint range。
 
+### M7/Sorting 批量采集准入门槛
+
+边界：不要在抓取/放置成功率还没稳定时直接开 100+ episode。`batch_generator` 会丢弃失败尝试并只落盘 `success=true` 的 episode，但低成功率会浪费时间，也会掩盖轨迹、接触或随机化参数还没调好的事实。
+
+批量采集前必须按三档预飞：
+
+1. **单条 smoke（每类目标各 1 条）**
+   - 红方块、蓝圆柱、绿球各运行 `episodes:=1 validation_mode:=place max_attempts_per_episode:=1`。
+   - 3/3 都必须一次通过；任何一个失败，先调 `pick_height_offset`、`hover_height`、`lift_target_z`、夹爪接触/摩擦参数和目标筐位置。
+
+2. **每类目标小样本（每类 20 accepted episodes）**
+   - 每个目标单独跑 `episodes:=20 validation_mode:=place max_attempts_per_episode:=3`。
+   - 准入线：每类 `accepted / attempts >= 0.90`，且不能出现连续 3 次 rejected。
+   - 若低于 90%，不要进入混合批采；先看 `/grasp/contact_debug`、`/sim/object_pose`、wrist view 和 `batch_generator` validation reason。
+
+3. **混合任务 soak（至少 60 accepted episodes）**
+   - 不传 `target_object_name`，让红/蓝/绿循环跑 `episodes:=60 validation_mode:=place max_attempts_per_episode:=3`。
+   - 准入线：整体 `accepted / attempts >= 0.90`；任一类别估算低于 0.85 时不允许开 500+ 大批。
+   - 采完必须跑 `python3 scripts/validate_dataset.py <output_dir> --min-frames 5`，确保 `language_instruction` 非空、`success=true`、无 `safety_estop` / `drive_fault` 污染帧。
+
+经验阈值：
+- **调参阶段**：10 条里至少 8 条通过（>=80%）才值得继续扩大测试。
+- **小批训练数据**：每类和混合任务都应 >=90%。
+- **大批/过夜采集**：最近一次 60-100 条 soak 应 >=95%，且 dataset validation 全 PASS。
+
+推荐预飞命令模板：
+
+```bash
+# 单目标小样本；target_object_name 依次替换为 object_red_box / object_blue_cylinder / object_green_sphere
+ros2 run synth_data_gen batch_generator --ros-args \
+  -p target_object_name:=object_red_box \
+  -p language_instruction:="pick up the red box and place it in the left bin" \
+  -p validation_mode:=place \
+  -p episodes:=20 \
+  -p max_attempts_per_episode:=3 \
+  -p lift_success_delta:=0.02 \
+  -p bin_xy_tolerance:=0.14
+
+# 混合任务 soak
+ros2 run synth_data_gen batch_generator --ros-args \
+  -p episodes:=60 \
+  -p validation_mode:=place \
+  -p max_attempts_per_episode:=3 \
+  -p lift_success_delta:=0.02 \
+  -p bin_xy_tolerance:=0.14
+
+python3 scripts/validate_dataset.py <output_dir> --min-frames 5
+```
+
+日志统计：
+- `batch_generator` 会打印 `Batch progress: X/Y accepted after Z attempts`；用 `X / Z` 作为当前窗口成功率。
+- 如果 validation reason 中 `bin_xy_error` 长期偏大，优先调放置轨迹和筐坐标；如果 `lift_delta` 不足，优先调抓取高度、夹爪闭合、接触参数和 lift 高度。
+- dataset 目录只证明“写盘成功”；真正能进 ACT 前必须同时满足成功率门槛和 `validate_dataset.py` 通过。
+
 ### M6/M7 视触觉链路调试
 
 面试叙事：本项目能讲成 `MuJoCo 指尖触觉相机 → camera_bridge GelSight-like 光度立体彩色图 → lerobot_recorder 多模态同步落盘`。这条线贴合视触觉感知与灵巧操作岗位，但要明确是软件仿真链路，不宣称真实 GF515 硬件精度。
@@ -335,46 +405,57 @@ from datasets import Array3D, Dataset, Features, Sequence, Value
 
 EPISODE_FEATURES = Features({
     "observation.state":       Sequence(Value("float32"), length=7),
-    "action":                  Sequence(Value("float32"), length=7),
+    "observation.gripper":     Sequence(Value("float32"), length=1),
+    "action":                  Sequence(Value("float32"), length=8),
     "observation.ee_pose":     Sequence(Value("float32"), length=7),
     "observation.object_pose": Sequence(Value("float32"), length=7),
+    "observation.images.scene":         Array3D(dtype="uint8", shape=(480, 640, 3)),
+    "observation.images.wrist":         Array3D(dtype="uint8", shape=(240, 320, 3)),
     "observation.images.tactile_left":  Array3D(dtype="uint8", shape=(240, 320, 3)),
     "observation.images.tactile_right": Array3D(dtype="uint8", shape=(240, 320, 3)),
     "timestamp":               Value("float64"),
     "episode_index":           Value("int64"),
     "frame_index":             Value("int64"),
     "done":                    Value("bool"),
+    "task":                    Value("string"),
     "language_instruction":    Value("string"),
     "success":                 Value("bool"),
+    "safety_estop":            Value("bool"),
+    "drive_fault":             Value("bool"),
 })
 
 ds = Dataset.from_list(buffer, features=EPISODE_FEATURES)
 ds.save_to_disk(f"data/episodes/episode_{idx:06d}/train")
 ```
 
+注意：本仓 raw recorder 的 `observation.state` 是 7 维关节状态，`observation.gripper` 单独记录；ACT 训练常用的 `state[8]` 和 `ee_delta_gripper[7]` 由中游 data lab 显式适配。
+
 ---
 
 ## 参见
 
-- **V2 工业级架构（当前基线）**：[docs/ARCHITECTURE_V2.md](../docs/ARCHITECTURE_V2.md)
-- **开发路线图与里程碑检查清单**：[docs/ROADMAP.md](../docs/ROADMAP.md)
+- **V2 工业级架构（当前基线）**：[docs/ARCHITECTURE_V2.md](../../../docs/ARCHITECTURE_V2.md)
+- **开发路线图与里程碑检查清单**：[docs/ROADMAP.md](../../../docs/ROADMAP.md)
+- **三仓数据闭环与交接契约速查**：[references/three_repo_handoff.md](references/three_repo_handoff.md)
+- **MuJoCo v3 API 速查**：[references/mujoco_api_cheatsheet.md](references/mujoco_api_cheatsheet.md)
+- **CANopen/KDL 速查**：[references/can_kdl_reference.md](references/can_kdl_reference.md)
 
 ### V2 里程碑细化 SPEC（当前）
 
-- **M1** ros2_control 骨架 + MuJoCo：[docs/SPEC_V2_M1_CONTROL_SKELETON.md](../docs/SPEC_V2_M1_CONTROL_SKELETON.md)
-- **M2** CANopen DS402 现场总线：[docs/SPEC_V2_M2_CANOPEN_FIELDBUS.md](../docs/SPEC_V2_M2_CANOPEN_FIELDBUS.md)
-- **M3** 笛卡尔阻抗控制器（插件）：[docs/SPEC_V2_M3_IMPEDANCE_CTRL.md](../docs/SPEC_V2_M3_IMPEDANCE_CTRL.md)
-- **M4** MoveIt Servo 运动层：[docs/SPEC_V2_M4_MOTION_LAYER.md](../docs/SPEC_V2_M4_MOTION_LAYER.md)
-- **M5** 安全层 + E-Stop 闭环：[docs/SPEC_V2_M5_SAFETY_LAYER.md](../docs/SPEC_V2_M5_SAFETY_LAYER.md)
-- **M6** 视觉感知 + LeRobot Recorder：[docs/SPEC_V2_M6_PERCEPTION_RECORDER.md](../docs/SPEC_V2_M6_PERCEPTION_RECORDER.md)
-- **M7** 遥操作设备可插拔 + 合成数据：[docs/SPEC_V2_M7_TELEOP_SYNTH.md](../docs/SPEC_V2_M7_TELEOP_SYNTH.md)
-- **策略部署流程**：[docs/POLICY_DEPLOYMENT.md](../docs/POLICY_DEPLOYMENT.md)
+- **M1** ros2_control 骨架 + MuJoCo：[docs/SPEC_V2_M1_CONTROL_SKELETON.md](../../../docs/SPEC_V2_M1_CONTROL_SKELETON.md)
+- **M2** CANopen DS402 现场总线：[docs/SPEC_V2_M2_CANOPEN_FIELDBUS.md](../../../docs/SPEC_V2_M2_CANOPEN_FIELDBUS.md)
+- **M3** 笛卡尔阻抗控制器（插件）：[docs/SPEC_V2_M3_IMPEDANCE_CTRL.md](../../../docs/SPEC_V2_M3_IMPEDANCE_CTRL.md)
+- **M4** MoveIt Servo 运动层：[docs/SPEC_V2_M4_MOTION_LAYER.md](../../../docs/SPEC_V2_M4_MOTION_LAYER.md)
+- **M5** 安全层 + E-Stop 闭环：[docs/SPEC_V2_M5_SAFETY_LAYER.md](../../../docs/SPEC_V2_M5_SAFETY_LAYER.md)
+- **M6** 视觉感知 + LeRobot Recorder：[docs/SPEC_V2_M6_PERCEPTION_RECORDER.md](../../../docs/SPEC_V2_M6_PERCEPTION_RECORDER.md)
+- **M7** 遥操作设备可插拔 + 合成数据：[docs/SPEC_V2_M7_TELEOP_SYNTH.md](../../../docs/SPEC_V2_M7_TELEOP_SYNTH.md)
+- **策略部署流程**：[docs/POLICY_DEPLOYMENT.md](../../../docs/POLICY_DEPLOYMENT.md)
 
 ### V1 历史存档 SPEC（参照用）
 
-- 整体设计规范（V1）：[docs/DESIGN_SPEC.md](../docs/DESIGN_SPEC.md)
-- M1 CAN/RS485 SPEC（V1）：[docs/SPEC_M1_CAN_RS485.md](../docs/SPEC_M1_CAN_RS485.md)
-- M2 MuJoCo 桥接 SPEC（V1）：[docs/SPEC_M2_MUJOCO_BRIDGE.md](../docs/SPEC_M2_MUJOCO_BRIDGE.md)
-- M3 阻抗控制器 SPEC（V1）：[docs/SPEC_M3_IMPEDANCE_CTRL.md](../docs/SPEC_M3_IMPEDANCE_CTRL.md)
-- M4 全链路集成 SPEC（V1）：[docs/SPEC_M4_FULL_PIPELINE.md](../docs/SPEC_M4_FULL_PIPELINE.md)
-- M5 LeRobot 录制 SPEC（V1）：[docs/SPEC_M5_LEROBOT_RECORDER.md](../docs/SPEC_M5_LEROBOT_RECORDER.md)
+- 整体设计规范（V1）：[docs/DESIGN_SPEC.md](../../../docs/DESIGN_SPEC.md)
+- M1 CAN/RS485 SPEC（V1）：[docs/SPEC_M1_CAN_RS485.md](../../../docs/SPEC_M1_CAN_RS485.md)
+- M2 MuJoCo 桥接 SPEC（V1）：[docs/SPEC_M2_MUJOCO_BRIDGE.md](../../../docs/SPEC_M2_MUJOCO_BRIDGE.md)
+- M3 阻抗控制器 SPEC（V1）：[docs/SPEC_M3_IMPEDANCE_CTRL.md](../../../docs/SPEC_M3_IMPEDANCE_CTRL.md)
+- M4 全链路集成 SPEC（V1）：[docs/SPEC_M4_FULL_PIPELINE.md](../../../docs/SPEC_M4_FULL_PIPELINE.md)
+- M5 LeRobot 录制 SPEC（V1）：[docs/SPEC_M5_LEROBOT_RECORDER.md](../../../docs/SPEC_M5_LEROBOT_RECORDER.md)

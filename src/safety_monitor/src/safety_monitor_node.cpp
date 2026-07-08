@@ -25,6 +25,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
+#include "geometry_msgs/msg/twist_stamped.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/header.hpp"
@@ -78,6 +79,8 @@ public:
     auto estop_qos = rclcpp::QoS(1).reliable().transient_local();
     pub_safe_pose_ = create_publisher<geometry_msgs::msg::PoseStamped>(
       "/safe_master_pose", rclcpp::QoS(10).reliable());
+    pub_safe_twist_ = create_publisher<geometry_msgs::msg::TwistStamped>(
+      "/safe_master_twist", rclcpp::QoS(10).reliable());
     pub_estop_ = create_publisher<std_msgs::msg::Bool>("/safety/estop", estop_qos);
     pub_status_ = create_publisher<teleop_interfaces::msg::SafetyStatus>(
       "/safety/status", rclcpp::QoS(10).reliable());
@@ -87,6 +90,9 @@ public:
     sub_cmd_ = create_subscription<geometry_msgs::msg::PoseStamped>(
       "/teleop/cmd_pose", rclcpp::QoS(10),
       std::bind(&SafetyMonitorNode::on_cmd_pose, this, std::placeholders::_1));
+    sub_cmd_twist_ = create_subscription<geometry_msgs::msg::TwistStamped>(
+      "/teleop/cmd_twist", rclcpp::QoS(10),
+      std::bind(&SafetyMonitorNode::on_cmd_twist, this, std::placeholders::_1));
     sub_hb_ = create_subscription<std_msgs::msg::Header>(
       "/teleop/heartbeat", rclcpp::QoS(10).reliable(),
       [this](const std_msgs::msg::Header::SharedPtr) {
@@ -220,6 +226,32 @@ private:
       pub_safe_pose_->publish(*msg);
     } else if (have_safe_pose_) {
       pub_safe_pose_->publish(last_safe_pose_);
+    }
+  }
+
+  void on_cmd_twist(const geometry_msgs::msg::TwistStamped::SharedPtr msg)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::string fault;
+    const bool pass = monitors_pass_locked(fault);
+
+    if (pass && !estop_.active()) {
+      last_safe_twist_ = *msg;
+      have_safe_twist_ = true;
+      pub_safe_twist_->publish(*msg);
+      return;
+    }
+
+    if (have_safe_twist_) {
+      geometry_msgs::msg::TwistStamped hold = last_safe_twist_;
+      hold.twist.linear.x = 0.0;
+      hold.twist.linear.y = 0.0;
+      hold.twist.linear.z = 0.0;
+      hold.twist.angular.x = 0.0;
+      hold.twist.angular.y = 0.0;
+      hold.twist.angular.z = 0.0;
+      pub_safe_twist_->publish(hold);
     }
   }
 
@@ -394,12 +426,16 @@ private:
   bool have_js_{false};
   geometry_msgs::msg::PoseStamped last_safe_pose_;
   bool have_safe_pose_{false};
+  geometry_msgs::msg::TwistStamped last_safe_twist_;
+  bool have_safe_twist_{false};
 
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_safe_pose_;
+  rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr pub_safe_twist_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_estop_;
   rclcpp::Publisher<teleop_interfaces::msg::SafetyStatus>::SharedPtr pub_status_;
   rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr pub_diag_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr sub_cmd_;
+  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr sub_cmd_twist_;
   rclcpp::Subscription<std_msgs::msg::Header>::SharedPtr sub_hb_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_js_;
   rclcpp::Service<teleop_interfaces::srv::TriggerEstop>::SharedPtr srv_estop_;

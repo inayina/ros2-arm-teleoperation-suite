@@ -242,7 +242,48 @@
         </body>
       </body>
     </body>
-  <body name="target_object" pos="0.4 0 0.05"><freejoint name="target_object_joint" /><geom name="target_object_geom" type="box" size="0.028 0.028 0.025" rgba="0.1 0.8 0.1 1" mass="0.04" friction="5.0 0.08 0.01" condim="6" solref="0.005 1" solimp="0.98 0.995 0.0005" /></body><geom name="floor" type="plane" size="2 2 0.02" material="floor" contype="1" conaffinity="1" /></worldbody>
+  <!-- 红色方块 -->
+  <body name="object_red_box" pos="0.35 -0.1 0.025">
+    <freejoint name="red_box_joint" />
+    <geom name="red_box_geom" type="box" size="0.025 0.025 0.025" rgba="0.9 0.1 0.1 1" mass="0.04" friction="3.0 0.2 0.05" />
+  </body>
+
+  <!-- 蓝色圆柱 -->
+  <body name="object_blue_cylinder" pos="0.4 0.1 0.03">
+    <freejoint name="blue_cylinder_joint" />
+    <geom name="blue_cylinder_geom" type="cylinder" size="0.02 0.03" rgba="0.1 0.1 0.9 1" mass="0.05" friction="3.0 0.2 0.05" />
+  </body>
+
+  <!-- 绿色球体 -->
+  <!-- 绿色球体：半径 0.02（直径 40mm）以适配 Panda 指距；过硬穿地靠 solref/solimp -->
+  <body name="object_green_sphere" pos="0.45 0.0 0.03">
+    <freejoint name="green_sphere_joint" />
+    <geom name="green_sphere_geom" type="sphere" size="0.02" rgba="0.1 0.9 0.1 1" mass="0.025"
+          friction="6.0 0.5 0.1" solref="0.004 1" solimp="0.95 0.99 0.001" margin="0.001" />
+  </body>
+
+  <!-- 左回收筐 -->
+  <body name="bin_left" pos="0.4 -0.2 0.02">
+    <geom name="bin_left_base" type="box" size="0.1 0.1 0.005" rgba="0.5 0.5 0.5 0.5" />
+    <geom name="bin_left_side1" type="box" size="0.1 0.005 0.03" pos="0 0.095 0.015" rgba="0.5 0.5 0.5 0.5" />
+    <geom name="bin_left_side2" type="box" size="0.1 0.005 0.03" pos="0 -0.095 0.015" rgba="0.5 0.5 0.5 0.5" />
+    <geom name="bin_left_side3" type="box" size="0.005 0.1 0.03" pos="0.095 0 0.015" rgba="0.5 0.5 0.5 0.5" />
+    <geom name="bin_left_side4" type="box" size="0.005 0.1 0.03" pos="-0.095 0 0.015" rgba="0.5 0.5 0.5 0.5" />
+  </body>
+
+  <!-- 右回收筐 -->
+  <body name="bin_right" pos="0.4 0.2 0.02">
+    <geom name="bin_right_base" type="box" size="0.1 0.1 0.005" rgba="0.5 0.5 0.5 0.5" />
+    <geom name="bin_right_side1" type="box" size="0.1 0.005 0.03" pos="0 0.095 0.015" rgba="0.5 0.5 0.5 0.5" />
+    <geom name="bin_right_side2" type="box" size="0.1 0.005 0.03" pos="0 -0.095 0.015" rgba="0.5 0.5 0.5 0.5" />
+    <geom name="bin_right_side3" type="box" size="0.005 0.1 0.03" pos="0.095 0 0.015" rgba="0.5 0.5 0.5 0.5" />
+    <geom name="bin_right_side4" type="box" size="0.005 0.1 0.03" pos="-0.095 0 0.015" rgba="0.5 0.5 0.5 0.5" />
+  </body>
+  <!-- Keep floor low friction so lift can break table contact; hard contact avoids sphere tunneling. -->
+  <geom name="floor" type="plane" size="2 2 0.02" material="floor"
+        friction="0.05 0.005 0.0001" contype="1" conaffinity="1"
+        solref="0.002 1" solimp="0.95 0.99 0.001" />
+</worldbody>
 
   <tendon>
     <fixed name="split">

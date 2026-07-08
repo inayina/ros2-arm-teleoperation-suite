@@ -19,6 +19,9 @@ def generate_launch_description():
     contact_debug_enabled = LaunchConfiguration("contact_debug_enabled")
     contact_debug_period_s = LaunchConfiguration("contact_debug_period_s")
     grasp_assist_enabled = LaunchConfiguration("grasp_assist_enabled")
+    gripper_force_max_n = LaunchConfiguration("gripper_force_max_n")
+    gripper_contact_hold_margin = LaunchConfiguration("gripper_contact_hold_margin")
+    gripper_force_squeeze_margin_max = LaunchConfiguration("gripper_force_squeeze_margin_max")
     return LaunchDescription([
         DeclareLaunchArgument(
             "model_path",
@@ -39,9 +42,12 @@ def generate_launch_description():
         DeclareLaunchArgument("contact_debug_period_s", default_value="1.0"),
         DeclareLaunchArgument(
             "grasp_assist_enabled",
-            default_value="true",
-            description="Enable synthetic grasp assist that attaches target_object to the end-effector.",
+            default_value="false",
+            description="Enable synthetic grasp assist. Must stay false for training-grade data collection.",
         ),
+        DeclareLaunchArgument("gripper_force_max_n", default_value="45.0"),
+        DeclareLaunchArgument("gripper_contact_hold_margin", default_value="0.008"),
+        DeclareLaunchArgument("gripper_force_squeeze_margin_max", default_value="0.010"),
         Node(
             package="mujoco_sim",
             executable="mujoco_sim_node",
@@ -54,6 +60,9 @@ def generate_launch_description():
                 "contact_debug_enabled": contact_debug_enabled,
                 "contact_debug_period_s": contact_debug_period_s,
                 "grasp_assist_enabled": grasp_assist_enabled,
+                "gripper_force_max_n": gripper_force_max_n,
+                "gripper_contact_hold_margin": gripper_contact_hold_margin,
+                "gripper_force_squeeze_margin_max": gripper_force_squeeze_margin_max,
             }],
         ),
         Node(

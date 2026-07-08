@@ -1,0 +1,7 @@
+# Commit or discard the buffered recorder episode (lerobot_ros-style).
+bool discard
+---
+bool success
+string message
+string dataset_path
+int32 frame_count

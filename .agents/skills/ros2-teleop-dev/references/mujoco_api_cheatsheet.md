@@ -88,6 +88,56 @@ def get_joint_idx(model, joint_name: str) -> int:
     return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
 ```
 
+## 多物体 sorting 常用片段
+
+### named body / geom / joint 查询
+
+```python
+body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "object_red_box")
+geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "object_red_box_geom")
+joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "object_red_box_joint")
+
+qpos_adr = model.jnt_qposadr[joint_id]
+qvel_adr = model.jnt_dofadr[joint_id]
+```
+
+### freejoint 重置
+
+MuJoCo freejoint 的 `qpos` 是 `[x, y, z, qw, qx, qy, qz]`，四元数顺序和 ROS message 常用的 `[qx, qy, qz, qw]` 不同。
+
+```python
+def reset_freejoint(model, data, joint_name, pos_xyz, quat_wxyz):
+    jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+    qadr = model.jnt_qposadr[jid]
+    dadr = model.jnt_dofadr[jid]
+    data.qpos[qadr:qadr + 7] = [*pos_xyz, *quat_wxyz]
+    data.qvel[dadr:dadr + 6] = 0.0
+    mujoco.mj_forward(model, data)
+```
+
+### MuJoCo pose → ROS pose
+
+```python
+pos = data.xpos[body_id].copy()
+quat_wxyz = data.xquat[body_id].copy()
+qx, qy, qz, qw = quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]
+```
+
+发布 `/sim/object_pose` 或写 `observation.object_pose` 时，统一用 `[x, y, z, qx, qy, qz, qw]`。
+
+### contact 调试
+
+```python
+for i in range(data.ncon):
+    c = data.contact[i]
+    g1 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, c.geom1)
+    g2 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, c.geom2)
+    if g1 and g2 and ("finger" in g1 or "finger" in g2):
+        print(i, g1, g2, "dist", c.dist, "pos", c.pos.copy())
+```
+
+批量采集前的抓取调参优先看 `finger_object_contacts`、`object_contacts`、`ee_object_dist`、`lift_delta`、`bin_xy_error`；只看到物体/地面接触不代表夹爪抓住了目标。
+
 ## 常见问题
 
 | 问题 | 原因 | 解决 |

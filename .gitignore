@@ -18,6 +18,20 @@ data/episodes/
 data/*.hdf5
 data/*.zarr
 
+# Cross-repo bulk artifacts stay outside the upstream capture repo
+data/releases/
+data/exports/
+checkpoints/
+runs/
+wandb/
+rollouts/
+replay_logs/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+
 # Media (track manually)
 media/*.mp4
 media/*.mkv

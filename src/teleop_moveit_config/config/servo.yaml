@@ -14,8 +14,8 @@ moveit_servo:
     pose_command_in_topic: ~/pose_target_cmds        # remapped → /safe_master_pose at launch
 
     scale:
-      linear: 0.4
-      rotational: 0.8
+      linear: 1.0
+      rotational: 1.0
       joint: 0.5
 
     # Output to the ros2_control controller as a joint trajectory.
@@ -34,12 +34,12 @@ moveit_servo:
     robot_link_command_frame: panda_ee
 
     publish_period: 0.008               # 125 Hz
-    incoming_command_timeout: 0.1
+    incoming_command_timeout: 0.25
 
     # Singularity safeguards (condition number: higher = closer to singularity).
     # hard_stop must be greater than lower (MoveIt Servo validation).
-    lower_singularity_threshold: 150.0          # begin slowing down
-    hard_stop_singularity_threshold: 300.0      # stop completely
+    lower_singularity_threshold: 400.0          # begin slowing down (relaxed for sim batch reach)
+    hard_stop_singularity_threshold: 1100.0      # stop completely (relaxed for sim batch)
     leaving_singularity_threshold_multiplier: 2.0
 
     # Joint limit margins (rad) — servo slows before reaching hw limits.

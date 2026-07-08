@@ -14,6 +14,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/DriveStatus.msg"
   "msg/DriveStatusArray.msg"
   "srv/TriggerEstop.srv"
+  "srv/EndEpisode.srv"
   DEPENDENCIES std_msgs
 )
 

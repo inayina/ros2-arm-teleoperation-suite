@@ -1,0 +1,63 @@
+# Lightweight feedback from middle/downstream repos back to upstream capture.
+# Keep this file small and commit-safe; do not attach full datasets, checkpoints, or replay logs.
+schema_version: upstream_feedback_v0
+report_id: feedback_YYYYMMDD_short_name
+created_at: YYYY-MM-DDTHH:MM:SSZ
+source_repo: robot-arm-episode-data-lab  # or ros2-moveit-pybullet-bridge
+target_repo: ros2-arm-teleoperation-suite
+source_commit: unknown
+upstream_commit: unknown
+
+scope:
+  task: multi_object_sorting
+  robot: panda
+  dataset_or_handoff_id: example_release_or_handoff_id
+  affected_objects: [object_red_box, object_blue_cylinder, object_green_sphere]
+
+summary:
+  status: needs_upstream_change  # pass | watch | needs_upstream_change
+  headline: Short human-readable finding.
+  impact: Why this matters for collection, validation, or runtime behavior.
+
+metrics:
+  accepted_episodes: 0
+  attempted_episodes: 0
+  success_rate: 0.0
+  per_task_success_rate:
+    object_red_box: null
+    object_blue_cylinder: null
+    object_green_sphere: null
+  rejected_reasons:
+    - reason: example_failure_reason
+      count: 0
+
+schema_findings:
+  missing_fields: []
+  shape_mismatches: []
+  unsafe_rows:
+    success_false: 0
+    safety_estop_true: 0
+    drive_fault_true: 0
+  language_instruction_issues: []
+
+runtime_findings:
+  frame_or_quaternion_issues: []
+  action_limit_violations: []
+  control_rate_mismatch: []
+  gripper_command_issues: []
+
+requested_upstream_changes:
+  - owner_area: synth_data_gen  # synth_data_gen | recorder | mujoco_sim | docs | validation
+    change: Describe the requested upstream change.
+    acceptance_check: How the upstream repo should verify the fix.
+
+allowed_artifacts:
+  reports: []
+  tiny_fixtures: []
+  screenshots_or_plots: []
+
+forbidden_artifacts_reminder:
+  - full dataset releases
+  - checkpoint binaries
+  - wandb/tensorboard directories
+  - large downstream replay logs or rollout datasets

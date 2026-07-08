@@ -20,6 +20,7 @@ def generate_launch_description():
     can_interface = LaunchConfiguration('can_interface')
     start_teleop = LaunchConfiguration('start_teleop')
     teleop_driver = LaunchConfiguration('teleop_driver')
+    servo_mode = LaunchConfiguration('servo_mode')
 
     servo_launch = PathJoinSubstitution(
         [FindPackageShare('teleop_moveit_config'), 'launch', 'servo.launch.py'])
@@ -31,6 +32,7 @@ def generate_launch_description():
         DeclareLaunchArgument('can_interface', default_value='vcan0'),
         DeclareLaunchArgument('start_teleop', default_value='true'),
         DeclareLaunchArgument('teleop_driver', default_value='keyboard'),
+        DeclareLaunchArgument('servo_mode', default_value='pose'),
 
         Node(
             package='teleop_input',
@@ -47,6 +49,7 @@ def generate_launch_description():
             launch_arguments={
                 'use_sim': use_sim,
                 'can_interface': can_interface,
+                'servo_mode': servo_mode,
             }.items(),
         ),
     ])

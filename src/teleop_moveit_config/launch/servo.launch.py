@@ -27,6 +27,7 @@ def _load_yaml(pkg, rel):
 def generate_launch_description():
     use_sim = LaunchConfiguration('use_sim')
     can_interface = LaunchConfiguration('can_interface')
+    servo_mode = LaunchConfiguration('servo_mode')
 
     xacro_file = PathJoinSubstitution(
         [FindPackageShare('teleop_description'), 'urdf', 'panda.urdf.xacro']
@@ -65,7 +66,10 @@ def generate_launch_description():
             {'robot_description_kinematics': kinematics},
             {'robot_description_planning': joint_limits},
         ],
-        remappings=[('~/pose_target_cmds', '/safe_master_pose')],
+        remappings=[
+            ('~/pose_target_cmds', '/safe_master_pose'),
+            ('~/delta_twist_cmds', '/safe_master_twist'),
+        ],
     )
 
     # MoveIt Servo starts paused; initialize it with service waits/retries so
@@ -76,6 +80,8 @@ def generate_launch_description():
             '--servo-node', '/servo_node',
             '--joint-target-topic', '/joint_target',
             '--pose-input-topic', '/safe_master_pose',
+            '--twist-input-topic', '/safe_master_twist',
+            '--command-type', servo_mode,
             '--timeout', '30.0',
         ],
         output='screen',
@@ -84,6 +90,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('use_sim', default_value='true'),
         DeclareLaunchArgument('can_interface', default_value='vcan0'),
+        DeclareLaunchArgument('servo_mode', default_value='pose',
+                              description='pose | twist (MoveIt Servo command type)'),
         servo_node,
         servo_init,
     ])

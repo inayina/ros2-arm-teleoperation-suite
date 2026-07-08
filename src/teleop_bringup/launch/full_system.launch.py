@@ -50,10 +50,14 @@ def generate_launch_description():
     contact_debug_enabled = LaunchConfiguration("contact_debug_enabled")
     contact_debug_period_s = LaunchConfiguration("contact_debug_period_s")
     grasp_assist_enabled = LaunchConfiguration("grasp_assist_enabled")
+    gripper_force_max_n = LaunchConfiguration("gripper_force_max_n")
+    gripper_contact_hold_margin = LaunchConfiguration("gripper_contact_hold_margin")
+    gripper_force_squeeze_margin_max = LaunchConfiguration("gripper_force_squeeze_margin_max")
     watchdog_timeout = LaunchConfiguration("watchdog_timeout")
     enable_grasp_monitor = LaunchConfiguration("enable_grasp_monitor")
     start_teleop = LaunchConfiguration("start_teleop")
     teleop_driver = LaunchConfiguration("teleop_driver")
+    servo_mode = LaunchConfiguration("servo_mode")
 
     common = {"use_sim": use_sim, "can_interface": can_interface}
 
@@ -72,6 +76,9 @@ def generate_launch_description():
                               "contact_debug_enabled": contact_debug_enabled,
                               "contact_debug_period_s": contact_debug_period_s,
                               "grasp_assist_enabled": grasp_assist_enabled,
+                              "gripper_force_max_n": gripper_force_max_n,
+                              "gripper_contact_hold_margin": gripper_contact_hold_margin,
+                              "gripper_force_squeeze_margin_max": gripper_force_squeeze_margin_max,
                           })
     fieldbus = _include("teleop_bringup", "fieldbus.launch.py", common)
     ros2_control = _include(
@@ -87,6 +94,7 @@ def generate_launch_description():
             "can_interface": can_interface,
             "start_teleop": start_teleop,
             "teleop_driver": teleop_driver,
+            "servo_mode": servo_mode,
         })
     recording = _include(
         "teleop_bringup", "recording.launch.py",
@@ -129,17 +137,29 @@ def generate_launch_description():
         DeclareLaunchArgument("contact_debug_period_s", default_value="1.0"),
         DeclareLaunchArgument(
             "grasp_assist_enabled",
-            default_value="true",
-            description="Enable synthetic grasp assist in MuJoCo. Set false for physics-only grasp validation.",
+            default_value="false",
+            description="Enable synthetic grasp assist in MuJoCo. Must stay false for training-grade batch collection.",
         ),
+        DeclareLaunchArgument("gripper_force_max_n", default_value="45.0"),
+        DeclareLaunchArgument("gripper_contact_hold_margin", default_value="0.008"),
+        DeclareLaunchArgument("gripper_force_squeeze_margin_max", default_value="0.010"),
         DeclareLaunchArgument(
             "watchdog_timeout",
             default_value="0.5",
             description="Teleop heartbeat timeout passed to safety_monitor.",
         ),
-        DeclareLaunchArgument("enable_grasp_monitor", default_value="false"),
+        DeclareLaunchArgument(
+            "enable_grasp_monitor",
+            default_value="true",
+            description="Enable grasp_monitor for physics-only grasp/slip evaluation (/grasp/status).",
+        ),
         DeclareLaunchArgument("start_teleop", default_value="true"),
         DeclareLaunchArgument("teleop_driver", default_value="keyboard"),
+        DeclareLaunchArgument(
+            "servo_mode",
+            default_value="pose",
+            description="MoveIt Servo input: pose (teleop) | twist (batch incremental).",
+        ),
 
         description,
         simulation,

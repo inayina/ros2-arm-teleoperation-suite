@@ -20,53 +20,111 @@ class DomainRandomizer:
         self.orig_light_diffuse = {}
 
     def apply(self, model, data, mujoco):
-        """Apply randomizations to the scene."""
+        """Apply randomizations to the scene.
+
+        Even when domain randomization is disabled, free-joint object poses are
+        restored to a known table-top rest. Otherwise /sim/reset_scene only
+        resets the arm and leaves ejected / sunk objects (e.g. sphere at z<0).
+        """
+        self.restore_object_poses(model, data, mujoco, randomize=self.enabled)
         if not self.enabled:
             return
-
-        self._randomize_object(model, data, mujoco)
         self._randomize_cameras(model, mujoco)
         self._randomize_lighting(model, mujoco)
 
-    def _randomize_object(self, model, data, mujoco):
-        obj_cfg = self.config.get("object", {})
-        if not obj_cfg:
-            return
-
-        # We assume the object is named "target_object" with a "target_object_joint" free joint
-        # and "target_object_geom" geom
-        body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "target_object")
-        geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "target_object_geom")
-        joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "target_object_joint")
-
-        if body_id < 0 or geom_id < 0 or joint_id < 0:
-            return
-
-        # Randomize mass
-        mass_range = obj_cfg.get("mass_range")
-        if mass_range:
-            new_mass = random.uniform(mass_range[0], mass_range[1])
-            model.body_mass[body_id] = new_mass
-
-        # Randomize friction (sliding)
-        friction_range = obj_cfg.get("friction_range")
-        if friction_range:
-            new_fric = random.uniform(friction_range[0], friction_range[1])
-            model.geom_friction[geom_id][0] = new_fric
-
-        # Randomize initial pose (we set the qpos for the free joint)
-        pos_range = obj_cfg.get("initial_pos_range", {})
+    def restore_object_poses(self, model, data, mujoco, randomize: bool = False):
+        """Place all teaching objects on the table with zero free-joint velocity."""
+        obj_cfg = self.config.get("object", {}) if self.config else {}
+        objects_to_place = [
+            ("object_red_box", "red_box_joint", "red_box_geom"),
+            ("object_blue_cylinder", "blue_cylinder_joint", "blue_cylinder_geom"),
+            ("object_green_sphere", "green_sphere_joint", "green_sphere_geom"),
+        ]
+        placed_positions = []
+        pos_range = obj_cfg.get("initial_pos_range", {}) if randomize else {}
         x_range = pos_range.get("x")
         y_range = pos_range.get("y")
+        mass_range = obj_cfg.get("mass_range") if randomize else None
+        friction_range = obj_cfg.get("friction_range") if randomize else None
 
-        if x_range and y_range:
-            qpos_adr = model.jnt_qposadr[joint_id]
-            # free joint has 7 qpos values: x, y, z, qw, qx, qy, qz
-            data.qpos[qpos_adr] = random.uniform(x_range[0], x_range[1])
-            data.qpos[qpos_adr + 1] = random.uniform(y_range[0], y_range[1])
-            # Reset velocity for the free joint (6 DOFs)
-            dof_adr = model.jnt_dofadr[joint_id]
+        # Match XML body origins so randomize:=false restores the proven
+        # table-top layout instead of arbitrary fallback slots.
+        fallback_xy = {
+            "object_red_box": (0.35, -0.10),
+            "object_blue_cylinder": (0.40, 0.10),
+            "object_green_sphere": (0.45, 0.00),
+        }
+        for obj_name, joint_name, geom_name in objects_to_place:
+            body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, obj_name)
+            geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, geom_name)
+            joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+            if body_id < 0 or geom_id < 0 or joint_id < 0:
+                continue
+
+            if mass_range:
+                model.body_mass[body_id] = random.uniform(mass_range[0], mass_range[1])
+            if friction_range:
+                lo, hi = friction_range[0], friction_range[1]
+                if obj_name == "object_green_sphere":
+                    lo = max(lo, float(obj_cfg.get("sphere_friction_min", 3.5)))
+                    hi = max(hi, float(obj_cfg.get("sphere_friction_max", 5.0)))
+                model.geom_friction[geom_id][0] = random.uniform(lo, hi)
+
+            qpos_adr = int(model.jnt_qposadr[joint_id])
+            dof_adr = int(model.jnt_dofadr[joint_id])
             data.qvel[dof_adr : dof_adr + 6] = 0.0
+
+            z_rest = float(obj_cfg.get("initial_z", 0.025))
+            if obj_name == "object_green_sphere":
+                # Spawn above the table then settle; soft-contact planes otherwise
+                # tunnel the sphere to z≈-0.04 across prior red/blue episodes.
+                z_rest = float(obj_cfg.get("sphere_initial_z", 0.03))
+            elif obj_name == "object_blue_cylinder":
+                z_rest = float(obj_cfg.get("cylinder_initial_z", 0.03))
+            elif obj_name == "object_red_box":
+                z_rest = float(obj_cfg.get("box_initial_z", 0.025))
+
+            x, y = fallback_xy.get(obj_name, (0.43, 0.0))
+            if x_range and y_range:
+                placed = False
+                for _ in range(100):
+                    cand_x = random.uniform(x_range[0], x_range[1])
+                    cand_y = random.uniform(y_range[0], y_range[1])
+                    too_close = any(
+                        math.sqrt((cand_x - px) ** 2 + (cand_y - py) ** 2) < 0.10
+                        for px, py in placed_positions
+                    )
+                    if not too_close:
+                        x, y = cand_x, cand_y
+                        placed = True
+                        break
+                if not placed:
+                    for px, py in placed_positions:
+                        if math.sqrt((x - px) ** 2 + (y - py) ** 2) < 0.10:
+                            x = min(x_range[1], max(x_range[0], x + 0.12))
+                            y = min(y_range[1], max(y_range[0], y - 0.08))
+                            break
+
+            data.qpos[qpos_adr] = x
+            data.qpos[qpos_adr + 1] = y
+            data.qpos[qpos_adr + 2] = z_rest
+            yaw = random.uniform(-math.pi, math.pi) if randomize else 0.0
+            cy = math.cos(yaw * 0.5)
+            sy = math.sin(yaw * 0.5)
+            data.qpos[qpos_adr + 3] = cy
+            data.qpos[qpos_adr + 4] = 0.0
+            data.qpos[qpos_adr + 5] = 0.0
+            data.qpos[qpos_adr + 6] = sy
+            placed_positions.append((x, y))
+
+        try:
+            mujoco.mj_forward(model, data)
+        except Exception:
+            pass
+
+    def _randomize_object(self, model, data, mujoco):
+        # Kept for tests / callers; pose restore + optional DR live in restore_object_poses.
+        self.restore_object_poses(model, data, mujoco, randomize=True)
 
     def _randomize_cameras(self, model, mujoco):
         cam_cfg = self.config.get("camera", {})

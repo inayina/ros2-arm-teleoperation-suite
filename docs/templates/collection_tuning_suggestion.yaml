@@ -1,0 +1,45 @@
+# Middle/downstream suggestion for improving upstream collection quality.
+schema_version: collection_tuning_suggestion_v0
+suggestion_id: tuning_YYYYMMDD_short_name
+created_at: YYYY-MM-DDTHH:MM:SSZ
+source_repo: robot-arm-episode-data-lab
+target_repo: ros2-arm-teleoperation-suite
+
+trigger:
+  feedback_report_id: feedback_YYYYMMDD_short_name
+  observed_problem: Short description.
+  evidence_summary: Short summary; link to small report only.
+
+collection_window:
+  task_set: multi_object_sorting
+  attempted_episodes: 0
+  accepted_episodes: 0
+  success_rate: 0.0
+  validation_mode: place
+
+recommended_changes:
+  batch_generator:
+    target_object_distribution: {}
+    max_attempts_per_episode: null
+    lift_success_delta: null
+    bin_xy_tolerance: null
+    validation_settle_s: null
+  domain_randomization:
+    object_pose_ranges: {}
+    friction_range: null
+    mass_range: null
+    camera_jitter: null
+  recorder:
+    required_fields: []
+    optional_fields: []
+  task_language:
+    templates: []
+
+expected_effect:
+  metric: success_rate
+  target_value: 0.95
+  validation_command: python3 scripts/validate_dataset.py <episode_root> --min-frames 5
+
+rollback_plan:
+  revert_parameters: []
+  stop_condition: Describe when to stop using this suggestion.

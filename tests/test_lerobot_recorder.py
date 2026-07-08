@@ -121,6 +121,7 @@ class TestLeRobotRecorder(unittest.TestCase):
             "frame_index": 10,
             "done": 0,
             "task": "pick_apple",
+            "language_instruction": "pick up the red box and place it in the left bin",
             "safety_estop": False,
             "drive_fault": False
         }
@@ -146,6 +147,7 @@ class TestLeRobotRecorder(unittest.TestCase):
         assert norm["episode_index"] == 5
         assert isinstance(norm["done"], bool)
         assert norm["done"] is False
+        assert norm["success"] is True
 
     def test_write_episode(self):
         # Create 3 dummy frames
@@ -168,14 +170,21 @@ class TestLeRobotRecorder(unittest.TestCase):
                 "frame_index": i,
                 "done": False,
                 "task": "test_task",
+                "language_instruction": "pick up the red box and place it in the left bin",
+                "success": True,
                 "safety_estop": False,
                 "drive_fault": False
             })
             
         with tempfile.TemporaryDirectory() as temp_dir:
-            out_path = write_episode(temp_dir, 42, frames, task="test_task")
-            
-            # Verify directory structure
+            path = write_episode(
+                temp_dir,
+                42,
+                frames,
+                task="test_task",
+                metadata={"upstream_gate": "batch_generator", "validation_mode": "place"},
+            )
+            out_path = path
             ep_dir = os.path.join(temp_dir, "episode_000042")
             assert os.path.exists(ep_dir)
             assert os.path.exists(out_path)
@@ -193,6 +202,9 @@ class TestLeRobotRecorder(unittest.TestCase):
             assert meta["task"] == "test_task"
             assert meta["frames"] == 3
             assert meta["episode_index"] == 42
+            assert meta["success"] is True
+            assert meta["upstream_gate"] == "batch_generator"
+            assert meta["metadata"]["validation_mode"] == "place"
             assert "saved_unix_time" in meta
             
             if _HAS_DATASETS:

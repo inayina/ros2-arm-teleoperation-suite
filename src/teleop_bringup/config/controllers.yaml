@@ -44,10 +44,10 @@ cartesian_impedance_controller:
       - panda_joint7
 
     # Cartesian stiffness [Tx Ty Tz Rx Ry Rz]
-    cartesian_stiffness: [50.0, 50.0, 50.0, 2.0, 2.0, 2.0]
+    cartesian_stiffness: [350.0, 350.0, 350.0, 15.0, 15.0, 15.0]
 
     # Critical damping: D = 2√K (per axis)
-    cartesian_damping: [14.1, 14.1, 14.1, 2.8, 2.8, 2.8]
+    cartesian_damping: [37.4, 37.4, 37.4, 7.7, 7.7, 7.7]
 
     # Contact compliance (>5 N → translational stiffness scales down)
     contact_threshold_n: 5.0

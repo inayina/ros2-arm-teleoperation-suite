@@ -67,6 +67,9 @@ private:
   // ── joint layout ──────────────────────────────────────────────────────────
   std::vector<std::string> joint_names_;
   size_t num_joints_{0};
+  /// Cached state-interface indices (populated once in on_activate).
+  std::vector<size_t> position_indices_;
+  std::vector<size_t> velocity_indices_;
 
   // ── Cartesian impedance parameters ────────────────────────────────────────
   /// Diagonal stiffness [Tx Ty Tz Rx Ry Rz] (N/m and N·m/rad).

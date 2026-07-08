@@ -9,6 +9,7 @@ from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseStamped, WrenchStamped
 from std_msgs.msg import Float64, String
 from teleop_interfaces.msg import DriveStatus, DriveStatusArray, SafetyStatus
+from teleop_interfaces.srv import EndEpisode
 
 from .lerobot_writer import write_episode
 from .time_sync import MultiModalSync
@@ -44,6 +45,8 @@ class RecorderNode(Node):
         super().__init__("lerobot_recorder")
         self.declare_parameter("output_dir", "data/episodes")
         self.declare_parameter("task", "teleop")
+        self.declare_parameter("language_instruction", "pick up the target object")
+        self.declare_parameter("upstream_gate", "teleop")
         self.declare_parameter("sync_queue_size", 30)
         self.declare_parameter("sync_slop", 0.05)
         self.declare_parameter("auto_record_seconds", 0.0)
@@ -54,6 +57,7 @@ class RecorderNode(Node):
         self.recording = False
         self.episode_index = 0
         self.frames = []
+        self._current_episode_metadata = {}
 
         self._grip = 0.0
         self._action = None
@@ -65,6 +69,9 @@ class RecorderNode(Node):
         self.create_subscription(SafetyStatus, "/safety/status", self._on_safety, 10)
         self.create_subscription(DriveStatusArray, "/servo_drive/status", self._on_drive_status, 10)
         self.create_subscription(String, "/teleop/record_trigger", self._on_trigger, 10)
+        self.srv_end_episode = self.create_service(
+            EndEpisode, "/lerobot_recorder/end_episode", self._on_end_episode
+        )
 
         self.sync = MultiModalSync(
             self,
@@ -99,22 +106,80 @@ class RecorderNode(Node):
         cmd = msg.data.strip().lower()
         if cmd == "start" and not self.recording:
             self._start_recording()
-        elif cmd == "stop" and self.recording:
-            self._stop_recording()
+        elif cmd in ("stop", "stop_success", "success") and self.recording:
+            self._stop_recording(success=True)
+        elif cmd in ("stop_failed", "failed") and self.recording:
+            self._stop_recording(success=False)
+        elif cmd in ("discard", "abort", "rollback") and self.recording:
+            self._discard_recording(reason=cmd)
 
     def _start_recording(self):
         self.frames = []
+        self._current_episode_metadata = {}
         self.recording = True
         self.get_logger().info(f"recording episode {self.episode_index} ...")
 
-    def _stop_recording(self):
+    def _stop_recording(self, success: bool = True):
         self.recording = False
-        if self.frames:
-            path = write_episode(self.out_dir, self.episode_index, self.frames, self.task)
-            self.get_logger().info(f"saved {len(self.frames)} frames -> {path}")
-            self.episode_index += 1
-        else:
+        if not self.frames:
             self.get_logger().warn("recording stopped without synchronized frames")
+            self._current_episode_metadata = {}
+            return None
+        metadata = dict(self._current_episode_metadata)
+        metadata["stop_trigger_success"] = bool(success)
+        metadata["upstream_gate"] = str(self.get_parameter("upstream_gate").value)
+        path = write_episode(
+            self.out_dir,
+            self.episode_index,
+            self.frames,
+            self.task,
+            success=success,
+            metadata=metadata,
+        )
+        self.get_logger().info(f"saved {len(self.frames)} frames -> {path}")
+        self.episode_index += 1
+        self.frames = []
+        self._current_episode_metadata = {}
+        return path
+
+    def _on_end_episode(self, request, response):
+        frame_count = len(self.frames)
+        if request.discard:
+            self._discard_recording(reason="end_episode_service")
+            response.success = True
+            response.message = "episode discarded"
+            response.dataset_path = ""
+            response.frame_count = frame_count
+            return response
+
+        if not self.recording and frame_count == 0:
+            response.success = False
+            response.message = "no active recording to commit"
+            response.dataset_path = ""
+            response.frame_count = 0
+            return response
+
+        path = self._stop_recording(success=True)
+        if path:
+            response.success = True
+            response.message = "episode committed"
+            response.dataset_path = str(path)
+            response.frame_count = frame_count
+        else:
+            response.success = False
+            response.message = "commit failed: no synchronized frames"
+            response.dataset_path = ""
+            response.frame_count = frame_count
+        return response
+
+    def _discard_recording(self, reason: str = "discard"):
+        frame_count = len(self.frames)
+        self.frames = []
+        self.recording = False
+        self._current_episode_metadata = {}
+        self.get_logger().warn(
+            f"discarded episode {self.episode_index} ({frame_count} buffered frames, reason={reason})"
+        )
 
     def _auto_start_recording(self):
         if self._auto_start_timer is not None:
@@ -182,6 +247,8 @@ class RecorderNode(Node):
             "episode_index": self.episode_index,
             "done": False,
             "task": self.task,
+            "language_instruction": str(self.get_parameter("language_instruction").value),
+            "success": True,
             "safety_estop": self._safety_estop,
             "drive_fault": self._drive_fault,
         }

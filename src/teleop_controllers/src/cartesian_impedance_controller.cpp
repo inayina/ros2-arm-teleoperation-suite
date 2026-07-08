@@ -186,9 +186,16 @@ controller_interface::CallbackReturn CartesianImpedanceController::on_activate(
 {
   // Do not clear estop_active_ here — /safety/estop (Transient Local) is authoritative.
 
+  position_indices_.resize(num_joints_);
+  velocity_indices_.resize(num_joints_);
+  for (size_t i = 0; i < num_joints_; ++i) {
+    position_indices_[i] = state_position_index(i);
+    velocity_indices_[i] = state_velocity_index(i);
+  }
+
   std::vector<double> current(num_joints_, 0.0);
   for (size_t i = 0; i < num_joints_; ++i) {
-    current[i] = state_interfaces_[state_position_index(i)].get_optional().value_or(0.0);
+    current[i] = state_interfaces_[position_indices_[i]].get_optional().value_or(0.0);
   }
   target_positions_.writeFromNonRT(current);
 
@@ -221,8 +228,8 @@ controller_interface::return_type CartesianImpedanceController::update(
   // ── 1. Read current joint state ─────────────────────────────────────────
   Eigen::Matrix<double, 7, 1> q, dq;
   for (size_t i = 0; i < num_joints_; ++i) {
-    q(i) = state_interfaces_[state_position_index(i)].get_optional().value_or(0.0);
-    dq(i) = state_interfaces_[state_velocity_index(i)].get_optional().value_or(0.0);
+    q(i) = state_interfaces_[position_indices_[i]].get_optional().value_or(0.0);
+    dq(i) = state_interfaces_[velocity_indices_[i]].get_optional().value_or(0.0);
   }
 
   // ── 2. Forward kinematics: q → T_current ────────────────────────────────

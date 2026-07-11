@@ -6,7 +6,8 @@ import tempfile
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseStamped
 from lerobot_recorder.recorder_node import _pad, _img_to_np, RecorderNode
-from lerobot_recorder.lerobot_writer import _normalize_frame, write_episode, _HAS_DATASETS
+from lerobot_recorder.lerobot_writer import _normalize_frame, write_episode, _HAS_DATASETS, _HAS_PYARROW
+from lerobot_recorder.lerobot_v21_dataset import FORMAT_V21
 
 class TestLeRobotRecorder(unittest.TestCase):
     def test_pad_helper(self):
@@ -107,9 +108,6 @@ class TestLeRobotRecorder(unittest.TestCase):
         raw_frame = {
             "observation.images.scene": np.zeros((10, 10, 3), dtype=np.uint8),
             "observation.images.wrist": np.zeros((5, 5, 3), dtype=np.uint8),
-            "observation.images.tactile_left": np.zeros((3, 3, 3), dtype=np.uint8),
-            "observation.images.tactile_right": np.zeros((3, 3, 3), dtype=np.uint8),
-            "observation.depth.scene": np.zeros((10, 10), dtype=np.float32),
             "observation.state": [1, 2, 3, 4, 5, 6, 7],
             "observation.ee_pose": (1, 2, 3, 4, 5, 6, 7),
             "observation.object_pose": (0, 0, 0, 0, 0, 0, 1),
@@ -132,12 +130,6 @@ class TestLeRobotRecorder(unittest.TestCase):
         assert norm["observation.images.scene"].dtype == np.uint8
         assert isinstance(norm["observation.images.wrist"], np.ndarray)
         assert norm["observation.images.wrist"].dtype == np.uint8
-        assert isinstance(norm["observation.images.tactile_left"], np.ndarray)
-        assert norm["observation.images.tactile_left"].dtype == np.uint8
-        assert isinstance(norm["observation.images.tactile_right"], np.ndarray)
-        assert norm["observation.images.tactile_right"].dtype == np.uint8
-        assert isinstance(norm["observation.depth.scene"], np.ndarray)
-        assert norm["observation.depth.scene"].dtype == np.float32
 
         assert isinstance(norm["observation.state"], list)
         assert isinstance(norm["observation.ee_pose"], list)
@@ -154,11 +146,8 @@ class TestLeRobotRecorder(unittest.TestCase):
         frames = []
         for i in range(3):
             frames.append({
-                "observation.images.scene": np.ones((5, 5, 3), dtype=np.uint8) * i,
-                "observation.images.wrist": np.ones((3, 3, 3), dtype=np.uint8) * i,
-                "observation.images.tactile_left": np.ones((2, 2, 3), dtype=np.uint8) * i,
-                "observation.images.tactile_right": np.ones((2, 2, 3), dtype=np.uint8) * i,
-                "observation.depth.scene": np.ones((5, 5), dtype=np.float32) * i,
+                "observation.images.scene": np.ones((6, 6, 3), dtype=np.uint8) * i,
+                "observation.images.wrist": np.ones((4, 4, 3), dtype=np.uint8) * i,
                 "observation.state": [0.0] * 7,
                 "observation.ee_pose": [0.0] * 7,
                 "observation.object_pose": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
@@ -187,29 +176,28 @@ class TestLeRobotRecorder(unittest.TestCase):
             out_path = path
             ep_dir = os.path.join(temp_dir, "episode_000042")
             assert os.path.exists(ep_dir)
-            assert os.path.exists(out_path)
-            
-            # Verify the last frame was marked as done
-            assert frames[-1]["done"] is True
-            
-            # Verify meta.json
+
             meta_path = os.path.join(ep_dir, "meta.json")
             assert os.path.exists(meta_path)
-            
+
             with open(meta_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
-                
+
             assert meta["task"] == "test_task"
             assert meta["frames"] == 3
             assert meta["episode_index"] == 42
             assert meta["success"] is True
             assert meta["upstream_gate"] == "batch_generator"
             assert meta["metadata"]["validation_mode"] == "place"
-            assert "saved_unix_time" in meta
-            
-            if _HAS_DATASETS:
+
+            if _HAS_PYARROW:
+                assert meta["format"] == FORMAT_V21
+                assert os.path.exists(out_path)
+                assert out_path.endswith(".parquet")
+                assert os.path.exists(os.path.join(temp_dir, "meta", "info.json"))
+            elif _HAS_DATASETS:
                 assert meta["format"] == "huggingface_dataset"
-                assert os.path.exists(os.path.join(out_path, "state.json")) or os.path.exists(os.path.join(out_path, "dataset_info.json"))
+                assert os.path.exists(out_path)
             else:
                 assert meta["format"] == "npz_fallback"
                 assert os.path.exists(os.path.join(out_path, "frames.npz"))

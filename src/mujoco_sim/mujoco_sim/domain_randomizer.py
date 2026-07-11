@@ -50,7 +50,7 @@ class DomainRandomizer:
         # Match XML body origins so randomize:=false restores the proven
         # table-top layout instead of arbitrary fallback slots.
         fallback_xy = {
-            "object_red_box": (0.35, -0.10),
+            "object_red_box": (0.35, -0.07),
             "object_blue_cylinder": (0.40, 0.10),
             "object_green_sphere": (0.45, 0.00),
         }

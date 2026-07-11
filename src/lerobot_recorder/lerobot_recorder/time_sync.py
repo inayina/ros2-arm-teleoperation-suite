@@ -14,13 +14,17 @@ class MultiModalSync:
     modality has a recent sample.
     """
 
-    def __init__(self, node, callback, queue_size: int = 30, slop: float = 0.05):
+    def __init__(self, node, callback, queue_size: int = 30, slop: float = 0.05,
+                 include_images: bool = True):
         del queue_size  # latest-cache sync is O(1); keep the public constructor stable.
         self.node = node
         self.callback = callback
         self.slop = max(0.0, float(slop))
         self.latest = {}
+        self.last_emitted_stamp = {}
+        self.include_images = include_images
         self._last_warn_s = 0.0
+        self._last_trigger_stamp = 0.0
         self._subscriptions = [
             node.create_subscription(
                 JointState,
@@ -48,26 +52,8 @@ class MultiModalSync:
             ),
             node.create_subscription(
                 Image,
-                "/camera/depth/image_raw",
-                lambda msg: self._update("depth", msg),
-                qos_profile_sensor_data,
-            ),
-            node.create_subscription(
-                Image,
                 "/camera/wrist/color/image_raw",
                 lambda msg: self._update("wrist", msg),
-                qos_profile_sensor_data,
-            ),
-            node.create_subscription(
-                Image,
-                "/camera/tactile_left/image_raw",
-                lambda msg: self._update("tactile_left", msg),
-                qos_profile_sensor_data,
-            ),
-            node.create_subscription(
-                Image,
-                "/camera/tactile_right/image_raw",
-                lambda msg: self._update("tactile_right", msg),
                 qos_profile_sensor_data,
             ),
             node.create_subscription(
@@ -80,21 +66,24 @@ class MultiModalSync:
 
     def _update(self, key: str, msg):
         self.latest[key] = msg
-        if key == "color":
+        if key == ("color" if self.include_images else "joint"):
+            if not self.include_images:
+                stamp = self._stamp_sec(msg)
+                if stamp - self._last_trigger_stamp < 0.0099:
+                    return
+                self._last_trigger_stamp = stamp
             self._try_emit(msg)
 
     def _try_emit(self, color_msg: Image):
-        required = (
+        required = [
             "joint",
             "ee",
             "ft",
-            "color",
-            "depth",
-            "wrist",
-            "tactile_left",
-            "tactile_right",
             "object",
-        )
+        ]
+        if self.include_images:
+            required.extend(["color", "wrist"])
+        required = tuple(required)
         missing = [key for key in required if key not in self.latest]
         if missing:
             self._warn_throttled(f"waiting for recorder modalities: {', '.join(missing)}")
@@ -107,17 +96,24 @@ class MultiModalSync:
             )
             return
 
+        reused = [
+            key for key in required
+            if self._stamp_sec(self.latest[key]) <= self.last_emitted_stamp.get(key, -1.0)
+        ]
+        if reused:
+            self._warn_throttled(f"waiting for unique recorder samples: {', '.join(reused)}")
+            return
+
         self.callback(
             self.latest["joint"],
             self.latest["ee"],
             self.latest["ft"],
-            self.latest["color"],
-            self.latest["depth"],
-            self.latest["wrist"],
-            self.latest["tactile_left"],
-            self.latest["tactile_right"],
+            self.latest.get("color"),
+            self.latest.get("wrist"),
             self.latest["object"],
         )
+        for key in required:
+            self.last_emitted_stamp[key] = self._stamp_sec(self.latest[key])
 
     def _stale_keys(self, anchor_msg, keys: tuple[str, ...]) -> list[str]:
         if self.slop <= 0.0:

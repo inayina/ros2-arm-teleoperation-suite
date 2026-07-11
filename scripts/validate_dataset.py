@@ -10,18 +10,21 @@ import sys
 
 import numpy as np
 
+ROOT = Path(__file__).resolve().parents[1]
+RECORDER_ROOT = ROOT / "src" / "lerobot_recorder"
+if str(RECORDER_ROOT) not in sys.path:
+    sys.path.insert(0, str(RECORDER_ROOT))
 
-REQUIRED_FIELDS = (
+from lerobot_recorder.episode_loader import FORMAT_ARROW, FORMAT_V21, detect_episode_format, validate_video_episode  # noqa: E402
+from lerobot_recorder.lerobot_v21_dataset import dataset_root, list_episode_indices, sidecar_meta_path  # noqa: E402
+
+
+REQUIRED_CORE_FIELDS = (
     "observation.state",
     "observation.ee_pose",
     "observation.object_pose",
     "observation.ft",
     "observation.gripper",
-    "observation.images.scene",
-    "observation.images.wrist",
-    "observation.images.tactile_left",
-    "observation.images.tactile_right",
-    "observation.depth.scene",
     "action",
     "timestamp",
     "episode_index",
@@ -34,11 +37,21 @@ REQUIRED_FIELDS = (
     "drive_fault",
 )
 
+REQUIRED_IMAGE_FIELDS = (
+    "observation.images.scene",
+    "observation.images.wrist",
+    "observation.images.tactile_left",
+    "observation.images.tactile_right",
+)
+
 
 def _episode_train_dirs(root: Path) -> list[Path]:
+    root = dataset_root(root)
+    if detect_episode_format(root) == FORMAT_V21:
+        return [sidecar_meta_path(root, index).parent for index in list_episode_indices(root)]
     if root.name == "train" and root.is_dir():
         return [root]
-    if (root / "train").is_dir():
+    if (root / "train").is_dir() and root.name.startswith("episode_"):
         return [root / "train"]
     episode_dirs = sorted(path for path in root.glob("episode_*/train") if path.is_dir())
     if episode_dirs:
@@ -50,27 +63,26 @@ def _episode_train_dirs(root: Path) -> list[Path]:
     )
 
 
-def _episode_meta_path(train_dir: Path) -> Path | None:
-    if train_dir.name == "train":
-        meta_path = train_dir.parent / "meta.json"
-        return meta_path if meta_path.is_file() else None
-    return None
-
-
 def _read_upstream_gate(train_dir: Path) -> str | None:
-    meta_path = _episode_meta_path(train_dir)
-    if meta_path is None:
-        return None
-    try:
-        payload = json.loads(meta_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    gate = payload.get("upstream_gate")
-    if gate:
-        return str(gate)
-    nested = payload.get("metadata")
-    if isinstance(nested, dict) and nested.get("upstream_gate"):
-        return str(nested["upstream_gate"])
+    meta_candidates = []
+    if train_dir.name == "train":
+        meta_candidates.append(train_dir.parent / "meta.json")
+    meta_candidates.append(train_dir / "meta.json")
+    if train_dir.name.startswith("episode_"):
+        meta_candidates.insert(0, train_dir / "meta.json")
+    for meta_path in meta_candidates:
+        if not meta_path.is_file():
+            continue
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        gate = payload.get("upstream_gate")
+        if gate:
+            return str(gate)
+        nested = payload.get("metadata")
+        if isinstance(nested, dict) and nested.get("upstream_gate"):
+            return str(nested["upstream_gate"])
     return None
 
 
@@ -107,11 +119,12 @@ def _shape_ok(ds, key: str, expected_last_dim: int | None = None) -> bool:
     return True
 
 
-def validate_episode(train_dir: Path, min_frames: int, allow_failed: bool) -> tuple[list[str], dict]:
+def validate_arrow_episode(train_dir: Path, min_frames: int, allow_failed: bool) -> tuple[list[str], dict]:
     errors: list[str] = []
     episode_info = {
         "train_dir": str(train_dir),
         "upstream_gate": _read_upstream_gate(train_dir),
+        "format": FORMAT_ARROW,
     }
     try:
         ds = _load_dataset(train_dir)
@@ -121,10 +134,17 @@ def validate_episode(train_dir: Path, min_frames: int, allow_failed: bool) -> tu
     if len(ds) < min_frames:
         errors.append(f"{train_dir}: too few frames ({len(ds)} < {min_frames})")
 
-    missing = [field for field in REQUIRED_FIELDS if field not in ds.features]
+    missing = [field for field in REQUIRED_CORE_FIELDS if field not in ds.features]
     if missing:
         errors.append(f"{train_dir}: missing required fields: {', '.join(missing)}")
         return errors, episode_info
+
+    has_images = any(field in ds.features for field in REQUIRED_IMAGE_FIELDS)
+    if has_images:
+        missing_images = [field for field in REQUIRED_IMAGE_FIELDS if field not in ds.features]
+        if missing_images:
+            errors.append(f"{train_dir}: dataset has partial images, missing: {', '.join(missing_images)}")
+            return errors, episode_info
 
     if not _nonempty_language(ds):
         errors.append(f"{train_dir}: language_instruction contains empty values")
@@ -139,16 +159,30 @@ def validate_episode(train_dir: Path, min_frames: int, allow_failed: bool) -> tu
         errors.append(f"{train_dir}: observation.state is empty")
     if not _shape_ok(ds, "action"):
         errors.append(f"{train_dir}: action is empty")
-    for key in (
-        "observation.images.scene",
-        "observation.images.wrist",
-        "observation.images.tactile_left",
-        "observation.images.tactile_right",
-    ):
-        if not _shape_ok(ds, key, expected_last_dim=3):
-            errors.append(f"{train_dir}: {key} is not an RGB image tensor")
+
+    if has_images:
+        for key in REQUIRED_IMAGE_FIELDS:
+            if not _shape_ok(ds, key, expected_last_dim=3):
+                errors.append(f"{train_dir}: {key} is not an RGB image tensor")
 
     return errors, episode_info
+
+
+def validate_episode(train_dir: Path, min_frames: int, allow_failed: bool) -> tuple[list[str], dict]:
+    root = dataset_root(train_dir)
+    if detect_episode_format(root) == FORMAT_V21:
+        if train_dir.name.startswith("episode_"):
+            errors = validate_video_episode(train_dir, min_frames)
+        else:
+            errors = []
+            for episode_dir in _episode_train_dirs(root):
+                errors.extend(validate_video_episode(episode_dir, min_frames))
+        return errors, {
+            "train_dir": str(train_dir),
+            "upstream_gate": _read_upstream_gate(train_dir if train_dir.name.startswith("episode_") else sidecar_meta_path(root, list_episode_indices(root)[0]).parent),
+            "format": FORMAT_V21,
+        }
+    return validate_arrow_episode(train_dir, min_frames, allow_failed)
 
 
 def main() -> int:
@@ -158,6 +192,11 @@ def main() -> int:
     parser.add_argument("--allow-failed", action="store_true")
     parser.add_argument("--json", action="store_true", help="emit a machine-readable summary")
     args = parser.parse_args()
+
+    root = dataset_root(args.dataset)
+    if detect_episode_format(root) == FORMAT_V21 and not _episode_train_dirs(root):
+        print(f"No LeRobot v2.1 episodes found under {args.dataset}", file=sys.stderr)
+        return 2
 
     train_dirs = _episode_train_dirs(args.dataset)
     if not train_dirs:

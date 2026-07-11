@@ -13,6 +13,7 @@ def generate_launch_description():
     sync_queue_size = LaunchConfiguration("sync_queue_size")
     auto_record_seconds = LaunchConfiguration("auto_record_seconds")
     auto_record_delay_s = LaunchConfiguration("auto_record_delay_s")
+    capture_mode = LaunchConfiguration("capture_mode")
     return LaunchDescription([
         DeclareLaunchArgument("output_dir", default_value="data/episodes"),
         DeclareLaunchArgument("task", default_value="teleop"),
@@ -20,6 +21,7 @@ def generate_launch_description():
         DeclareLaunchArgument("sync_queue_size", default_value="30"),
         DeclareLaunchArgument("auto_record_seconds", default_value="0.0"),
         DeclareLaunchArgument("auto_record_delay_s", default_value="0.0"),
+        DeclareLaunchArgument("capture_mode", default_value="portfolio"),
         Node(
             package="lerobot_recorder",
             executable="lerobot_recorder_node",
@@ -32,6 +34,7 @@ def generate_launch_description():
                 "sync_queue_size": ParameterValue(sync_queue_size, value_type=int),
                 "auto_record_seconds": ParameterValue(auto_record_seconds, value_type=float),
                 "auto_record_delay_s": ParameterValue(auto_record_delay_s, value_type=float),
+                "capture_mode": capture_mode,
             }],
         ),
     ])

@@ -23,6 +23,7 @@ def generate_launch_description():
             executable="grasp_monitor_node",
             name="grasp_monitor",
             output="screen",
+            prefix="nice -n 19 ionice -c 3",
             parameters=[params_file],
         ),
     ])

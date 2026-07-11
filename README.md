@@ -1,164 +1,25 @@
+<div align="right">
+
+[中文](#中文) | [English](#english)
+
+</div>
+
 # ros2-arm-teleoperation-suite
 
 [![CI](https://github.com/inayina/ros2-arm-teleoperation-suite/actions/workflows/ci.yml/badge.svg)](https://github.com/inayina/ros2-arm-teleoperation-suite/actions/workflows/ci.yml)
+![Docker](https://img.shields.io/badge/Docker-verified-2496ED?logo=docker&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-blue.svg)
+![ROS 2 Jazzy](https://img.shields.io/badge/ROS%202-Jazzy-blue)
+![MuJoCo](https://img.shields.io/badge/MuJoCo-physics-purple)
+![MoveIt 2](https://img.shields.io/badge/MoveIt-2-green)
+![CANopen](https://img.shields.io/badge/CANopen-DS402-orange)
+![LeRobot](https://img.shields.io/badge/LeRobot-dataset-red)
+![Python 3.12](https://img.shields.io/badge/Python-3.12-yellow)
 ![Estimated Replication Time](https://img.shields.io/badge/Estimated%20Replication%20Time-10%20mins-orange?logo=clock)
 
-[English](#english) | [中文](#中文)
-
 ---
 
-<a name="english"></a>
-## 🇬🇧 English
-
-### Overview
-
-`ros2-arm-teleoperation-suite` is a full-pipeline ROS 2 (Jazzy) robotic arm teleoperation suite, completely based on software simulation (without physical hardware). The **V2 architecture** is designed as an industrial-grade stack (not a teaching demo), mirroring how real industrial arms are built: a dedicated safety layer, decoupled motion/control layers, a `ros2_control` real-time loop, a CANopen DS402 fieldbus driving a simulated servo drive, vision perception, and multi-modal LeRobot data recording.
-
-> **Architecture spec: [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md)** (mermaid diagrams, node/topic graphs, package layout, launch design, M1–M7 milestones). Project scope and acceptance boundaries are summarized in [`docs/PROJECT_SCOPE_AND_ACCEPTANCE.md`](docs/PROJECT_SCOPE_AND_ACCEPTANCE.md). V1 design is archived in [`docs/DESIGN_SPEC.md`](docs/DESIGN_SPEC.md).
-
-### Key Features (V2 · 7 layers)
-
-1. **L0 Teleop Input**: Keyboard / SpaceMouse / gamepad / Quest 3 → `/teleop/cmd_pose` + heartbeat. All devices share a **pluggable `TeleopDriverBase` interface** — swapping input hardware requires zero changes to downstream layers.
-2. **L1 Safety Layer (C++)**: `safety_monitor` with Joint / Workspace / Velocity limit monitors, communication watchdog, and a latching E-Stop wired to DS402 Quick Stop. Outputs `/safe_master_pose` only when all checks pass.
-3. **L2 Motion Layer**: MoveIt 2 Servo for Cartesian→joint servoing with singularity / joint-limit avoidance, emitting `/joint_target` (decoupled from control).
-4. **L3 Control Layer (`ros2_control`, 1kHz)**: Cartesian impedance controller as a `controller_interface` plugin + `joint_state_broadcaster`, hot-swappable with `joint_trajectory_controller`.
-5. **L4 Fieldbus / Drive**: `canopen_system` hardware interface over vcan0 (CANopen DS402 PDO/SDO/NMT/EMCY) → `virtual_servo_driver` simulating DS402 state machine, encoder feedback, and fault states.
-6. **L5 Physics Simulation**: `mujoco` v3 (Franka Panda) as a pure physics server + virtual cameras; ground-truth vs. fieldbus-measured state separation.
-7. **L6 Perception + L7 Recording**: `camera_bridge` (scene RGB/Depth + wrist RGB + left/right GelSight-like tactile RGB) and a multi-modal `lerobot_recorder` (state, ee_pose, ft, gripper, scene/wrist/tactile images, depth, action, timestamp) → LeRobot dataset for ACT / Diffusion Policy.
-
-### System Architecture (V2)
-
-```mermaid
-flowchart TB
-    TI["L0 teleop_input<br/>keyboard / gamepad / Quest3"]
-    SM["L1 safety_monitor (C++)<br/>JointLimit · Workspace · Velocity<br/>Watchdog · E-Stop"]
-    SV["L2 moveit_servo<br/>Cartesian → Joint"]
-    RC["L3 ros2_control (1kHz)<br/>cartesian_impedance_controller<br/>+ joint_state_broadcaster + canopen_system"]
-    FB["L4 vcan0 (CANopen DS402)<br/>+ virtual_servo_driver ×7"]
-    MJ["L5 mujoco_sim<br/>physics + FT + virtual cameras"]
-    CAM["L6 camera_bridge<br/>Scene/Wrist RGBD<br/>+ fingertip tactile RGB"]
-    REC["L7 lerobot_recorder<br/>multi-modal → LeRobot Dataset"]
-
-    TI -->|"/teleop/cmd_pose + heartbeat"| SM
-    SM -->|"/safe_master_pose"| SV
-    SM -.->|"/safety/estop → DS402 Quick Stop"| RC
-    SV -->|"/joint_target"| RC
-    RC <-->|"CAN frames"| FB
-    FB <-->|"/sim/* backplane"| MJ
-    MJ -->|"/ft_sensor, /ee_pose, /joint_states"| REC
-    MJ --> CAM
-    CAM -->|"/camera/color, /camera/depth<br/>/camera/tactile_*"| REC
-
-    style SM fill:#5c1a1a,stroke:#ff4a4a,color:#fde8e8
-    style SV fill:#1a3a2a,stroke:#4aff8a,color:#e8fdf0
-    style RC fill:#1a2a5c,stroke:#4a7aff,color:#e8eefd
-    style FB fill:#3a2a1a,stroke:#ffaa4a,color:#fdf3e8
-    style MJ fill:#2a1a3a,stroke:#aa4aff,color:#f3e8fd
-    style CAM fill:#1a3a3a,stroke:#4affff,color:#e8fdfd
-    style REC fill:#3a1a2a,stroke:#ff4aaa,color:#fde8f3
-```
-
-> Full layered diagrams (node graph, topic graph, launch architecture) are in [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md).
-
-### End-to-End Pipeline: Teleoperation → Training → Sim2Sim Deployment
-
-```
-[Teleop Device]          [MuJoCo Simulation]
-      │                          │
-      ▼                          ▼
- /teleop/cmd_pose  →  Safety → Servo → Impedance → CAN → Physics
-                                                            │
-                                          LeRobot Dataset ←┘
-                                                  │
-                              ACT / Diffusion Policy Training
-                                                  │
-                              Policy Inference Node (ROS 2)
-                                                  │
-                                    MuJoCo Sim2Sim Validation
-```
-
-![Three-Repository End-to-End Dataflow](media/three_repo_dataflow_diagram.png)
-
-**▶ Three-Repository Live Integration Evidence** — real terminal output from all three repos chained end-to-end:
-
-![Three-Repo End-to-End Run Evidence](media/three_repo_run_evidence.png)
-
-The suite covers the complete loop: **data collection → dataset → policy training → sim deployment**. Domain Randomization (object poses, friction, mass) in MuJoCo ensures dataset diversity for robust policy learning. For tactile manipulation interviews, the M6/M7 path demonstrates a software-only **MuJoCo fingertip tactile camera → GelSight-like photometric image → synchronized LeRobot dataset** chain.
-
-### Quick Start
-
-ROS 2 Jazzy should be run with the system Python 3.12 environment (`/usr/bin/python3` + `/opt/ros/jazzy`). Do not run `ros2 launch` from the conda `ros2-teleop` environment; keep conda for LeRobot data processing, training, and notebooks.
-
-```bash
-# 1. Source ROS 2
-source /opt/ros/jazzy/setup.bash
-
-# 2. Setup virtual CAN interface
-bash scripts/setup_vcan.sh
-
-# 3. Install dependencies
-bash scripts/install_deps.sh
-
-# 4. Build the workspace
-colcon build
-
-# 5. Source workspace environment
-source install/setup.bash
-
-# 6. Launch the full system (sim mode, impedance controller)
-ros2 launch teleop_bringup full_system.launch.py
-
-# Variants
-ros2 launch teleop_bringup m1_control_sim.launch.py                 # M1 smoke: ros2_control + MuJoCo
-ros2 launch teleop_bringup full_system.launch.py controller:=forward        # M1/M2 torque path
-ros2 launch teleop_bringup full_system.launch.py use_sim:=false can_interface:=vcan0 # CANopen path through virtual DS402 drives
-ros2 launch teleop_bringup full_system.launch.py use_sim:=false can_interface:=can0  # future real CAN bring-up
-ros2 launch teleop_bringup full_system.launch.py record:=true               # enable recorder
-ros2 launch teleop_bringup full_system.launch.py teleop_driver:=gamepad     # Xbox/PS gamepad
-ros2 launch teleop_bringup full_system.launch.py enable_grasp_monitor:=true # M7 grasp state advisor
-
-# M4/M6 validation / cleanup
-bash scripts/validate_m4_motion_layer.sh --launch   # launch stack + run acceptance checks
-bash scripts/validate_m5_safety_layer.sh --launch   # M5 safety / E-Stop checks
-bash scripts/validate_m6_perception_recorder.sh --launch  # RGB/Depth + LeRobot dataset checks
-bash scripts/validate_m7_grasp_monitor.sh           # M7 grasp monitor topic/state checks
-bash scripts/capture_m7_demo.sh                     # M7 MuJoCo grasp/demo GIF (sim-direct)
-bash scripts/stop_stack.sh                          # tear down lingering background nodes
-```
-
-### M7 Grasp Monitor: Multi-Source Grasp Diagnosis
-
-The M7 demo is no longer only a visual GIF check. MuJoCo publishes `/grasp/contact_debug` as `std_msgs/String` JSON at 10 Hz with fields such as `timestamp`, `ee_object_dist`, `gripper_opening`, `gripper_cmd`, `object_contacts`, `finger_object_contacts`, and `grasp_assist_attached`. The passive `/grasp_monitor` node fuses `/ee_pose`, `/sim/object_pose`, `/ft_sensor`, `/gripper/state`, and `/grasp/contact_debug`, then publishes `/grasp/status`, `/grasp/advice`, and `/grasp/debug`.
-
-It reports grasp phases (`APPROACHING`, `READY_TO_CLOSE`, `CLOSING`, `CONTACT_DETECTED`, `LIFTING`, `GRASP_SUCCESS`) and separates failures such as `MISS_OBJECT`, `WEAK_CONTACT`, `SLIP_AFTER_LIFT`, and `RELEASED_BY_COMMAND`. A slip is detected when the object had contact and rose with the end effector, but later drops, separates, or loses finger contact.
-
-```mermaid
-flowchart TB
-    EE["/ee_pose"]
-    OBJ["/sim/object_pose"]
-    FT["/ft_sensor"]
-    GRIP["/gripper/state"]
-    CONTACT["/grasp/contact_debug"]
-
-    EE --> GM["/grasp_monitor"]
-    OBJ --> GM
-    FT --> GM
-    GRIP --> GM
-    CONTACT --> GM
-
-    GM --> STATUS["/grasp/status"]
-    GM --> ADVICE["/grasp/advice"]
-    GM --> DEBUG["/grasp/debug"]
-
-    STATUS --> OUT["SUCCESS / MISS_OBJECT / SLIP_AFTER_LIFT / RELEASED_BY_COMMAND"]
-```
-
-`grasp_assist` remains a deterministic sim-direct demo helper for repeatable captures under simplified contact physics. `grasp_monitor` is the diagnostic layer: it observes multiple sources and explains whether the grasp succeeded, missed, slipped after lift, or was released by command.
-
----
-
-<a name="中文"></a>
-## 🇨🇳 中文
+## 中文
 
 ### 项目概述
 
@@ -227,7 +88,24 @@ flowchart TB
                                   MuJoCo Sim2Sim 验证
 ```
 
+![三仓联动端到端数据流](media/three_repo_dataflow_diagram.png)
+
+**▶ 三仓联动实测证据** — 三仓串联端到端真实终端输出：
+
+![三仓端到端运行证据](media/three_repo_run_evidence.png)
+
 全链路覆盖：**数据采集 → 数据集 → 策略训练 → 仿真部署**。MuJoCo 中的 Domain Randomization（物体位姿、摩擦力、质量）确保数据集多样性，提升策略泛化能力。针对视触觉/灵巧操作面试，M6/M7 可重点讲成 **MuJoCo 指尖触觉相机 → GelSight-like 光度立体图像 → LeRobot 多模态同步数据集** 的软件闭环。
+
+### 上游多模态感知与 3D 轨迹实证 (Panda V2.1)
+
+在遥操作数据录制与感知对齐阶段，上游高频同步录制了多模态数据并生成三维运动路径：
+
+1. **多模态视触觉对齐网格 (Scene, Wrist, Left/Right Tactile)**：
+   ![Upstream Multimodal Grid](media/m6/multimodal_sensor_sync_grid.png)
+2. **多通道时间戳同步条形图 (Timeline Sync)**：
+   ![Multi-channel Sync Chart](media/m6/multimodal_sync.png)
+3. **3D 遥操作轨迹分布图 (30 Episodes)**：
+   ![Franka Panda 3D Teleoperation Trajectories](media/panda_teleop_trajectories_3d.png)
 
 ### 🐳 Docker / 一键容器复现 (One-Click Docker Replication)
 
@@ -406,3 +284,185 @@ bash scripts/collect_media_evidence.sh
 - [SPEC_V2_M7_TELEOP_SYNTH.md](docs/SPEC_V2_M7_TELEOP_SYNTH.md)：✅ 遥操作抽象 + 合成数据 / Domain Randomization
 
 **V1 存档（参照用）：** [DESIGN_SPEC.md](docs/DESIGN_SPEC.md) 及各 `SPEC_M*.md`
+
+---
+
+## English
+
+### Overview
+
+`ros2-arm-teleoperation-suite` is a full-pipeline ROS 2 (Jazzy) robotic arm teleoperation suite, completely based on software simulation (without physical hardware). The **V2 architecture** is designed as an industrial-grade stack (not a teaching demo), mirroring how real industrial arms are built: a dedicated safety layer, decoupled motion/control layers, a `ros2_control` real-time loop, a CANopen DS402 fieldbus driving a simulated servo drive, vision perception, and multi-modal LeRobot data recording.
+
+> **Architecture spec: [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md)** (mermaid diagrams, node/topic graphs, package layout, launch design, M1–M7 milestones). Project scope and acceptance boundaries are summarized in [`docs/PROJECT_SCOPE_AND_ACCEPTANCE.md`](docs/PROJECT_SCOPE_AND_ACCEPTANCE.md). V1 design is archived in [`docs/DESIGN_SPEC.md`](docs/DESIGN_SPEC.md).
+
+### Key Features (V2 · 7 layers)
+
+1. **L0 Teleop Input**: Keyboard / SpaceMouse / gamepad / Quest 3 → `/teleop/cmd_pose` + heartbeat. All devices share a **pluggable `TeleopDriverBase` interface** — swapping input hardware requires zero changes to downstream layers.
+2. **L1 Safety Layer (C++)**: `safety_monitor` with Joint / Workspace / Velocity limit monitors, communication watchdog, and a latching E-Stop wired to DS402 Quick Stop. Outputs `/safe_master_pose` only when all checks pass.
+3. **L2 Motion Layer**: MoveIt 2 Servo for Cartesian→joint servoing with singularity / joint-limit avoidance, emitting `/joint_target` (decoupled from control).
+4. **L3 Control Layer (`ros2_control`, 1kHz)**: Cartesian impedance controller as a `controller_interface` plugin + `joint_state_broadcaster`, hot-swappable with `joint_trajectory_controller`.
+5. **L4 Fieldbus / Drive**: `canopen_system` hardware interface over vcan0 (CANopen DS402 PDO/SDO/NMT/EMCY) → `virtual_servo_driver` simulating DS402 state machine, encoder feedback, and fault states.
+6. **L5 Physics Simulation**: `mujoco` v3 (Franka Panda) as a pure physics server + virtual cameras; ground-truth vs. fieldbus-measured state separation.
+7. **L6 Perception + L7 Recording**: `camera_bridge` (scene RGB/Depth + wrist RGB + left/right GelSight-like tactile RGB) and a multi-modal `lerobot_recorder` (state, ee_pose, ft, gripper, scene/wrist/tactile images, depth, action, timestamp) → LeRobot dataset for ACT / Diffusion Policy.
+
+### System Architecture (V2)
+
+```mermaid
+flowchart TB
+    TI["L0 teleop_input<br/>keyboard / gamepad / Quest3"]
+    SM["L1 safety_monitor (C++)<br/>JointLimit · Workspace · Velocity<br/>Watchdog · E-Stop"]
+    SV["L2 moveit_servo<br/>Cartesian → Joint"]
+    RC["L3 ros2_control (1kHz)<br/>cartesian_impedance_controller<br/>+ joint_state_broadcaster + canopen_system"]
+    FB["L4 vcan0 (CANopen DS402)<br/>+ virtual_servo_driver ×7"]
+    MJ["L5 mujoco_sim<br/>physics + FT + virtual cameras"]
+    CAM["L6 camera_bridge<br/>Scene/Wrist RGBD<br/>+ fingertip tactile RGB"]
+    REC["L7 lerobot_recorder<br/>multi-modal → LeRobot Dataset"]
+
+    TI -->|"/teleop/cmd_pose + heartbeat"| SM
+    SM -->|"/safe_master_pose"| SV
+    SM -.->|"/safety/estop → DS402 Quick Stop"| RC
+    SV -->|"/joint_target"| RC
+    RC <-->|"CAN frames"| FB
+    FB <-->|"/sim/* backplane"| MJ
+    MJ -->|"/ft_sensor, /ee_pose, /joint_states"| REC
+    MJ --> CAM
+    CAM -->|"/camera/color, /camera/depth<br/>/camera/tactile_*"| REC
+
+    style SM fill:#5c1a1a,stroke:#ff4a4a,color:#fde8e8
+    style SV fill:#1a3a2a,stroke:#4aff8a,color:#e8fdf0
+    style RC fill:#1a2a5c,stroke:#4a7aff,color:#e8eefd
+    style FB fill:#3a2a1a,stroke:#ffaa4a,color:#fdf3e8
+    style MJ fill:#2a1a3a,stroke:#aa4aff,color:#f3e8fd
+    style CAM fill:#1a3a3a,stroke:#4affff,color:#e8fdfd
+    style REC fill:#3a1a2a,stroke:#ff4aaa,color:#fde8f3
+```
+
+> Full layered diagrams (node graph, topic graph, launch architecture) are in [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md).
+
+### End-to-End Pipeline: Teleoperation → Training → Sim2Sim Deployment
+
+```
+[Teleop Device]          [MuJoCo Simulation]
+      │                          │
+      ▼                          ▼
+ /teleop/cmd_pose  →  Safety → Servo → Impedance → CAN → Physics
+                                                            │
+                                          LeRobot Dataset ←┘
+                                                  │
+                              ACT / Diffusion Policy Training
+                                                  │
+                              Policy Inference Node (ROS 2)
+                                                  │
+                                    MuJoCo Sim2Sim Validation
+```
+
+![Three-Repository End-to-End Dataflow](media/three_repo_dataflow_diagram.png)
+
+**▶ Three-Repository Live Integration Evidence** — real terminal output from all three repos chained end-to-end:
+
+![Three-Repo End-to-End Run Evidence](media/three_repo_run_evidence.png)
+
+The suite covers the complete loop: **data collection → dataset → policy training → sim deployment**. Domain Randomization (object poses, friction, mass) in MuJoCo ensures dataset diversity for robust policy learning. For tactile manipulation interviews, the M6/M7 path demonstrates a software-only **MuJoCo fingertip tactile camera → GelSight-like photometric image → synchronized LeRobot dataset** chain.
+
+### Docker / One-Click Container Replication
+
+```bash
+docker compose run --rm verify      # unit + integration tests
+docker compose run --rm teleop-sim  # headless M1 (ros2_control + MuJoCo)
+```
+
+### Quick Start
+
+ROS 2 Jazzy should be run with the system Python 3.12 environment (`/usr/bin/python3` + `/opt/ros/jazzy`). Do not run `ros2 launch` from the conda `ros2-teleop` environment; keep conda for LeRobot data processing, training, and notebooks.
+
+```bash
+# 1. Source ROS 2
+source /opt/ros/jazzy/setup.bash
+
+# 2. Setup virtual CAN interface
+bash scripts/setup_vcan.sh
+
+# 3. Install dependencies
+bash scripts/install_deps.sh
+
+# 4. Build the workspace
+colcon build
+
+# 5. Source workspace environment
+source install/setup.bash
+
+# 6. Launch the full system (sim mode, impedance controller)
+ros2 launch teleop_bringup full_system.launch.py
+
+# Variants
+ros2 launch teleop_bringup m1_control_sim.launch.py                 # M1 smoke: ros2_control + MuJoCo
+ros2 launch teleop_bringup full_system.launch.py controller:=forward        # M1/M2 torque path
+ros2 launch teleop_bringup full_system.launch.py use_sim:=false can_interface:=vcan0 # CANopen path through virtual DS402 drives
+ros2 launch teleop_bringup full_system.launch.py use_sim:=false can_interface:=can0  # future real CAN bring-up
+ros2 launch teleop_bringup full_system.launch.py record:=true               # enable recorder
+ros2 launch teleop_bringup full_system.launch.py teleop_driver:=gamepad     # Xbox/PS gamepad
+ros2 launch teleop_bringup full_system.launch.py enable_grasp_monitor:=true # M7 grasp state advisor
+
+# Run teleop_input in a separate terminal (disable built-in teleop first)
+ros2 launch teleop_bringup full_system.launch.py start_teleop:=false
+ros2 run teleop_input teleop_input_node --ros-args -p driver_type:=gamepad
+
+# M4/M6 validation / cleanup
+bash scripts/validate_m4_motion_layer.sh --launch   # launch stack + run acceptance checks
+bash scripts/validate_m5_safety_layer.sh --launch   # M5 safety / E-Stop checks
+bash scripts/open_safety_monitor.sh --launch        # open rqt safety diagnostics
+bash scripts/validate_m6_perception_recorder.sh --launch  # RGB/Depth + LeRobot dataset checks
+bash scripts/validate_m7_grasp_monitor.sh           # M7 grasp monitor topic/state checks
+bash scripts/capture_m7_demo.sh                     # M7 MuJoCo grasp/demo GIF (sim-direct)
+bash scripts/stop_stack.sh                          # tear down lingering background nodes
+```
+
+### Key Performance Benchmarks
+
+| Milestone / Link | Metric | Target | Mean | Max | Status |
+|---|---|---|---|---|---|
+| **M4 E2E latency** | Teleop → Servo → Impedance → CAN → Sim | < 50 ms | **~0 ms** (loopback) | 14.2 ms | **Pass** |
+| **L2 Servo rate** | `/joint_target` publish rate | 125 Hz | **61.6–125 Hz** | — | **Mostly pass** |
+| **L0 heartbeat** | Teleop heartbeat rate | 50 Hz | **49.99 Hz** | 50.1 Hz | **Pass** |
+| **L3 control loop** | `ros2_control` cycle rate | 1000 Hz | **1000 Hz** | — | **Pass** |
+
+Run `bash scripts/validate_m4_motion_layer.sh --launch` for automated measurement.
+
+### Demos
+
+See [`docs/MEDIA_CAPTURE_PLAN.md`](docs/MEDIA_CAPTURE_PLAN.md). Key evidence: M1 control loop, M2 CANopen, M6 data loop, M7 grasp demo.
+
+**M1 · M2 · M6 · M7** media under `media/m1/`, `media/m2/`, `media/m6/`, `media/m7/`. Regenerate with `bash scripts/collect_media_evidence.sh` and `bash scripts/capture_m7_demo.sh`.
+
+### M7 Grasp Monitor: Multi-Source Grasp Diagnosis
+
+The M7 demo is no longer only a visual GIF check. MuJoCo publishes `/grasp/contact_debug` as `std_msgs/String` JSON at 10 Hz with fields such as `timestamp`, `ee_object_dist`, `gripper_opening`, `gripper_cmd`, `object_contacts`, `finger_object_contacts`, and `grasp_assist_attached`. The passive `/grasp_monitor` node fuses `/ee_pose`, `/sim/object_pose`, `/ft_sensor`, `/gripper/state`, and `/grasp/contact_debug`, then publishes `/grasp/status`, `/grasp/advice`, and `/grasp/debug`.
+
+It reports grasp phases (`APPROACHING`, `READY_TO_CLOSE`, `CLOSING`, `CONTACT_DETECTED`, `LIFTING`, `GRASP_SUCCESS`) and separates failures such as `MISS_OBJECT`, `WEAK_CONTACT`, `SLIP_AFTER_LIFT`, and `RELEASED_BY_COMMAND`. A slip is detected when the object had contact and rose with the end effector, but later drops, separates, or loses finger contact.
+
+```mermaid
+flowchart TB
+    EE["/ee_pose"]
+    OBJ["/sim/object_pose"]
+    FT["/ft_sensor"]
+    GRIP["/gripper/state"]
+    CONTACT["/grasp/contact_debug"]
+
+    EE --> GM["/grasp_monitor"]
+    OBJ --> GM
+    FT --> GM
+    GRIP --> GM
+    CONTACT --> GM
+
+    GM --> STATUS["/grasp/status"]
+    GM --> ADVICE["/grasp/advice"]
+    GM --> DEBUG["/grasp/debug"]
+
+    STATUS --> OUT["SUCCESS / MISS_OBJECT / SLIP_AFTER_LIFT / RELEASED_BY_COMMAND"]
+```
+
+`grasp_assist` remains a deterministic sim-direct demo helper for repeatable captures under simplified contact physics. `grasp_monitor` is the diagnostic layer: it observes multiple sources and explains whether the grasp succeeded, missed, slipped after lift, or was released by command.
+
+### Developer Documentation
+
+See [`docs/README.md`](docs/README.md) for the full index. Key docs: [ARCHITECTURE_V2.md](docs/ARCHITECTURE_V2.md), [PROJECT_SCOPE_AND_ACCEPTANCE.md](docs/PROJECT_SCOPE_AND_ACCEPTANCE.md), [ROADMAP.md](docs/ROADMAP.md), and M1–M7 `SPEC_V2_M*.md`.

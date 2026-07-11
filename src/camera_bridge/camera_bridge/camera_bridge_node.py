@@ -7,6 +7,8 @@ import numpy as np
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
+from rcl_interfaces.msg import ParameterType
+from rcl_interfaces.srv import GetParameters
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image, JointState
@@ -19,6 +21,8 @@ try:
     _HAS_MUJOCO = True
 except Exception:  # pragma: no cover - exercised on systems without MuJoCo
     _HAS_MUJOCO = False
+
+from camera_bridge.object_sync import MANIPULABLE_OBJECTS, MUJOCO_SIM_PARAM_NODE, object_joint_name
 
 JOINT_NAMES = [f"panda_joint{i}" for i in range(1, 8)]
 FINGER_JOINT_NAMES = ["panda_finger_joint1", "panda_finger_joint2"]
@@ -43,6 +47,8 @@ class CameraBridgeNode(Node):
         self.declare_parameter("tactile_mode", False)
         self.declare_parameter("gel_depth_baseline", 0.0155)
         self.declare_parameter("gel_scale", 300.0)
+        self.declare_parameter("target_object_name", "object_red_box")
+        self.declare_parameter("mujoco_sim_param_node", MUJOCO_SIM_PARAM_NODE)
 
         self.w = int(self.get_parameter("width").value)
         self.h = int(self.get_parameter("height").value)
@@ -60,10 +66,15 @@ class CameraBridgeNode(Node):
         self._data = None
         self._joint_qposadr: list[int] = []
         self._gripper_qposadr: list[int] = []
-        self._target_qposadr = None
-        self._target_qveladr = None
+        self._object_joints: dict[str, dict[str, object]] = {}
+        self._target_object_name = str(self.get_parameter("target_object_name").value)
+        self._mujoco_sim_param_node = str(self.get_parameter("mujoco_sim_param_node").value)
         self._object_pose = None
+        self._ee_pose = None
         self._camera = None
+        self._params_poll_counter = 0
+        self._get_params_client = self.create_client(
+            GetParameters, f"{self._mujoco_sim_param_node}/get_parameters")
 
         color_topic = str(self.get_parameter("color_topic").value)
         depth_topic = str(self.get_parameter("depth_topic").value)
@@ -80,6 +91,8 @@ class CameraBridgeNode(Node):
             Float64, "/gripper/state", self._on_gripper_state, qos_profile_sensor_data)
         self.create_subscription(
             PoseStamped, "/sim/object_pose", self._on_object_pose, qos_profile_sensor_data)
+        self.create_subscription(
+            PoseStamped, "/ee_pose", self._on_ee_pose, qos_profile_sensor_data)
 
         if bool(self.get_parameter("use_mujoco_renderer").value):
             self._try_init_mujoco()
@@ -112,11 +125,8 @@ class CameraBridgeNode(Node):
                 jid = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_JOINT, name)
                 if jid >= 0:
                     self._gripper_qposadr.append(int(self._model.jnt_qposadr[jid]))
-            target_jid = mujoco.mj_name2id(
-                self._model, mujoco.mjtObj.mjOBJ_JOINT, "target_object_joint")
-            if target_jid >= 0:
-                self._target_qposadr = int(self._model.jnt_qposadr[target_jid])
-                self._target_qveladr = int(self._model.jnt_dofadr[target_jid])
+            self._object_joints = self._build_object_joint_map(mujoco)
+            self._set_target_object_name(self._target_object_name, log=False)
             self._set_model_joints(self._q)
 
             camera = CameraModel(
@@ -133,6 +143,58 @@ class CameraBridgeNode(Node):
             self._model = None
             self._data = None
             self._camera = None
+
+    def _build_object_joint_map(self, mujoco_module) -> dict[str, dict[str, object]]:
+        joints: dict[str, dict[str, object]] = {}
+        for object_name in MANIPULABLE_OBJECTS:
+            joint_name = object_joint_name(object_name)
+            joint_id = mujoco_module.mj_name2id(
+                self._model, mujoco_module.mjtObj.mjOBJ_JOINT, joint_name)
+            if joint_id < 0:
+                self.get_logger().warn(
+                    f"MuJoCo joint '{joint_name}' not found for camera object sync.")
+                continue
+            qposadr = int(self._model.jnt_qposadr[joint_id])
+            qveladr = int(self._model.jnt_dofadr[joint_id])
+            joints[object_name] = {
+                "qposadr": qposadr,
+                "qveladr": qveladr,
+                "initial_qpos": self._data.qpos[qposadr: qposadr + 7].copy(),
+            }
+        return joints
+
+    def _set_target_object_name(self, target_name: str, *, log: bool = True) -> None:
+        target_name = str(target_name).strip()
+        if not target_name or target_name == self._target_object_name:
+            return
+        if target_name not in self._object_joints:
+            self.get_logger().warn(
+                f"Unknown target_object_name '{target_name}' for camera render sync.")
+            return
+        self._target_object_name = target_name
+        if log:
+            joint_name = object_joint_name(target_name)
+            self.get_logger().info(
+                f"Camera render target updated: name={target_name}, joint={joint_name}")
+
+    def _poll_target_object_name(self) -> None:
+        self._params_poll_counter += 1
+        if self._params_poll_counter % 30 != 0:
+            return
+        if not self._get_params_client.service_is_ready():
+            return
+        request = GetParameters.Request()
+        request.names = ["target_object_name"]
+        try:
+            response = self._get_params_client.call(request)
+        except Exception:
+            return
+        if not response or not response.values:
+            return
+        value = response.values[0]
+        if value.type != ParameterType.PARAMETER_STRING:
+            return
+        self._set_target_object_name(value.string_value)
 
     def _on_joint_state(self, msg: JointState):
         if not msg.position:
@@ -164,6 +226,12 @@ class CameraBridgeNode(Node):
         if np.all(np.isfinite(pos)):
             self._object_pose = (pos, quat)
 
+    def _on_ee_pose(self, msg: PoseStamped):
+        p = msg.pose.position
+        pos = np.array([p.x, p.y, p.z], dtype=float)
+        if np.all(np.isfinite(pos)):
+            self._ee_pose = pos
+
     def _set_model_joints(self, q):
         if self._model is None or self._data is None:
             return
@@ -172,13 +240,16 @@ class CameraBridgeNode(Node):
         gripper_qpos = self._gripper_opening * MAX_GRIPPER_OPENING_M
         for adr in self._gripper_qposadr:
             self._data.qpos[adr] = gripper_qpos
-        if self._target_qposadr is not None and self._object_pose is not None:
-            pos, quat = self._object_pose
-            adr = self._target_qposadr
-            self._data.qpos[adr: adr + 3] = pos
-            self._data.qpos[adr + 3: adr + 7] = quat
-            if self._target_qveladr is not None:
-                self._data.qvel[self._target_qveladr: self._target_qveladr + 6] = 0.0
+        for object_name, joint_info in self._object_joints.items():
+            qposadr = int(joint_info["qposadr"])
+            qveladr = int(joint_info["qveladr"])
+            if object_name == self._target_object_name and self._object_pose is not None:
+                pos, quat = self._object_pose
+                self._data.qpos[qposadr: qposadr + 3] = pos
+                self._data.qpos[qposadr + 3: qposadr + 7] = quat
+            else:
+                self._data.qpos[qposadr: qposadr + 7] = joint_info["initial_qpos"]
+            self._data.qvel[qveladr: qveladr + 6] = 0.0
         self._data.qvel[:] = 0.0
         mujoco.mj_forward(self._model, self._data)
 
@@ -204,6 +275,7 @@ class CameraBridgeNode(Node):
         self._k += 1
 
         if self._camera is not None:
+            self._poll_target_object_name()
             self._set_model_joints(self._q)
             rgb, depth_arr = self._camera.render(self._data)
             rgb = np.ascontiguousarray(np.flipud(rgb))
@@ -271,18 +343,8 @@ class CameraBridgeNode(Node):
         return rgb_tactile
 
     def _synthetic_frame(self):
-        xs = np.linspace(0, 255, self.w, dtype=np.uint8)
-        row = np.tile(xs, (self.h, 1))
-        rgb = np.dstack([
-            row,
-            np.flipud(row),
-            np.full((self.h, self.w), (self._k * 4) % 256, dtype=np.uint8),
-        ])
-
-        # Default depth
         depth = np.full((self.h, self.w), 0.8, dtype=np.float32)
 
-        # If tactile mode, let's create a simulated indentation in the middle of the gel
         if self.tactile_mode:
             depth = np.full((self.h, self.w), self.gel_depth_baseline, dtype=np.float32)
             cx, cy = self.w // 2, self.h // 2
@@ -296,8 +358,99 @@ class CameraBridgeNode(Node):
             # Sphere shape: depth is smaller in the middle
             sphere_depth = self.gel_depth_baseline - depth_oscillation * np.sqrt(np.maximum(0.0, 1.0 - dist_sq / (r**2)))
             depth[mask] = sphere_depth[mask]
+            xs = np.linspace(0, 255, self.w, dtype=np.uint8)
+            row = np.tile(xs, (self.h, 1))
+            rgb = np.dstack([
+                row,
+                np.flipud(row),
+                np.full((self.h, self.w), (self._k * 4) % 256, dtype=np.uint8),
+            ])
+            return rgb, depth
 
+        rgb = np.full((self.h, self.w, 3), (236, 239, 241), dtype=np.uint8)
+        self._draw_table_scene(rgb, depth)
         return rgb, depth
+
+    def _world_to_px(self, pos: np.ndarray | tuple[float, float, float]) -> tuple[int, int]:
+        x, y, z = (float(pos[0]), float(pos[1]), float(pos[2]))
+        u = int(self.w * 0.50 + (y / 0.32) * self.w * 0.36)
+        v = int(self.h * 0.84 - ((x - 0.20) / 0.35) * self.h * 0.54 - z * self.h * 1.35)
+        return int(np.clip(u, 0, self.w - 1)), int(np.clip(v, 0, self.h - 1))
+
+    @staticmethod
+    def _draw_rect(img: np.ndarray, x0: int, y0: int, x1: int, y1: int, color) -> None:
+        h, w = img.shape[:2]
+        x0, x1 = sorted((max(0, x0), min(w, x1)))
+        y0, y1 = sorted((max(0, y0), min(h, y1)))
+        if x1 > x0 and y1 > y0:
+            img[y0:y1, x0:x1] = color
+
+    def _draw_box_outline(self, img: np.ndarray, center, half_w: int, half_h: int, color) -> None:
+        u, v = center
+        t = max(2, min(self.w, self.h) // 120)
+        self._draw_rect(img, u - half_w, v - half_h, u + half_w, v - half_h + t, color)
+        self._draw_rect(img, u - half_w, v + half_h - t, u + half_w, v + half_h, color)
+        self._draw_rect(img, u - half_w, v - half_h, u - half_w + t, v + half_h, color)
+        self._draw_rect(img, u + half_w - t, v - half_h, u + half_w, v + half_h, color)
+
+    def _draw_circle(self, img: np.ndarray, center, radius: int, color) -> None:
+        u, v = center
+        y0 = max(0, v - radius)
+        y1 = min(self.h, v + radius + 1)
+        x0 = max(0, u - radius)
+        x1 = min(self.w, u + radius + 1)
+        if x1 <= x0 or y1 <= y0:
+            return
+        yy, xx = np.ogrid[y0:y1, x0:x1]
+        mask = (xx - u) ** 2 + (yy - v) ** 2 <= radius ** 2
+        img[y0:y1, x0:x1][mask] = color
+
+    def _draw_table_scene(self, rgb: np.ndarray, depth: np.ndarray) -> None:
+        table_color = (210, 216, 220)
+        self._draw_rect(rgb, 0, int(self.h * 0.16), self.w, self.h, table_color)
+        for y, color in [(-0.2, (128, 144, 154)), (0.2, (148, 158, 164))]:
+            center = self._world_to_px((0.40, y, 0.02))
+            self._draw_box_outline(
+                rgb,
+                center,
+                max(18, self.w // 11),
+                max(14, self.h // 13),
+                color,
+            )
+
+        if self._ee_pose is not None:
+            ee_u, ee_v = self._world_to_px(self._ee_pose)
+            gap = int(8 + 24 * float(np.clip(self._gripper_opening, 0.0, 1.0)))
+            finger_h = max(10, self.h // 24)
+            finger_w = max(3, self.w // 90)
+            color = (0, 132, 180)
+            self._draw_rect(rgb, ee_u - gap, ee_v - finger_h, ee_u - gap + finger_w, ee_v + finger_h, color)
+            self._draw_rect(rgb, ee_u + gap - finger_w, ee_v - finger_h, ee_u + gap, ee_v + finger_h, color)
+            self._draw_rect(rgb, ee_u - gap, ee_v - finger_h, ee_u + gap, ee_v - finger_h + finger_w, color)
+
+        if self._object_pose is None:
+            return
+        pos, _ = self._object_pose
+        obj_u, obj_v = self._world_to_px(pos)
+        shadow_u, shadow_v = self._world_to_px((pos[0], pos[1], 0.0))
+        shadow_r = max(5, min(self.w, self.h) // 45)
+        self._draw_circle(rgb, (shadow_u, shadow_v), shadow_r, (170, 176, 180))
+
+        z = max(0.0, float(pos[2]))
+        size = max(8, int(min(self.w, self.h) * (0.045 + z * 0.20)))
+        color = (210, 40, 42)
+        if "blue" in self._target_object_name:
+            color = (36, 94, 190)
+        elif "green" in self._target_object_name:
+            color = (46, 150, 72)
+
+        if "box" in self._target_object_name:
+            self._draw_rect(rgb, obj_u - size, obj_v - size, obj_u + size, obj_v + size, color)
+        else:
+            self._draw_circle(rgb, (obj_u, obj_v), size, color)
+
+        d = float(np.clip(0.55 - z, 0.2, 0.8))
+        self._draw_rect(depth, obj_u - size, obj_v - size, obj_u + size, obj_v + size, d)
 
     def _image_msg(self, stamp, encoding: str, array: np.ndarray) -> Image:
         msg = Image()

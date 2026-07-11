@@ -73,7 +73,11 @@ enable_grasp_monitor: true       # 辅轨评测
 
 Preflight：`scripts/run_batch_preflight_smoke.sh`
 
-Validation：`scripts/validate_dataset.py`
+日常追加：`scripts/collect_daily_episodes.sh` → 持久库 `data/episodes/`
+
+归档工具：`scripts/episode_archive.py`（`import` / `status` / `next-index`）
+
+Validation：`scripts/validate_dataset.py data/episodes --min-frames 5`
 
 ---
 

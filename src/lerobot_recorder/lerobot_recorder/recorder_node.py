@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """L7 multi-modal recorder for M6 LeRobot episodes."""
+from pathlib import Path
+import time
+
 import numpy as np
 
 import rclpy
@@ -51,11 +54,17 @@ class RecorderNode(Node):
         self.declare_parameter("sync_slop", 0.05)
         self.declare_parameter("auto_record_seconds", 0.0)
         self.declare_parameter("auto_record_delay_s", 0.0)
+        self.declare_parameter("capture_mode", "portfolio")
         self.out_dir = self.get_parameter("output_dir").value
         self.task = self.get_parameter("task").value
+        self.capture_mode = str(self.get_parameter("capture_mode").value)
+        if self.capture_mode not in {"training", "portfolio"}:
+            raise ValueError("capture_mode must be training or portfolio")
 
+        from .lerobot_v21_dataset import next_episode_index
+
+        self.episode_index = next_episode_index(Path(self.out_dir))
         self.recording = False
-        self.episode_index = 0
         self.frames = []
         self._current_episode_metadata = {}
 
@@ -78,9 +87,11 @@ class RecorderNode(Node):
             self._on_frame,
             queue_size=int(self.get_parameter("sync_queue_size").value),
             slop=float(self.get_parameter("sync_slop").value),
+            include_images=self.capture_mode == "portfolio",
         )
 
-        self.get_logger().info(f"lerobot_recorder up (output={self.out_dir}).")
+        self.get_logger().info(
+            f"lerobot_recorder up (output={self.out_dir}, capture_mode={self.capture_mode}).")
         auto_seconds = float(self.get_parameter("auto_record_seconds").value)
         auto_delay = float(self.get_parameter("auto_record_delay_s").value)
         self._auto_start_timer = None
@@ -117,6 +128,7 @@ class RecorderNode(Node):
         self.frames = []
         self._current_episode_metadata = {}
         self.recording = True
+        self._record_started = time.perf_counter()
         self.get_logger().info(f"recording episode {self.episode_index} ...")
 
     def _stop_recording(self, success: bool = True):
@@ -128,6 +140,7 @@ class RecorderNode(Node):
         metadata = dict(self._current_episode_metadata)
         metadata["stop_trigger_success"] = bool(success)
         metadata["upstream_gate"] = str(self.get_parameter("upstream_gate").value)
+        write_started = time.perf_counter()
         path = write_episode(
             self.out_dir,
             self.episode_index,
@@ -135,7 +148,14 @@ class RecorderNode(Node):
             self.task,
             success=success,
             metadata=metadata,
+            prefer_video=self.capture_mode == "portfolio",
         )
+        write_s = time.perf_counter() - write_started
+        elapsed_s = time.perf_counter() - self._record_started
+        self.get_logger().info(
+            f"episode_profile frames={len(self.frames)} capture_mode={self.capture_mode} "
+            f"record_wall_s={elapsed_s:.3f} write_s={write_s:.3f} "
+            f"effective_hz={len(self.frames) / max(elapsed_s, 1e-9):.3f}")
         self.get_logger().info(f"saved {len(self.frames)} frames -> {path}")
         self.episode_index += 1
         self.frames = []
@@ -213,10 +233,7 @@ class RecorderNode(Node):
         ee_msg: PoseStamped,
         ft_msg: WrenchStamped,
         color: Image,
-        depth: Image,
         wrist_color: Image,
-        tactile_left: Image,
-        tactile_right: Image,
         obj_msg: PoseStamped,
     ):
         if not self.recording:
@@ -236,13 +253,8 @@ class RecorderNode(Node):
             "observation.object_pose": self._pose_vec(obj_msg),
             "observation.ft": ft,
             "observation.gripper": [float(self._grip)],
-            "observation.images.scene": _img_to_np(color),
-            "observation.images.wrist": _img_to_np(wrist_color),
-            "observation.images.tactile_left": _img_to_np(tactile_left),
-            "observation.images.tactile_right": _img_to_np(tactile_right),
-            "observation.depth.scene": _img_to_np(depth),
             "action": action_pose + [float(self._grip)],
-            "timestamp": _stamp_sec(color),
+            "timestamp": _stamp_sec(color if color is not None else js),
             "frame_index": len(self.frames),
             "episode_index": self.episode_index,
             "done": False,
@@ -252,6 +264,9 @@ class RecorderNode(Node):
             "safety_estop": self._safety_estop,
             "drive_fault": self._drive_fault,
         }
+        if self.capture_mode == "portfolio":
+            frame["observation.images.scene"] = _img_to_np(color)
+            frame["observation.images.wrist"] = _img_to_np(wrist_color)
         self.frames.append(frame)
 
 

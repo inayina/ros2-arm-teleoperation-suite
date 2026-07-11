@@ -361,6 +361,15 @@ void CanopenSystem::on_encoder_state(const sensor_msgs::msg::JointState::SharedP
 {
   std::lock_guard<std::mutex> lock(encoder_mutex_);
   const size_t n = std::min(num_joints_, msg->position.size());
+  static int count = 0;
+  if (count < 5) {
+    std::cerr << "[canopen_hw_debug] on_encoder_state msg position: ";
+    for (double p : msg->position) {
+      std::cerr << p << " ";
+    }
+    std::cerr << std::endl;
+    count++;
+  }
   for (size_t i = 0; i < n; ++i) {
     if (std::isfinite(msg->position[i])) {
       encoder_position_[i] = msg->position[i];

@@ -14,9 +14,7 @@ dist/
 venv/
 
 # Data (too large for git)
-data/episodes/
-data/*.hdf5
-data/*.zarr
+data/
 
 # Cross-repo bulk artifacts stay outside the upstream capture repo
 data/releases/

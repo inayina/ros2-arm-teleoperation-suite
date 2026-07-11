@@ -133,9 +133,12 @@ controller_interface::CallbackReturn CartesianImpedanceController::on_configure(
   sub_estop_ = get_node()->create_subscription<std_msgs::msg::Bool>(
     "/safety/estop", rclcpp::QoS(1).reliable().transient_local(),
     [this](const std_msgs::msg::Bool::SharedPtr msg) {
-      estop_active_.store(msg->data);
-      if (msg->data) {
-        RCLCPP_WARN(get_node()->get_logger(), "E-Stop received: zeroing torque.");
+      const bool active = msg->data;
+      const bool prev = estop_active_.exchange(active);
+      if (active && !prev) {
+        RCLCPP_WARN(get_node()->get_logger(), "E-Stop active: zeroing torque.");
+      } else if (!active && prev) {
+        RCLCPP_INFO(get_node()->get_logger(), "E-Stop cleared.");
       }
     });
 

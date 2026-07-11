@@ -453,6 +453,9 @@ class MujocoSimNode(Node):
 
     def _set_initial_pose(self, mujoco):
         q0 = self._initial_positions()
+        print(f"[mujoco_sim_node_debug] JOINT_NAMES: {JOINT_NAMES}", flush=True)
+        print(f"[mujoco_sim_node_debug] joint_qposadr: {self.joint_qposadr}", flush=True)
+        print(f"[mujoco_sim_node_debug] q0: {q0}", flush=True)
         for i, adr in enumerate(self.joint_qposadr):
             self.data.qpos[adr] = q0[i]
         for adr in self.gripper_qposadr:
@@ -463,6 +466,7 @@ class MujocoSimNode(Node):
         self._set_gripper_force_limit(self.gripper_force_min_n, mode="free")
         mujoco.mj_forward(self.model, self.data)
         self.q = np.array([self.data.qpos[adr] for adr in self.joint_qposadr])
+        print(f"[mujoco_sim_node_debug] qpos after mj_forward: {[self.data.qpos[adr] for adr in self.joint_qposadr]}", flush=True)
         self.qd = np.array([self.data.qvel[adr] for adr in self.joint_dofadr])
 
     def _on_effort(self, msg: Float64MultiArray):
@@ -522,6 +526,8 @@ class MujocoSimNode(Node):
             self._maybe_log_contact_debug(mujoco)
 
             self.q = np.array([self.data.qpos[adr] for adr in self.joint_qposadr])
+            if self._k < 10:
+                print(f"[mujoco_sim_node_debug] step {self._k} q: {self.q.tolist()}", flush=True)
             self.qd = np.array([self.data.qvel[adr] for adr in self.joint_dofadr])
             if not np.all(np.isfinite(self.q)) or not np.all(np.isfinite(self.qd)):
                 self.get_logger().warn("Non-finite MuJoCo state detected; resetting scene.")

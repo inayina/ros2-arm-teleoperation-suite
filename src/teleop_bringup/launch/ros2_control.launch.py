@@ -36,6 +36,7 @@ def generate_launch_description():
     )
     impedance_spawner = Node(
         package="controller_manager", executable="spawner",
+        prefix="nice -n 19 ionice -c 3",
         arguments=[
             "joint_state_broadcaster",
             "cartesian_impedance_controller",
@@ -46,6 +47,7 @@ def generate_launch_description():
     )
     forward_spawner = Node(
         package="controller_manager", executable="spawner",
+        prefix="nice -n 19 ionice -c 3",
         arguments=[
             "joint_state_broadcaster",
             "forward_effort_controller",

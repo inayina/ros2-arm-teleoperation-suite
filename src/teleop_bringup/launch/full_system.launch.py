@@ -41,10 +41,13 @@ def generate_launch_description():
     model_path = LaunchConfiguration("model_path")
     randomize = LaunchConfiguration("randomize")
     headless = LaunchConfiguration("headless")
+    scene_use_mujoco_renderer = LaunchConfiguration("scene_use_mujoco_renderer")
     camera_width = LaunchConfiguration("camera_width")
     camera_height = LaunchConfiguration("camera_height")
     camera_rate = LaunchConfiguration("camera_rate")
     enable_wrist_camera = LaunchConfiguration("enable_wrist_camera")
+    wrist_use_mujoco_renderer = LaunchConfiguration("wrist_use_mujoco_renderer")
+    enable_tactile = LaunchConfiguration("enable_tactile")
     wrist_camera_width = LaunchConfiguration("wrist_camera_width")
     wrist_camera_height = LaunchConfiguration("wrist_camera_height")
     contact_debug_enabled = LaunchConfiguration("contact_debug_enabled")
@@ -58,6 +61,7 @@ def generate_launch_description():
     start_teleop = LaunchConfiguration("start_teleop")
     teleop_driver = LaunchConfiguration("teleop_driver")
     servo_mode = LaunchConfiguration("servo_mode")
+    capture_mode = LaunchConfiguration("capture_mode")
 
     common = {"use_sim": use_sim, "can_interface": can_interface}
 
@@ -67,15 +71,19 @@ def generate_launch_description():
                               "model_path": model_path,
                               "randomize": randomize,
                               "headless": headless,
+                              "scene_use_mujoco_renderer": scene_use_mujoco_renderer,
                               "camera_width": camera_width,
                               "camera_height": camera_height,
                               "camera_rate": camera_rate,
                               "enable_wrist_camera": enable_wrist_camera,
+                              "wrist_use_mujoco_renderer": wrist_use_mujoco_renderer,
+                              "enable_tactile": enable_tactile,
                               "wrist_camera_width": wrist_camera_width,
                               "wrist_camera_height": wrist_camera_height,
                               "contact_debug_enabled": contact_debug_enabled,
                               "contact_debug_period_s": contact_debug_period_s,
                               "grasp_assist_enabled": grasp_assist_enabled,
+                              "capture_mode": capture_mode,
                               "gripper_force_max_n": gripper_force_max_n,
                               "gripper_contact_hold_margin": gripper_contact_hold_margin,
                               "gripper_force_squeeze_margin_max": gripper_force_squeeze_margin_max,
@@ -105,6 +113,7 @@ def generate_launch_description():
             "sync_queue_size": sync_queue_size,
             "auto_record_seconds": auto_record_seconds,
             "auto_record_delay_s": auto_record_delay_s,
+            "capture_mode": capture_mode,
         },
         condition=IfCondition(record))
     grasp_monitor = _include(
@@ -117,6 +126,8 @@ def generate_launch_description():
         DeclareLaunchArgument("controller", default_value="impedance",
                               description="impedance | forward"),
         DeclareLaunchArgument("record", default_value="false"),
+        DeclareLaunchArgument("capture_mode", default_value="portfolio",
+                              description="training (low-dimensional only) | portfolio (scene/wrist video)"),
         DeclareLaunchArgument("output_dir", default_value="data/episodes"),
         DeclareLaunchArgument("task", default_value="teleop"),
         DeclareLaunchArgument("sync_slop", default_value="0.05"),
@@ -127,10 +138,13 @@ def generate_launch_description():
         DeclareLaunchArgument("randomize", default_value="false"),
         DeclareLaunchArgument("headless", default_value="false",
                               description="true → MuJoCo offscreen renderer (no viewer window)"),
+        DeclareLaunchArgument("scene_use_mujoco_renderer", default_value="true"),
         DeclareLaunchArgument("camera_width", default_value="640"),
         DeclareLaunchArgument("camera_height", default_value="480"),
         DeclareLaunchArgument("camera_rate", default_value="30.0"),
         DeclareLaunchArgument("enable_wrist_camera", default_value="true"),
+        DeclareLaunchArgument("wrist_use_mujoco_renderer", default_value="true"),
+        DeclareLaunchArgument("enable_tactile", default_value="true"),
         DeclareLaunchArgument("wrist_camera_width", default_value="320"),
         DeclareLaunchArgument("wrist_camera_height", default_value="240"),
         DeclareLaunchArgument("contact_debug_enabled", default_value="false"),
@@ -164,9 +178,9 @@ def generate_launch_description():
         description,
         simulation,
         TimerAction(period=2.0, actions=[fieldbus]),
-        TimerAction(period=4.0, actions=[ros2_control]),
-        TimerAction(period=6.0, actions=[safety]),
-        TimerAction(period=9.0, actions=[motion]),
-        TimerAction(period=10.0, actions=[recording]),
-        TimerAction(period=10.0, actions=[grasp_monitor]),
+        TimerAction(period=2.0, actions=[recording]),
+        TimerAction(period=2.0, actions=[grasp_monitor]),
+        TimerAction(period=4.0, actions=[safety]),
+        TimerAction(period=6.0, actions=[motion]),
+        TimerAction(period=12.0, actions=[ros2_control]),
     ])

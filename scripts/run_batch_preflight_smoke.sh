@@ -9,15 +9,17 @@ OUT_ROOT="${BATCH_PREFLIGHT_OUTPUT_ROOT:-/tmp/ros2_arm_batch_preflight_${STAMP}_
 LOG_DIR="${BATCH_PREFLIGHT_LOG_DIR:-${OUT_ROOT}/logs}"
 OBJECTS="${BATCH_PREFLIGHT_OBJECTS:-object_red_box object_blue_cylinder object_green_sphere}"
 EPISODES="${BATCH_PREFLIGHT_EPISODES:-1}"
-MAX_ATTEMPTS="${BATCH_PREFLIGHT_MAX_ATTEMPTS:-3}"
+MAX_ATTEMPTS="${BATCH_PREFLIGHT_MAX_ATTEMPTS:-8}"
 RANDOMIZE="${BATCH_PREFLIGHT_RANDOMIZE:-false}"
 HEADLESS="${BATCH_PREFLIGHT_HEADLESS:-true}"
 WATCHDOG_TIMEOUT="${BATCH_PREFLIGHT_WATCHDOG_TIMEOUT:-2.0}"
 SYNC_SLOP="${BATCH_PREFLIGHT_SYNC_SLOP:-2.5}"
 SYNC_QUEUE_SIZE="${BATCH_PREFLIGHT_SYNC_QUEUE_SIZE:-120}"
-VALIDATION_MODE="${BATCH_PREFLIGHT_VALIDATION_MODE:-lift}"
-GRASP_ASSIST="${BATCH_PREFLIGHT_GRASP_ASSIST:-false}"
+VALIDATION_MODE="${BATCH_PREFLIGHT_VALIDATION_MODE:-place}"
 ENABLE_GRASP_MONITOR="${BATCH_PREFLIGHT_ENABLE_GRASP_MONITOR:-true}"
+ENABLE_TACTILE="${BATCH_PREFLIGHT_ENABLE_TACTILE:-false}"
+SCENE_USE_MUJOCO_RENDERER="${BATCH_PREFLIGHT_SCENE_USE_MUJOCO_RENDERER:-false}"
+WRIST_USE_MUJOCO_RENDERER="${BATCH_PREFLIGHT_WRIST_USE_MUJOCO_RENDERER:-false}"
 #
 # IMPORTANT: downstream Panda schema expects scene RGB shape [240, 320, 3].
 # The recorder writes image shapes as-is, so we must make the scene camera
@@ -27,6 +29,7 @@ CAMERA_WIDTH="${BATCH_PREFLIGHT_CAMERA_WIDTH:-320}"
 CAMERA_HEIGHT="${BATCH_PREFLIGHT_CAMERA_HEIGHT:-240}"
 WRIST_CAMERA_WIDTH="${BATCH_PREFLIGHT_WRIST_CAMERA_WIDTH:-320}"
 WRIST_CAMERA_HEIGHT="${BATCH_PREFLIGHT_WRIST_CAMERA_HEIGHT:-240}"
+CAMERA_RATE="${BATCH_PREFLIGHT_CAMERA_RATE:-10.0}"
 CONTROLLER_TIMEOUT_S="${BATCH_PREFLIGHT_CONTROLLER_TIMEOUT_S:-45}"
 BATCH_TIMEOUT_S="${BATCH_PREFLIGHT_BATCH_TIMEOUT_S:-450}"
 DATASET_WAIT_S="${BATCH_PREFLIGHT_DATASET_WAIT_S:-45}"
@@ -36,24 +39,25 @@ RECORDER_SETTLE_S="${BATCH_PREFLIGHT_RECORDER_SETTLE_S:-45.0}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-92}"
 MUJOCO_GL="${MUJOCO_GL:-egl}"
 
-HOVER_DURATION="${BATCH_PREFLIGHT_HOVER_DURATION:-8.0}"
+HOVER_DURATION="${BATCH_PREFLIGHT_HOVER_DURATION:-4.0}"
 HOVER_HEIGHT="${BATCH_PREFLIGHT_HOVER_HEIGHT:-0.12}"
-DESCEND_DURATION="${BATCH_PREFLIGHT_DESCEND_DURATION:-12.0}"
+DESCEND_DURATION="${BATCH_PREFLIGHT_DESCEND_DURATION:-4.0}"
 CLOSE_DURATION="${BATCH_PREFLIGHT_CLOSE_DURATION:-3.0}"
-GRASP_PAUSE="${BATCH_PREFLIGHT_GRASP_PAUSE:-4.0}"
-# M7-proven grasp defaults (docs/M7_GRASP_DEBUGGING.md): pick 15mm, close cmd 0,
-# ~6mm squeeze/hold; 7-8mm squeeze tends to eject the cube sideways.
-# Use shape defaults (box/cylinder/sphere) in batch_generator; 0.05 is the
-# sentinel that enables per-shape pick offsets instead of a global override.
-PICK_HEIGHT_OFFSET="${BATCH_PREFLIGHT_PICK_HEIGHT_OFFSET:-0.05}"
+GRASP_PAUSE="${BATCH_PREFLIGHT_GRASP_PAUSE:-3.0}"
+# Use M7-proven absolute pick offset (docs/M7_GRASP_DEBUGGING.md), not shape sentinel.
+PICK_HEIGHT_OFFSET="${BATCH_PREFLIGHT_PICK_HEIGHT_OFFSET:-0.015}"
 GRIPPER_CLOSE_TARGET="${BATCH_PREFLIGHT_GRIPPER_CLOSE_TARGET:-0.0}"
 POSE_STEP_M="${BATCH_PREFLIGHT_POSE_STEP_M:-0.008}"
 POSE_CMD_RATE_HZ="${BATCH_PREFLIGHT_POSE_CMD_RATE_HZ:-100.0}"
-LIFT_DURATION="${BATCH_PREFLIGHT_LIFT_DURATION:-12.0}"
-LIFT_TARGET_Z="${BATCH_PREFLIGHT_LIFT_TARGET_Z:-0.100}"
+LIFT_DURATION="${BATCH_PREFLIGHT_LIFT_DURATION:-10.0}"
+LIFT_TARGET_Z="${BATCH_PREFLIGHT_LIFT_TARGET_Z:-0.12}"
 POST_LIFT_HOLD="${BATCH_PREFLIGHT_POST_LIFT_HOLD:-8.0}"
-LIFT_SUCCESS_DELTA="${BATCH_PREFLIGHT_LIFT_SUCCESS_DELTA:-0.015}"
-BIN_XY_TOLERANCE="${BATCH_PREFLIGHT_BIN_XY_TOLERANCE:-0.14}"
+LIFT_SUCCESS_DELTA="${BATCH_PREFLIGHT_LIFT_SUCCESS_DELTA:-0.03}"
+BIN_XY_TOLERANCE="${BATCH_PREFLIGHT_BIN_XY_TOLERANCE:-0.08}"
+REQUIRE_GRIPPER_CLOSE="${BATCH_PREFLIGHT_REQUIRE_GRIPPER_CLOSE:-true}"
+GRIPPER_CLOSE_MAX="${BATCH_PREFLIGHT_GRIPPER_CLOSE_MAX:-0.12}"
+# Portfolio fallback only: physics grasp may still fail without assist.
+GRASP_ASSIST="${BATCH_PREFLIGHT_GRASP_ASSIST:-true}"
 GRIPPER_FORCE_MAX_N="${BATCH_PREFLIGHT_GRIPPER_FORCE_MAX_N:-30.0}"
 GRIPPER_CONTACT_HOLD_MARGIN="${BATCH_PREFLIGHT_GRIPPER_CONTACT_HOLD_MARGIN:-0.006}"
 GRIPPER_FORCE_SQUEEZE_MARGIN_MAX="${BATCH_PREFLIGHT_GRIPPER_FORCE_SQUEEZE_MARGIN_MAX:-0.008}"
@@ -65,7 +69,7 @@ EE_TRACKING_TOLERANCE_M="${BATCH_PREFLIGHT_EE_TRACKING_TOLERANCE_M:-0.08}"
 # 0.05 is too tight leaving Panda home singularity; 0.08 is enough for G0 without
 # the old 0.12 false-reach problem near home.
 EE_XY_TOLERANCE="${BATCH_PREFLIGHT_EE_XY_TOLERANCE:-0.08}"
-EE_Z_TOLERANCE="${BATCH_PREFLIGHT_EE_Z_TOLERANCE:-0.04}"
+EE_Z_TOLERANCE="${BATCH_PREFLIGHT_EE_Z_TOLERANCE:-0.01}"
 RECORD_WARMUP_S="${BATCH_PREFLIGHT_RECORD_WARMUP_S:-3.0}"
 
 LAUNCH_PID=""
@@ -136,7 +140,13 @@ episode_accepted() {
 
 count_episode_train_dirs() {
   local root="$1"
-  find "${root}" -mindepth 2 -maxdepth 2 -type d -name train 2>/dev/null | wc -l
+  local legacy_count
+  legacy_count="$(find "${root}" -mindepth 2 -maxdepth 2 -type d -name train 2>/dev/null | wc -l)"
+  if (( legacy_count > 0 )); then
+    echo "${legacy_count}"
+  else
+    find "${root}" -mindepth 1 -maxdepth 2 -type d -name "episode_*" 2>/dev/null | wc -l
+  fi
 }
 
 wait_for_episode_dirs() {
@@ -196,6 +206,7 @@ setsid ros2 launch teleop_bringup full_system.launch.py \
   headless:="${HEADLESS}" \
   record:=true \
   output_dir:="${OUT_ROOT}" \
+  capture_mode:="${BATCH_PREFLIGHT_CAPTURE_MODE:-portfolio}" \
   servo_mode:="${SERVO_MODE}" \
   sync_slop:="${SYNC_SLOP}" \
   sync_queue_size:="${SYNC_QUEUE_SIZE}" \
@@ -204,8 +215,12 @@ setsid ros2 launch teleop_bringup full_system.launch.py \
   contact_debug_period_s:=1.0 \
   camera_width:="${CAMERA_WIDTH}" \
   camera_height:="${CAMERA_HEIGHT}" \
+  camera_rate:="${CAMERA_RATE}" \
+  scene_use_mujoco_renderer:="${SCENE_USE_MUJOCO_RENDERER}" \
   wrist_camera_width:="${WRIST_CAMERA_WIDTH}" \
   wrist_camera_height:="${WRIST_CAMERA_HEIGHT}" \
+  wrist_use_mujoco_renderer:="${WRIST_USE_MUJOCO_RENDERER}" \
+  enable_tactile:="${ENABLE_TACTILE}" \
   grasp_assist_enabled:="${GRASP_ASSIST}" \
   enable_grasp_monitor:="${ENABLE_GRASP_MONITOR}" \
   gripper_force_max_n:="${GRIPPER_FORCE_MAX_N}" \
@@ -221,12 +236,14 @@ if ! wait_for_controller; then
   echo "[preflight] controller did not become active; see ${LOG_DIR}/full_system.log" >&2
   exit 1
 fi
+echo "[preflight] waiting 12s for late-running nodes to settle..."
+sleep 12
 
 timeout 8s ros2 service call /servo_node/switch_command_type moveit_msgs/srv/ServoCommandType \
   "{command_type: $([ "${SERVO_MODE}" = twist ] && echo 1 || echo 2)}" >/dev/null 2>&1 || true
-python3 "${ROOT_DIR}/scripts/publish_dummy_heartbeat.py" --rate 50 >/dev/null 2>&1 &
+nice -n 19 ionice -c 3 python3 "${ROOT_DIR}/scripts/publish_dummy_heartbeat.py" --rate 50 >/dev/null 2>&1 &
 HB_PID=$!
-ros2 topic pub -r 30 /teleop/heartbeat std_msgs/msg/Header \
+nice -n 19 ionice -c 3 ros2 topic pub -r 30 /teleop/heartbeat std_msgs/msg/Header \
   "{frame_id: 'batch_preflight_heartbeat'}" >/dev/null 2>&1 &
 ROS_HB_PID=$!
 request_safety_reset
@@ -249,7 +266,7 @@ for object_name in ${OBJECTS}; do
   echo "[preflight] running ${object_name} -> ${instruction}"
   request_safety_reset || true
   timeout 4s ros2 service call /servo_node/pause_servo std_srvs/srv/SetBool "{data: false}" >/dev/null 2>&1 || true
-  ros2 run synth_data_gen batch_generator --ros-args \
+  nice -n 19 ionice -c 3 ros2 run synth_data_gen batch_generator --ros-args \
     -p target_object_name:="${object_name}" \
     -p language_instruction:="${instruction}" \
     -p validation_mode:="${VALIDATION_MODE}" \
@@ -258,6 +275,8 @@ for object_name in ${OBJECTS}; do
     -p fail_on_max_attempts:=true \
     -p lift_success_delta:="${LIFT_SUCCESS_DELTA}" \
     -p bin_xy_tolerance:="${BIN_XY_TOLERANCE}" \
+    -p require_gripper_close:="${REQUIRE_GRIPPER_CLOSE}" \
+    -p gripper_close_max:="${GRIPPER_CLOSE_MAX}" \
     -p hover_duration:="${HOVER_DURATION}" \
     -p hover_height:="${HOVER_HEIGHT}" \
     -p pose_step_m:="${POSE_STEP_M}" \

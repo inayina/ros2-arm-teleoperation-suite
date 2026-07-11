@@ -79,7 +79,7 @@ class TestDomainRandomizer(unittest.TestCase):
         # Mass randomization stays off, but objects must still be restored.
         assert model.body_mass[0] == 1.0
         assert abs(data.qpos[0] - 0.35) < 1e-9
-        assert abs(data.qpos[1] - (-0.10)) < 1e-9
+        assert abs(data.qpos[1] - (-0.07)) < 1e-9
         assert abs(data.qpos[2] - 0.025) < 1e-9
         assert abs(data.qpos[14] - 0.45) < 1e-9
         assert abs(data.qpos[16] - 0.03) < 1e-9

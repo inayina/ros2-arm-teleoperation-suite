@@ -22,6 +22,7 @@
 #define SAFETY_MONITOR__JOINT_LIMIT_MONITOR_HPP_
 
 #include <algorithm>
+#include <iostream>
 #include <string>
 #include <vector>
 

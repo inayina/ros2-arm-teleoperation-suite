@@ -2,7 +2,7 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
@@ -10,10 +10,12 @@ def generate_launch_description():
     model_path = LaunchConfiguration("model_path")
     randomize = LaunchConfiguration("randomize")
     camera_name = LaunchConfiguration("camera_name")
+    scene_use_mujoco_renderer = LaunchConfiguration("scene_use_mujoco_renderer")
     camera_width = LaunchConfiguration("camera_width")
     camera_height = LaunchConfiguration("camera_height")
     camera_rate = LaunchConfiguration("camera_rate")
     enable_wrist_camera = LaunchConfiguration("enable_wrist_camera")
+    wrist_use_mujoco_renderer = LaunchConfiguration("wrist_use_mujoco_renderer")
     wrist_camera_width = LaunchConfiguration("wrist_camera_width")
     wrist_camera_height = LaunchConfiguration("wrist_camera_height")
     contact_debug_enabled = LaunchConfiguration("contact_debug_enabled")
@@ -23,6 +25,7 @@ def generate_launch_description():
     gripper_contact_hold_margin = LaunchConfiguration("gripper_contact_hold_margin")
     gripper_force_squeeze_margin_max = LaunchConfiguration("gripper_force_squeeze_margin_max")
     return LaunchDescription([
+        DeclareLaunchArgument("capture_mode", default_value="portfolio"),
         DeclareLaunchArgument(
             "model_path",
             default_value="config/models/franka_panda.xml",
@@ -31,10 +34,12 @@ def generate_launch_description():
         DeclareLaunchArgument("headless", default_value="false"),
         DeclareLaunchArgument("randomize", default_value="false"),
         DeclareLaunchArgument("camera_name", default_value="scene_camera"),
+        DeclareLaunchArgument("scene_use_mujoco_renderer", default_value="true"),
         DeclareLaunchArgument("camera_width", default_value="640"),
         DeclareLaunchArgument("camera_height", default_value="480"),
         DeclareLaunchArgument("camera_rate", default_value="30.0"),
         DeclareLaunchArgument("enable_wrist_camera", default_value="true"),
+        DeclareLaunchArgument("wrist_use_mujoco_renderer", default_value="true"),
         DeclareLaunchArgument("wrist_camera_width", default_value="320"),
         DeclareLaunchArgument("wrist_camera_height", default_value="240"),
         DeclareLaunchArgument("enable_tactile", default_value="true"),
@@ -81,7 +86,11 @@ def generate_launch_description():
                 "color_topic": "/camera/color/image_raw",
                 "depth_topic": "/camera/depth/image_raw",
                 "camera_info_topic": "/camera/color/camera_info",
+                "use_mujoco_renderer": scene_use_mujoco_renderer,
             }],
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("capture_mode"), "' == 'portfolio'"
+            ])),
         ),
         Node(
             package="camera_bridge",
@@ -99,8 +108,12 @@ def generate_launch_description():
                 "color_topic": "/camera/wrist/color/image_raw",
                 "depth_topic": "/camera/wrist/depth/image_raw",
                 "camera_info_topic": "/camera/wrist/color/camera_info",
+                "use_mujoco_renderer": wrist_use_mujoco_renderer,
             }],
-            condition=IfCondition(enable_wrist_camera),
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("capture_mode"), "' == 'portfolio' and '",
+                enable_wrist_camera, "' == 'true'"
+            ])),
         ),
         Node(
             package="camera_bridge",
@@ -122,7 +135,10 @@ def generate_launch_description():
                 "gel_depth_baseline": 0.0155,
                 "gel_scale": 300.0,
             }],
-            condition=IfCondition(LaunchConfiguration("enable_tactile")),
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("capture_mode"), "' == 'portfolio' and '",
+                LaunchConfiguration("enable_tactile"), "' == 'true'"
+            ])),
         ),
         Node(
             package="camera_bridge",
@@ -144,6 +160,9 @@ def generate_launch_description():
                 "gel_depth_baseline": 0.0155,
                 "gel_scale": 300.0,
             }],
-            condition=IfCondition(LaunchConfiguration("enable_tactile")),
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("capture_mode"), "' == 'portfolio' and '",
+                LaunchConfiguration("enable_tactile"), "' == 'true'"
+            ])),
         ),
     ])

@@ -45,6 +45,8 @@ class BatchGenerator(Node):
         self.declare_parameter('fail_on_max_attempts', True)
         self.declare_parameter('lift_success_delta', 0.02)
         self.declare_parameter('bin_xy_tolerance', 0.14)
+        self.declare_parameter('require_gripper_close', True)
+        self.declare_parameter('gripper_close_max', 0.12)
         self.declare_parameter('validation_settle_s', 1.0)
         self.declare_parameter('recorder_settle_s', 5.0)
         self.declare_parameter('record_warmup_s', 2.0)
@@ -86,6 +88,8 @@ class BatchGenerator(Node):
         self.fail_on_max_attempts = bool(self.get_parameter('fail_on_max_attempts').value)
         self.lift_success_delta = float(self.get_parameter('lift_success_delta').value)
         self.bin_xy_tolerance = float(self.get_parameter('bin_xy_tolerance').value)
+        self.require_gripper_close = bool(self.get_parameter('require_gripper_close').value)
+        self.gripper_close_max = float(self.get_parameter('gripper_close_max').value)
         self.validation_settle_s = float(self.get_parameter('validation_settle_s').value)
         self.recorder_settle_s = float(self.get_parameter('recorder_settle_s').value)
         self.record_warmup_s = float(self.get_parameter('record_warmup_s').value)
@@ -106,6 +110,7 @@ class BatchGenerator(Node):
         self._trial_initial_object_xyz = None
         self._trial_max_object_z = None
         self._trial_max_ee_tracking_error = 0.0
+        self._trial_gripper_was_closed = False
         self._gripper_hold_value = None
         self._pick_height_offset_default = 0.05
         self._last_cmd_ori = [1.0, 0.0, 0.0, 0.0]
@@ -262,8 +267,8 @@ class BatchGenerator(Node):
             time.sleep(max(0.5, self.record_warmup_s))
 
             # 3. Execute Pick-Place Motion
+            self._ensure_servo_ready(force_home=True)
             self._request_safety_reset()
-            self._ensure_servo_ready()
             start_p, start_q = self._motion_start_from_ee()
             object_xyz = self._object_xyz(object_pose)
             motion_ok = True
@@ -780,6 +785,7 @@ class BatchGenerator(Node):
     def _start_trial_tracking(self, object_pose):
         xyz = self._object_xyz(object_pose)
         self._trial_max_ee_tracking_error = 0.0
+        self._trial_gripper_was_closed = False
         if xyz is None:
             self._trial_initial_object_z = None
             self._trial_initial_object_xyz = None
@@ -807,14 +813,24 @@ class BatchGenerator(Node):
         if ori is not None:
             self._last_cmd_ori = [float(ori[0]), float(ori[1]), float(ori[2]), float(ori[3])]
 
-    def _ensure_servo_ready(self, timeout=4.0):
-        hold_pos, hold_ori = self._motion_start_from_ee()
+    def _ensure_servo_ready(self, timeout=4.0, force_home=False):
+        if force_home:
+            hold_pos, hold_ori = [0.307, 0.0, 0.490], [0.0, 1.0, 0.0, 0.0]
+        else:
+            hold_pos, hold_ori = self._motion_start_from_ee()
         self._sync_cmd_setpoint(hold_pos, hold_ori)
         use_twist = self.motion_mode == 'twist'
         if use_twist:
             self._publish_twist_hold(0.8)
         else:
             self._publish_pose_hold(hold_pos, hold_ori, duration=0.8, rate_hz=self.pose_cmd_rate_hz)
+
+        # Force a transition to paused first (if it wasn't), then to unpaused.
+        # This resets MoveIt Servo's internal target joint state to the current /joint_states.
+        pause_true = SetBool.Request()
+        pause_true.data = True
+        self._call_service(self.cli_pause_servo, pause_true, timeout=1.0)
+        time.sleep(0.1)
 
         pause_req = SetBool.Request()
         pause_req.data = False
@@ -885,6 +901,8 @@ class BatchGenerator(Node):
 
     def _lock_gripper(self, normalized_value: float):
         self._gripper_hold_value = float(normalized_value)
+        if self._gripper_hold_value <= self.gripper_close_max:
+            self._trial_gripper_was_closed = True
         self.pub_grip.publish(Float64(data=self._gripper_hold_value))
 
     def _release_gripper_lock(self):
@@ -941,6 +959,13 @@ class BatchGenerator(Node):
             return {"success": False, "reason": "scene reset failed or timed out"}
         if not motion_ok:
             return {"success": False, "reason": "motion phase did not converge before grasp/lift"}
+        if self.require_gripper_close and not self._trial_gripper_was_closed:
+            return {
+                "success": False,
+                "reason": (
+                    f"gripper never closed below {self.gripper_close_max:.3f} during trial"
+                ),
+            }
         if (
             self.motion_mode == "twist"
             and self._trial_max_ee_tracking_error > self.ee_tracking_tolerance_m
@@ -1036,9 +1061,9 @@ class BatchGenerator(Node):
 
     def _hold_nominal_home(self, duration=3.0):
         home_pos, home_ori = self._nominal_home()
-        self._request_safety_reset()
         if self.motion_mode == "pose":
-            self._ensure_servo_ready(timeout=3.0)
+            self._ensure_servo_ready(timeout=3.0, force_home=True)
+        self._request_safety_reset()
         self._publish_pose_hold(
             home_pos, home_ori, duration=float(duration), rate_hz=self.pose_cmd_rate_hz
         )

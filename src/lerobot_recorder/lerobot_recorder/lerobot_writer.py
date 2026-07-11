@@ -1,9 +1,28 @@
-"""Write buffered M6 episodes in a LeRobot/HuggingFace-loadable layout."""
+"""Write buffered M6 episodes in LeRobot v2.1 (MP4 + parquet) layout."""
 import json
 import os
 import time
+from pathlib import Path
 
 import numpy as np
+
+from .lerobot_v21_dataset import (
+    FORMAT_ARROW,
+    FORMAT_V21,
+    append_episode,
+    ffmpeg_available,
+)
+from .video_encode import DEFAULT_FPS
+
+try:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    _HAS_PYARROW = True
+except Exception:
+    pa = None
+    pq = None
+    _HAS_PYARROW = False
 
 try:
     from datasets import Array2D, Array3D, Dataset, Features, Sequence, Value
@@ -16,9 +35,6 @@ except Exception:
 def _episode_features(first_frame: dict) -> "Features":
     rgb = np.asarray(first_frame["observation.images.scene"])
     wrist_rgb = np.asarray(first_frame["observation.images.wrist"])
-    tactile_left = np.asarray(first_frame["observation.images.tactile_left"])
-    tactile_right = np.asarray(first_frame["observation.images.tactile_right"])
-    depth = np.asarray(first_frame["observation.depth.scene"])
     return Features({
         "observation.state": Sequence(Value("float32"), length=7),
         "observation.ee_pose": Sequence(Value("float32"), length=7),
@@ -30,15 +46,6 @@ def _episode_features(first_frame: dict) -> "Features":
         ),
         "observation.images.wrist": Array3D(
             dtype="uint8", shape=(int(wrist_rgb.shape[0]), int(wrist_rgb.shape[1]), 3)
-        ),
-        "observation.images.tactile_left": Array3D(
-            dtype="uint8", shape=(int(tactile_left.shape[0]), int(tactile_left.shape[1]), 3)
-        ),
-        "observation.images.tactile_right": Array3D(
-            dtype="uint8", shape=(int(tactile_right.shape[0]), int(tactile_right.shape[1]), 3)
-        ),
-        "observation.depth.scene": Array2D(
-            dtype="float32", shape=(int(depth.shape[0]), int(depth.shape[1]))
         ),
         "action": Sequence(Value("float32"), length=8),
         "timestamp": Value("float64"),
@@ -55,21 +62,9 @@ def _episode_features(first_frame: dict) -> "Features":
 
 def _normalize_frame(frame: dict) -> dict:
     normalized = dict(frame)
-    normalized["observation.images.scene"] = np.asarray(
-        frame["observation.images.scene"], dtype=np.uint8
-    )
-    normalized["observation.images.wrist"] = np.asarray(
-        frame["observation.images.wrist"], dtype=np.uint8
-    )
-    normalized["observation.images.tactile_left"] = np.asarray(
-        frame["observation.images.tactile_left"], dtype=np.uint8
-    )
-    normalized["observation.images.tactile_right"] = np.asarray(
-        frame["observation.images.tactile_right"], dtype=np.uint8
-    )
-    normalized["observation.depth.scene"] = np.asarray(
-        frame["observation.depth.scene"], dtype=np.float32
-    )
+    for key in ("observation.images.scene", "observation.images.wrist"):
+        if key in frame:
+            normalized[key] = np.asarray(frame[key], dtype=np.uint8)
     for key in (
         "observation.state",
         "observation.ee_pose",
@@ -91,6 +86,36 @@ def _normalize_frame(frame: dict) -> dict:
     return normalized
 
 
+def _filter_shape_consistent_frames(frames: list[dict]) -> list[dict]:
+    from collections import Counter
+
+    if "observation.images.scene" not in frames[0]:
+        return frames
+    scene_shapes = [np.asarray(frame["observation.images.scene"]).shape for frame in frames]
+    most_common_scene = Counter(scene_shapes).most_common(1)[0][0]
+    return [
+        frame
+        for frame in frames
+        if np.asarray(frame["observation.images.scene"]).shape == most_common_scene
+    ]
+
+
+def _write_arrow_episode(train_dir: str, normalized: list[dict]) -> None:
+    if _HAS_DATASETS:
+        ds = Dataset.from_list(normalized, features=_episode_features(normalized[0]))
+        ds.save_to_disk(train_dir)
+        return
+
+    flat = {}
+    for key in normalized[0].keys():
+        try:
+            flat[key] = np.asarray([frame[key] for frame in normalized])
+        except Exception:
+            flat[key] = np.asarray([frame[key] for frame in normalized], dtype=object)
+    os.makedirs(train_dir, exist_ok=True)
+    np.savez_compressed(os.path.join(train_dir, "frames.npz"), **flat)
+
+
 def write_episode(
     out_dir: str,
     episode_index: int,
@@ -98,51 +123,46 @@ def write_episode(
     task: str = "teleop",
     success: bool = True,
     metadata: dict | None = None,
+    *,
+    fps: float = DEFAULT_FPS,
+    prefer_video: bool = True,
 ) -> str:
     """Write one episode and return the loadable dataset path."""
     if not frames:
         raise ValueError("cannot write an empty episode")
 
-    # Filter frames to ensure shape consistency across all modalities (discard transient DDS history shapes)
-    from collections import Counter
-    scene_shapes = [np.asarray(f["observation.images.scene"]).shape for f in frames]
-    most_common_scene = Counter(scene_shapes).most_common(1)[0][0]
-    
-    filtered_frames = []
-    for f in frames:
-        if np.asarray(f["observation.images.scene"]).shape == most_common_scene:
-            filtered_frames.append(f)
-    frames = filtered_frames
-
-    if not frames:
+    filtered = _filter_shape_consistent_frames(frames)
+    if not filtered:
         raise ValueError("no frames left after shape consistency filtering")
 
-    os.makedirs(out_dir, exist_ok=True)
-    ep_dir = os.path.join(out_dir, f"episode_{episode_index:06d}")
-    os.makedirs(ep_dir, exist_ok=True)
-    train_dir = os.path.join(ep_dir, "train")
-
-    for frame in frames:
+    for frame in filtered:
         frame["success"] = bool(success)
-    frames[-1]["done"] = True
-    normalized = [_normalize_frame(frame) for frame in frames]
+    filtered[-1]["done"] = True
+    normalized = [_normalize_frame(frame) for frame in filtered]
 
-    if _HAS_DATASETS:
-        ds = Dataset.from_list(normalized, features=_episode_features(normalized[0]))
-        ds.save_to_disk(train_dir)
-    else:
-        flat = {}
-        for key in normalized[0].keys():
-            try:
-                flat[key] = np.asarray([f[key] for f in normalized])
-            except Exception:
-                flat[key] = np.asarray([f[key] for f in normalized], dtype=object)
-        os.makedirs(train_dir, exist_ok=True)
-        np.savez_compressed(os.path.join(train_dir, "frames.npz"), **flat)
+    dataset_root = Path(out_dir)
+    use_v21 = _HAS_PYARROW and (not prefer_video or ffmpeg_available())
+    episode_metadata = dict(metadata or {})
+    if "upstream_gate" not in episode_metadata:
+        episode_metadata["upstream_gate"] = "teleop"
 
+    if use_v21:
+        parquet_path = append_episode(
+            dataset_root,
+            episode_index,
+            normalized,
+            task=task,
+            success=success,
+            metadata=episode_metadata,
+            fps=fps,
+        )
+        return str(parquet_path)
+
+    ep_dir = os.path.join(out_dir, f"episode_{episode_index:06d}")
+    train_dir = os.path.join(ep_dir, "train")
+    _write_arrow_episode(train_dir, normalized)
+    upstream_gate = str(episode_metadata.pop("upstream_gate", "teleop"))
     with open(os.path.join(ep_dir, "meta.json"), "w", encoding="utf-8") as fh:
-        episode_metadata = dict(metadata or {})
-        upstream_gate = str(episode_metadata.pop("upstream_gate", "teleop"))
         json.dump(
             {
                 "task": task,
@@ -150,7 +170,7 @@ def write_episode(
                 "episode_index": episode_index,
                 "dataset_path": train_dir,
                 "saved_unix_time": time.time(),
-                "format": "huggingface_dataset" if _HAS_DATASETS else "npz_fallback",
+                "format": FORMAT_ARROW if _HAS_DATASETS else "npz_fallback",
                 "success": bool(success),
                 "upstream_gate": upstream_gate,
                 "metadata": episode_metadata,

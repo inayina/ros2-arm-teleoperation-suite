@@ -57,7 +57,8 @@ cartesian_impedance_controller:
     # This keeps the simulated arm near the Servo joint target while the
     # Cartesian impedance term defines the end-effector behavior.
     joint_stiffness: [35.0, 35.0, 30.0, 25.0, 12.0, 10.0, 8.0]
-    joint_damping: [8.0, 8.0, 7.0, 6.0, 3.0, 2.5, 2.0]
+    joint_damping: [12.0, 12.0, 11.0, 10.0, 7.0, 6.5, 6.0]
+
 
     # Safety limits
     max_torque_nm: [87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0]

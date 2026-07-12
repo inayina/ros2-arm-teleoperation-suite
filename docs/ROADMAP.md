@@ -187,7 +187,7 @@ commit 格式：`type(scope): message`，例如 `feat(canopen_hw_interface): cyc
 ## V1 历史存档
 
 V1 为五层教学版（teleop → impedance(独立节点) → can_bridge → mujoco → recorder），相关文档：
-- [`DESIGN_SPEC.md`](./DESIGN_SPEC.md)（V1 总体设计）
-- [`SPEC_M1_CAN_RS485.md`](./SPEC_M1_CAN_RS485.md) / [`SPEC_M2_MUJOCO_BRIDGE.md`](./SPEC_M2_MUJOCO_BRIDGE.md) / [`SPEC_M3_IMPEDANCE_CTRL.md`](./SPEC_M3_IMPEDANCE_CTRL.md) / [`SPEC_M4_FULL_PIPELINE.md`](./SPEC_M4_FULL_PIPELINE.md) / [`SPEC_M5_LEROBOT_RECORDER.md`](./SPEC_M5_LEROBOT_RECORDER.md)
+- [DESIGN_SPEC.md](./archive/v1/DESIGN_SPEC.md)（V1 总体设计）
+- [SPEC_M1_CAN_RS485.md](./archive/v1/SPEC_M1_CAN_RS485.md) / [SPEC_M2_MUJOCO_BRIDGE.md](./archive/v1/SPEC_M2_MUJOCO_BRIDGE.md) / [SPEC_M3_IMPEDANCE_CTRL.md](./archive/v1/SPEC_M3_IMPEDANCE_CTRL.md) / [SPEC_M4_FULL_PIPELINE.md](./archive/v1/SPEC_M4_FULL_PIPELINE.md) / [SPEC_M5_LEROBOT_RECORDER.md](./archive/v1/SPEC_M5_LEROBOT_RECORDER.md)
 
 > 这些文档保留作演进对照，**当前开发以 V2 为准，见上方 V2 细化 SPEC 索引**。

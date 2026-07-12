@@ -1,4 +1,4 @@
-> 🗄 **归档（V1）**。V2 现场总线设计见 [`ARCHITECTURE_V2.md`](./ARCHITECTURE_V2.md) §6.4（`canopen_hw_interface` + `virtual_servo_driver`）。
+> 🗄 **归档（V1）**。V2 现场总线设计见 [`ARCHITECTURE_V2.md`](../../ARCHITECTURE_V2.md) §6.4（`canopen_hw_interface` + `virtual_servo_driver`）。
 
 # SPEC M1: CAN + RS485 通信层
 

@@ -37,9 +37,9 @@
 
 | 文档 | 说明 |
 |---|---|
-| [DESIGN_SPEC.md](./DESIGN_SPEC.md) | V1 五层教学版总体设计规范 |
-| [SPEC_M1_CAN_RS485.md](./SPEC_M1_CAN_RS485.md) | V1 CAN/RS485 通信层 |
-| [SPEC_M2_MUJOCO_BRIDGE.md](./SPEC_M2_MUJOCO_BRIDGE.md) | V1 MuJoCo 桥接 |
-| [SPEC_M3_IMPEDANCE_CTRL.md](./SPEC_M3_IMPEDANCE_CTRL.md) | V1 阻抗控制器（独立节点版） |
-| [SPEC_M4_FULL_PIPELINE.md](./SPEC_M4_FULL_PIPELINE.md) | V1 全链路集成 |
-| [SPEC_M5_LEROBOT_RECORDER.md](./SPEC_M5_LEROBOT_RECORDER.md) | V1 LeRobot 录制 |
+| [DESIGN_SPEC.md](./archive/v1/DESIGN_SPEC.md) | V1 五层教学版总体设计规范 |
+| [SPEC_M1_CAN_RS485.md](./archive/v1/SPEC_M1_CAN_RS485.md) | V1 CAN/RS485 通信层 |
+| [SPEC_M2_MUJOCO_BRIDGE.md](./archive/v1/SPEC_M2_MUJOCO_BRIDGE.md) | V1 MuJoCo 桥接 |
+| [SPEC_M3_IMPEDANCE_CTRL.md](./archive/v1/SPEC_M3_IMPEDANCE_CTRL.md) | V1 阻抗控制器（独立节点版） |
+| [SPEC_M4_FULL_PIPELINE.md](./archive/v1/SPEC_M4_FULL_PIPELINE.md) | V1 全链路集成 |
+| [SPEC_M5_LEROBOT_RECORDER.md](./archive/v1/SPEC_M5_LEROBOT_RECORDER.md) | V1 LeRobot 录制 |

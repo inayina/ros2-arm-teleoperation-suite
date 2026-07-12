@@ -8,7 +8,7 @@ description: Development assistant for ros2-arm-teleoperation-suite. Provides pr
 ## 项目概况
 
 - **目标**：工业级机械臂遥操作全链路平台（无实体硬件，纯软件仿真）
-- **架构**：**V2**（见 `docs/ARCHITECTURE_V2.md`）；V1 五层设计存档于 `docs/DESIGN_SPEC.md`
+- **架构**：**V2**（见 `docs/ARCHITECTURE_V2.md`）；V1 五层设计存档于 `docs/archive/v1/DESIGN_SPEC.md`
 - **机器人**：Franka Panda（MuJoCo v3 + mujoco_menagerie XML）
 - **ROS2 发行版**：Jazzy（含 ros2_control / MoveIt 2 Servo）
 - **Python 环境**：ROS2/Jazzy 主运行环境使用系统 Python 3.12（`/usr/bin/python3` + `/opt/ros/jazzy`）；conda 仅用于 LeRobot 数据处理、训练或 notebook，不用于 `ros2 launch`
@@ -453,9 +453,9 @@ ds.save_to_disk(f"data/episodes/episode_{idx:06d}/train")
 
 ### V1 历史存档 SPEC（参照用）
 
-- 整体设计规范（V1）：[docs/DESIGN_SPEC.md](../../../docs/DESIGN_SPEC.md)
-- M1 CAN/RS485 SPEC（V1）：[docs/SPEC_M1_CAN_RS485.md](../../../docs/SPEC_M1_CAN_RS485.md)
-- M2 MuJoCo 桥接 SPEC（V1）：[docs/SPEC_M2_MUJOCO_BRIDGE.md](../../../docs/SPEC_M2_MUJOCO_BRIDGE.md)
-- M3 阻抗控制器 SPEC（V1）：[docs/SPEC_M3_IMPEDANCE_CTRL.md](../../../docs/SPEC_M3_IMPEDANCE_CTRL.md)
-- M4 全链路集成 SPEC（V1）：[docs/SPEC_M4_FULL_PIPELINE.md](../../../docs/SPEC_M4_FULL_PIPELINE.md)
-- M5 LeRobot 录制 SPEC（V1）：[docs/SPEC_M5_LEROBOT_RECORDER.md](../../../docs/SPEC_M5_LEROBOT_RECORDER.md)
+- 整体设计规范（V1）：[docs/archive/v1/DESIGN_SPEC.md](../../../docs/archive/v1/DESIGN_SPEC.md)
+- M1 CAN/RS485 SPEC（V1）：[docs/archive/v1/SPEC_M1_CAN_RS485.md](../../../docs/archive/v1/SPEC_M1_CAN_RS485.md)
+- M2 MuJoCo 桥接 SPEC（V1）：[docs/archive/v1/SPEC_M2_MUJOCO_BRIDGE.md](../../../docs/archive/v1/SPEC_M2_MUJOCO_BRIDGE.md)
+- M3 阻抗控制器 SPEC（V1）：[docs/archive/v1/SPEC_M3_IMPEDANCE_CTRL.md](../../../docs/archive/v1/SPEC_M3_IMPEDANCE_CTRL.md)
+- M4 全链路集成 SPEC（V1）：[docs/archive/v1/SPEC_M4_FULL_PIPELINE.md](../../../docs/archive/v1/SPEC_M4_FULL_PIPELINE.md)
+- M5 LeRobot 录制 SPEC（V1）：[docs/archive/v1/SPEC_M5_LEROBOT_RECORDER.md](../../../docs/archive/v1/SPEC_M5_LEROBOT_RECORDER.md)

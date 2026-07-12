@@ -34,6 +34,8 @@ jobs:
       - name: Build workspace
         run: |
           . /opt/ros/jazzy/setup.sh
+          rosdep update
+          rosdep install --from-paths src --ignore-src -r -y --rosdistro jazzy
           colcon build
 
       - name: Run tests

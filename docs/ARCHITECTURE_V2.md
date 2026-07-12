@@ -258,8 +258,10 @@ flowchart TB
 ros2-arm-teleoperation-suite/
 ├── docs/
 │   ├── ARCHITECTURE_V2.md          ← 本文件
-│   ├── DESIGN_SPEC.md              ← V1 历史存档
-│   └── SPEC_M*_*.md                ← 各里程碑细化 SPEC
+│   ├── SPEC_V2_M*_*.md             ← 各 V2 里程碑细化 SPEC
+│   └── archive/                    ← 历史文档归档目录
+│       ├── README.md               ← 归档索引
+│       └── v1/                     ← V1 历史设计文档 (DESIGN_SPEC.md 及各 SPEC_M*.md)
 │
 ├── src/
 │   ├── teleop_interfaces/          ← 【新】自定义 msg/srv（纯接口包）
@@ -570,4 +572,4 @@ flowchart LR
 
 ---
 
-*本文件为 V2 架构基线，随各里程碑落地细化对应 `SPEC_M*_V2.md`。V1 设计见 `DESIGN_SPEC.md`（历史存档）。*
+*本文件为 V2 架构基线，随各里程碑落地细化对应 `SPEC_V2_M*.md`。V1 设计见 [DESIGN_SPEC.md](archive/v1/DESIGN_SPEC.md)（历史存档）。*

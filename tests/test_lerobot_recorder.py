@@ -6,7 +6,13 @@ import tempfile
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseStamped
 from lerobot_recorder.recorder_node import _pad, _img_to_np, RecorderNode
-from lerobot_recorder.lerobot_writer import _normalize_frame, write_episode, _HAS_DATASETS, _HAS_PYARROW
+from lerobot_recorder.lerobot_writer import (
+    _normalize_frame,
+    write_episode,
+    _HAS_DATASETS,
+    _HAS_PYARROW,
+    ffmpeg_available,
+)
 from lerobot_recorder.lerobot_v21_dataset import FORMAT_V21
 
 class TestLeRobotRecorder(unittest.TestCase):
@@ -190,7 +196,7 @@ class TestLeRobotRecorder(unittest.TestCase):
             assert meta["upstream_gate"] == "batch_generator"
             assert meta["metadata"]["validation_mode"] == "place"
 
-            if _HAS_PYARROW:
+            if _HAS_PYARROW and ffmpeg_available():
                 assert meta["format"] == FORMAT_V21
                 assert os.path.exists(out_path)
                 assert out_path.endswith(".parquet")

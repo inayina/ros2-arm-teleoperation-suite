@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="520" viewBox="0 0 1320 520" role="img" aria-labelledby="title desc">
+  <title id="title">Canonical three-repo Panda dataflow</title>
+  <desc id="desc">Upstream records Panda simulation episodes, midstream adapts and trains, downstream replays handoff and produces readiness reports.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f8fb; }
+      .box { fill: #ffffff; stroke: #24324a; stroke-width: 2.5; rx: 10; }
+      .head { font: 700 26px sans-serif; fill: #162033; }
+      .body { font: 18px sans-serif; fill: #2d3b52; }
+      .small { font: 15px sans-serif; fill: #4e5c70; }
+      .arrow { stroke: #2c6fbb; stroke-width: 4; fill: none; marker-end: url(#arrowhead); }
+      .tag { fill: #e8f1fb; stroke: #2c6fbb; stroke-width: 1.5; rx: 8; }
+      .warn { fill: #fff3d9; stroke: #b27712; stroke-width: 1.5; rx: 8; }
+    </style>
+    <marker id="arrowhead" markerWidth="12" markerHeight="8" refX="11" refY="4" orient="auto">
+      <polygon points="0 0, 12 4, 0 8" fill="#2c6fbb"/>
+    </marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1320" height="520"/>
+
+  <text class="head" x="64" y="58">Panda Three-Repo Closed Loop: Software Simulation and Sim2Real-Readiness</text>
+  <text class="small" x="64" y="88">Canonical scope: Panda sim episodes -> midstream release/training/handoff -> downstream PyBullet replay/risk report. No real-robot deployment claim.</text>
+
+  <rect class="box" x="64" y="132" width="340" height="235"/>
+  <text class="head" x="94" y="178">Upstream</text>
+  <text class="body" x="94" y="214">ros2-arm-teleoperation-suite</text>
+  <text class="small" x="94" y="250">Task / Motion / Evaluation</text>
+  <text class="small" x="94" y="280">ROS 2 + MuJoCo + recorder</text>
+  <text class="small" x="94" y="310">batch_generator physical gate</text>
+  <rect class="tag" x="94" y="328" width="240" height="36"/>
+  <text class="small" x="112" y="351">Output: raw episode</text>
+
+  <rect class="box" x="490" y="132" width="340" height="235"/>
+  <text class="head" x="520" y="178">Midstream</text>
+  <text class="body" x="520" y="214">robot-arm-episode-data-lab</text>
+  <text class="small" x="520" y="250">Adapter / Inspector / Release</text>
+  <text class="small" x="520" y="280">MLP BC offline training</text>
+  <text class="small" x="520" y="310">predicted JSONL + handoff</text>
+  <rect class="tag" x="520" y="328" width="255" height="36"/>
+  <text class="small" x="538" y="351">Output: bridge_handoff</text>
+
+  <rect class="box" x="916" y="132" width="340" height="235"/>
+  <text class="head" x="946" y="178">Downstream</text>
+  <text class="body" x="946" y="214">ros2-moveit-pybullet-bridge</text>
+  <text class="small" x="946" y="250">Handoff Loader / Replay</text>
+  <text class="small" x="946" y="280">PandaActionAdapter + PyBullet</text>
+  <text class="small" x="946" y="310">monitoring / risk benchmark</text>
+  <rect class="tag" x="946" y="328" width="245" height="36"/>
+  <text class="small" x="964" y="351">Output: benchmark report</text>
+
+  <path class="arrow" d="M 405 250 C 435 250, 455 250, 485 250"/>
+  <path class="arrow" d="M 831 250 C 861 250, 881 250, 911 250"/>
+
+  <rect class="warn" x="64" y="414" width="1192" height="58"/>
+  <text class="small" x="86" y="439">Boundary: upstream owns collection and physical gate; midstream owns schema/release/training/handoff; downstream owns replay and risk validation.</text>
+  <text class="small" x="86" y="463">Do not use this diagram as proof of real-robot deployment, completed Sim2Real, online ACT rollout, or physical grasp success downstream.</text>
+</svg>

@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="560" viewBox="0 0 1320 560" role="img" aria-labelledby="title desc">
+  <title id="title">Canonical three-repo run evidence</title>
+  <desc id="desc">Evidence summary for Panda 30 episode MLP BC handoff and latest downstream smoke benchmark.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8f9fc; }
+      .panel { fill: #ffffff; stroke: #26334d; stroke-width: 2; rx: 10; }
+      .head { font: 700 26px sans-serif; fill: #15213a; }
+      .label { font: 700 18px sans-serif; fill: #26334d; }
+      .body { font: 17px sans-serif; fill: #34445f; }
+      .note { font: 15px sans-serif; fill: #5b6678; }
+      .ok { fill: #e9f7ef; stroke: #2f8f55; stroke-width: 1.5; rx: 8; }
+      .warn { fill: #fff4db; stroke: #b87917; stroke-width: 1.5; rx: 8; }
+      .line { stroke: #d5dbe7; stroke-width: 2; }
+    </style>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1320" height="560"/>
+  <text class="head" x="64" y="56">Panda 30-Episode Canonical Evidence</text>
+  <text class="note" x="64" y="84">Evidence-backed facts for README use. Performance numbers are split between canonical 2026-07-11 artifacts and latest archived 2026-07-12 downstream smoke.</text>
+
+  <rect class="panel" x="64" y="122" width="360" height="300"/>
+  <text class="label" x="92" y="162">G0 Upstream Dataset</text>
+  <line class="line" x1="92" y1="182" x2="396" y2="182"/>
+  <text class="body" x="92" y="220">30 Panda simulation episodes</text>
+  <text class="body" x="92" y="250">71,737 frames</text>
+  <text class="body" x="92" y="280">upstream_gate: batch_generator</text>
+  <text class="body" x="92" y="310">grasp_assist_enabled: false</text>
+  <rect class="ok" x="92" y="342" width="216" height="40"/>
+  <text class="body" x="112" y="368">30/30 valid</text>
+
+  <rect class="panel" x="480" y="122" width="360" height="300"/>
+  <text class="label" x="508" y="162">G1 Midstream Release</text>
+  <line class="line" x1="508" y1="182" x2="812" y2="182"/>
+  <text class="body" x="508" y="220">release: panda_30_release_v0</text>
+  <text class="body" x="508" y="250">schema: panda_ee_delta_gripper_v0</text>
+  <text class="body" x="508" y="280">state[8] -> action[7]</text>
+  <text class="body" x="508" y="310">MLP BC, 100 epochs, CUDA</text>
+  <text class="body" x="508" y="340">train/test loss: 0.04914 / 0.23502</text>
+  <rect class="warn" x="508" y="362" width="258" height="40"/>
+  <text class="note" x="526" y="387">images missing in release</text>
+
+  <rect class="panel" x="896" y="122" width="360" height="300"/>
+  <text class="label" x="924" y="162">G2 Downstream Replay</text>
+  <line class="line" x1="924" y1="182" x2="1228" y2="182"/>
+  <text class="body" x="924" y="220">handoff: panda_30_mlp_bridge_v0</text>
+  <text class="body" x="924" y="250">strategy: panda_jsonl_replay</text>
+  <text class="body" x="924" y="280">mode: pybullet_ik</text>
+  <text class="body" x="924" y="310">latest smoke: 1/1 completed</text>
+  <text class="body" x="924" y="340">mean/max: 9.79 / 34.218 ms</text>
+  <rect class="warn" x="924" y="362" width="272" height="40"/>
+  <text class="note" x="942" y="387">3,275 gripper cmds out of range</text>
+
+  <rect class="warn" x="64" y="466" width="1192" height="54"/>
+  <text class="note" x="86" y="489">Do not claim: real-robot deployment, completed Sim2Real, stable online autonomous grasping, ACT canonical runtime, or loss improvement as task success.</text>
+  <text class="note" x="86" y="512">Canonical downstream latency/fault numbers in older docs must be backed by original benchmark JSON before use as headline metrics.</text>
+</svg>

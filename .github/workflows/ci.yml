@@ -22,6 +22,7 @@ jobs:
             python3-pip \
             python3-pytest \
             python3-colcon-common-extensions \
+            ffmpeg \
             libglfw3-dev \
             libxxf86vm-dev \
             libgl1-mesa-dev \

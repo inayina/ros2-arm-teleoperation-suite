@@ -2,6 +2,7 @@
 """L7 multi-modal recorder for M6 LeRobot episodes."""
 from pathlib import Path
 import time
+import json
 
 import numpy as np
 
@@ -11,6 +12,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseStamped, WrenchStamped
 from std_msgs.msg import Float64, String
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from teleop_interfaces.msg import DriveStatus, DriveStatusArray, SafetyStatus
 from teleop_interfaces.srv import EndEpisode
 
@@ -19,11 +21,13 @@ from .time_sync import MultiModalSync
 
 
 def _img_to_np(msg: Image) -> np.ndarray:
-    if msg.encoding in ("rgb8", "bgr8"):
+    if msg.encoding == "rgb8":
+        # 仿真相机原生发布 rgb8 编码，避开非连续切片逆序重排。
+        # 此时 NumPy copy() 执行的是底层 C 级别的连续内存 memcpy，效率极高。
+        return np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3).copy()
+    if msg.encoding == "bgr8":
         arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
-        if msg.encoding == "bgr8":
-            arr = arr[:, :, ::-1]
-        return arr.copy()
+        return arr[:, :, ::-1].copy()  # 仅在确为 BGR 时执行非连续重排深拷贝
     if msg.encoding == "16UC1":
         depth_mm = np.frombuffer(msg.data, dtype=np.uint16).reshape(msg.height, msg.width)
         return (depth_mm.astype(np.float32) * 0.001).copy()
@@ -55,6 +59,10 @@ class RecorderNode(Node):
         self.declare_parameter("auto_record_seconds", 0.0)
         self.declare_parameter("auto_record_delay_s", 0.0)
         self.declare_parameter("capture_mode", "portfolio")
+        self.declare_parameter("enable_wrist_camera", False)
+        self.declare_parameter("expected_frame_rate_hz", 10.0)
+        self.declare_parameter("close_command_threshold", 0.12)
+        self.declare_parameter("require_close_command_for_batch", True)
         self.out_dir = self.get_parameter("output_dir").value
         self.task = self.get_parameter("task").value
         self.capture_mode = str(self.get_parameter("capture_mode").value)
@@ -69,11 +77,19 @@ class RecorderNode(Node):
         self._current_episode_metadata = {}
 
         self._grip = 0.0
+        self._grip_cmd = None
         self._action = None
         self._safety_estop = False
         self._drive_fault = False
+        self._close_command_seen = False
+        self._last_writer_s = 0.0
+        self._last_writer_error = ""
+        self._command_missing_rejects = 0
+        self._last_commit_error = ""
+        self._record_started = time.perf_counter()
 
         self.create_subscription(Float64, "/gripper/state", self._on_grip, 10)
+        self.create_subscription(Float64, "/teleop/gripper_cmd", self._on_grip_cmd, 10)
         self.create_subscription(PoseStamped, "/teleop/cmd_pose", self._on_action, 10)
         self.create_subscription(SafetyStatus, "/safety/status", self._on_safety, 10)
         self.create_subscription(DriveStatusArray, "/servo_drive/status", self._on_drive_status, 10)
@@ -88,7 +104,16 @@ class RecorderNode(Node):
             queue_size=int(self.get_parameter("sync_queue_size").value),
             slop=float(self.get_parameter("sync_slop").value),
             include_images=self.capture_mode == "portfolio",
+            visual_keys=(
+                (("color", "wrist") if bool(
+                    self.get_parameter("enable_wrist_camera").value
+                ) else ("color",))
+                if self.capture_mode == "portfolio" else ()
+            ),
         )
+        self._diagnostics_pub = self.create_publisher(
+            DiagnosticArray, "/recorder/diagnostics", 10)
+        self._diagnostics_timer = self.create_timer(1.0, self._publish_diagnostics)
 
         self.get_logger().info(
             f"lerobot_recorder up (output={self.out_dir}, capture_mode={self.capture_mode}).")
@@ -104,6 +129,12 @@ class RecorderNode(Node):
             )
 
     def _on_grip(self, m): self._grip = m.data
+    def _on_grip_cmd(self, m):
+        self._grip_cmd = float(m.data)
+        if self.recording and self._grip_cmd <= float(
+            self.get_parameter("close_command_threshold").value
+        ):
+            self._close_command_seen = True
     def _on_action(self, m): self._action = m
     def _on_safety(self, m): self._safety_estop = bool(m.estop_active)
 
@@ -127,6 +158,9 @@ class RecorderNode(Node):
     def _start_recording(self):
         self.frames = []
         self._current_episode_metadata = {}
+        self._close_command_seen = False
+        self._command_missing_rejects = 0
+        self._last_commit_error = ""
         self.recording = True
         self._record_started = time.perf_counter()
         self.get_logger().info(f"recording episode {self.episode_index} ...")
@@ -134,23 +168,63 @@ class RecorderNode(Node):
     def _stop_recording(self, success: bool = True):
         self.recording = False
         if not self.frames:
+            self._last_commit_error = "no synchronized frames"
             self.get_logger().warn("recording stopped without synchronized frames")
+            self._current_episode_metadata = {}
+            return None
+        if (
+            str(self.get_parameter("upstream_gate").value) == "batch_generator"
+            and bool(self.get_parameter("require_close_command_for_batch").value)
+            and not self._close_command_seen
+        ):
+            self._last_commit_error = "no close gripper command captured"
+            self.get_logger().error(
+                "rejecting batch episode: no close gripper command captured")
+            self.frames = []
             self._current_episode_metadata = {}
             return None
         metadata = dict(self._current_episode_metadata)
         metadata["stop_trigger_success"] = bool(success)
         metadata["upstream_gate"] = str(self.get_parameter("upstream_gate").value)
+        enabled_visual_streams = ["scene"]
+        if bool(self.get_parameter("enable_wrist_camera").value):
+            enabled_visual_streams.append("wrist")
+        expected_fps = float(self.get_parameter("expected_frame_rate_hz").value)
+        metadata.update({
+            "visual_streams": (
+                enabled_visual_streams if self.capture_mode == "portfolio" else []
+            ),
+            "capture_fps": expected_fps,
+            "action_type": "ee_pose_gripper",
+            "action_semantics": "ee_pose_gripper_cmd_v1",
+            "action_sources": {
+                "pose": "/teleop/cmd_pose",
+                "gripper_command": "/teleop/gripper_cmd",
+                "gripper_observation": "/gripper/state",
+            },
+        })
         write_started = time.perf_counter()
-        path = write_episode(
-            self.out_dir,
-            self.episode_index,
-            self.frames,
-            self.task,
-            success=success,
-            metadata=metadata,
-            prefer_video=self.capture_mode == "portfolio",
-        )
+        try:
+            path = write_episode(
+                self.out_dir,
+                self.episode_index,
+                self.frames,
+                self.task,
+                success=success,
+                metadata=metadata,
+                fps=expected_fps,
+                prefer_video=self.capture_mode == "portfolio",
+            )
+            self._last_writer_error = ""
+        except Exception as exc:
+            self._last_commit_error = f"writer error: {exc}"
+            self._last_writer_error = str(exc)
+            self.get_logger().error(f"episode write failed: {exc}")
+            self.frames = []
+            self._current_episode_metadata = {}
+            return None
         write_s = time.perf_counter() - write_started
+        self._last_writer_s = write_s
         elapsed_s = time.perf_counter() - self._record_started
         self.get_logger().info(
             f"episode_profile frames={len(self.frames)} capture_mode={self.capture_mode} "
@@ -160,6 +234,7 @@ class RecorderNode(Node):
         self.episode_index += 1
         self.frames = []
         self._current_episode_metadata = {}
+        self._last_commit_error = ""
         return path
 
     def _on_end_episode(self, request, response):
@@ -187,7 +262,7 @@ class RecorderNode(Node):
             response.frame_count = frame_count
         else:
             response.success = False
-            response.message = "commit failed: no synchronized frames"
+            response.message = f"commit failed: {self._last_commit_error or 'unknown error'}"
             response.dataset_path = ""
             response.frame_count = frame_count
         return response
@@ -238,6 +313,9 @@ class RecorderNode(Node):
     ):
         if not self.recording:
             return
+        if self._action is None or self._grip_cmd is None:
+            self._command_missing_rejects += 1
+            return
         ft = [
             ft_msg.wrench.force.x,
             ft_msg.wrench.force.y,
@@ -246,14 +324,14 @@ class RecorderNode(Node):
             ft_msg.wrench.torque.y,
             ft_msg.wrench.torque.z,
         ]
-        action_pose = self._pose_vec(self._action) if self._action else [0.0] * 7
+        action_pose = self._pose_vec(self._action)
         frame = {
             "observation.state": _pad(list(js.position), 7),
             "observation.ee_pose": self._pose_vec(ee_msg),
             "observation.object_pose": self._pose_vec(obj_msg),
             "observation.ft": ft,
             "observation.gripper": [float(self._grip)],
-            "action": action_pose + [float(self._grip)],
+            "action": action_pose + [float(self._grip_cmd)],
             "timestamp": _stamp_sec(color if color is not None else js),
             "frame_index": len(self.frames),
             "episode_index": self.episode_index,
@@ -266,8 +344,54 @@ class RecorderNode(Node):
         }
         if self.capture_mode == "portfolio":
             frame["observation.images.scene"] = _img_to_np(color)
-            frame["observation.images.wrist"] = _img_to_np(wrist_color)
+            if bool(self.get_parameter("enable_wrist_camera").value) and wrist_color is not None:
+                frame["observation.images.wrist"] = _img_to_np(wrist_color)
         self.frames.append(frame)
+
+    def _publish_diagnostics(self):
+        elapsed = max(time.perf_counter() - self._record_started, 1e-9)
+        sync_diag = self.sync.diagnostics_snapshot()
+        status = DiagnosticStatus()
+        status.name = "lerobot_recorder/health"
+        status.hardware_id = "scene_only_capture"
+        status.level = (
+            DiagnosticStatus.ERROR if self._last_writer_error else DiagnosticStatus.OK
+        )
+        status.message = (
+            self._last_writer_error or ("recording" if self.recording else "idle")
+        )
+        values = {
+            "recording": self.recording,
+            "buffered_frames": len(self.frames),
+            "effective_hz": len(self.frames) / elapsed if self.recording else 0.0,
+            "enabled_visual_streams": sync_diag["enabled_visual_streams"],
+            "scene_age_s": sync_diag["ages_s"].get("color", -1.0),
+            "missing_rejects": sync_diag["reject_counts"]["missing"],
+            "stale_rejects": sync_diag["reject_counts"]["stale"],
+            "reused_rejects": sync_diag["reject_counts"]["reused"],
+            "command_missing_rejects": self._command_missing_rejects,
+            "gripper_command": (
+                self._grip_cmd if self._grip_cmd is not None else "unseen"
+            ),
+            "gripper_state": self._grip,
+            "close_command_seen": self._close_command_seen,
+            "last_writer_s": self._last_writer_s,
+            "last_writer_error": self._last_writer_error,
+        }
+        status.values = [
+            KeyValue(
+                key=str(key),
+                value=(
+                    json.dumps(value)
+                    if isinstance(value, (bool, list, dict)) else str(value)
+                ),
+            )
+            for key, value in values.items()
+        ]
+        msg = DiagnosticArray()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.status = [status]
+        self._diagnostics_pub.publish(msg)
 
 
 def main(args=None):

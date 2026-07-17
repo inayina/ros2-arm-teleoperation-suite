@@ -14,8 +14,13 @@ class MultiModalSync:
     modality has a recent sample.
     """
 
+    VISUAL_TOPICS = {
+        "color": "/camera/color/image_raw",
+        "wrist": "/camera/wrist/color/image_raw",
+    }
+
     def __init__(self, node, callback, queue_size: int = 30, slop: float = 0.05,
-                 include_images: bool = True):
+                 include_images: bool = True, visual_keys: tuple[str, ...] | None = None):
         del queue_size  # latest-cache sync is O(1); keep the public constructor stable.
         self.node = node
         self.callback = callback
@@ -23,6 +28,14 @@ class MultiModalSync:
         self.latest = {}
         self.last_emitted_stamp = {}
         self.include_images = include_images
+        self.visual_keys = tuple(
+            visual_keys or (("color", "wrist") if include_images else ())
+        )
+        unknown = set(self.visual_keys) - set(self.VISUAL_TOPICS)
+        if unknown:
+            raise ValueError(f"unknown visual sync keys: {sorted(unknown)}")
+        self.reject_counts = {"missing": 0, "stale": 0, "reused": 0}
+        self.last_received_wall_s = {}
         self._last_warn_s = 0.0
         self._last_trigger_stamp = 0.0
         self._subscriptions = [
@@ -45,28 +58,25 @@ class MultiModalSync:
                 qos_profile_sensor_data,
             ),
             node.create_subscription(
-                Image,
-                "/camera/color/image_raw",
-                lambda msg: self._update("color", msg),
-                qos_profile_sensor_data,
-            ),
-            node.create_subscription(
-                Image,
-                "/camera/wrist/color/image_raw",
-                lambda msg: self._update("wrist", msg),
-                qos_profile_sensor_data,
-            ),
-            node.create_subscription(
                 PoseStamped,
                 "/sim/object_pose",
                 lambda msg: self._update("object", msg),
                 qos_profile_sensor_data,
             ),
         ]
+        for key in self.visual_keys:
+            self._subscriptions.append(node.create_subscription(
+                Image,
+                self.VISUAL_TOPICS[key],
+                lambda msg, image_key=key: self._update(image_key, msg),
+                qos_profile_sensor_data,
+            ))
 
     def _update(self, key: str, msg):
         self.latest[key] = msg
-        if key == ("color" if self.include_images else "joint"):
+        self.last_received_wall_s[key] = self._now_s()
+        trigger_key = self.visual_keys[0] if self.include_images else "joint"
+        if key == trigger_key:
             if not self.include_images:
                 stamp = self._stamp_sec(msg)
                 if stamp - self._last_trigger_stamp < 0.0099:
@@ -82,26 +92,30 @@ class MultiModalSync:
             "object",
         ]
         if self.include_images:
-            required.extend(["color", "wrist"])
+            required.extend(self.visual_keys)
         required = tuple(required)
         missing = [key for key in required if key not in self.latest]
         if missing:
+            self.reject_counts["missing"] += 1
             self._warn_throttled(f"waiting for recorder modalities: {', '.join(missing)}")
             return
 
         stale = self._stale_keys(color_msg, required)
         if stale:
+            self.reject_counts["stale"] += 1
             self._warn_throttled(
                 f"recorder modalities outside sync_slop={self.slop:.3f}s: {', '.join(stale)}"
             )
             return
 
+        image_keys = list(self.visual_keys)
         reused = [
-            key for key in required
+            key for key in image_keys
             if self._stamp_sec(self.latest[key]) <= self.last_emitted_stamp.get(key, -1.0)
         ]
         if reused:
-            self._warn_throttled(f"waiting for unique recorder samples: {', '.join(reused)}")
+            self.reject_counts["reused"] += 1
+            self._warn_throttled(f"waiting for unique image samples: {', '.join(reused)}")
             return
 
         self.callback(
@@ -114,6 +128,23 @@ class MultiModalSync:
         )
         for key in required:
             self.last_emitted_stamp[key] = self._stamp_sec(self.latest[key])
+
+    def diagnostics_snapshot(self) -> dict:
+        now = self._now_s()
+        ages = {
+            key: max(0.0, now - stamp)
+            for key, stamp in self.last_received_wall_s.items()
+        }
+        return {
+            "enabled_visual_streams": [
+                "scene" if key == "color" else key for key in self.visual_keys
+            ],
+            "ages_s": ages,
+            "reject_counts": dict(self.reject_counts),
+        }
+
+    def _now_s(self) -> float:
+        return self.node.get_clock().now().nanoseconds * 1e-9
 
     def _stale_keys(self, anchor_msg, keys: tuple[str, ...]) -> list[str]:
         if self.slop <= 0.0:
@@ -132,7 +163,7 @@ class MultiModalSync:
         return float(stamp.sec) + float(stamp.nanosec) * 1e-9
 
     def _warn_throttled(self, text: str):
-        now = self.node.get_clock().now().nanoseconds * 1e-9
+        now = self._now_s()
         if now - self._last_warn_s < 5.0:
             return
         self._last_warn_s = now

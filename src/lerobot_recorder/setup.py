@@ -20,6 +20,7 @@ setup(
     entry_points={
         "console_scripts": [
             "lerobot_recorder_node = lerobot_recorder.recorder_node:main",
+            "system_telemetry_node = lerobot_recorder.system_telemetry:main",
         ],
     },
 )

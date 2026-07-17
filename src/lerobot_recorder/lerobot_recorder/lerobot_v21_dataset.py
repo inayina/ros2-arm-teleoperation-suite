@@ -253,6 +253,8 @@ def episode_to_parquet_table(
 
 def _write_rgb_videos(root: Path, normalized: list[dict], episode_index: int, fps: float) -> None:
     for key in RGB_IMAGE_KEYS:
+        if key not in normalized[0]:
+            continue
         frames = [np.asarray(frame[key], dtype=np.uint8) for frame in normalized]
         output = video_episode_path(root, key, episode_index)
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -381,7 +383,7 @@ def append_episode(
     metadata: dict[str, Any] | None,
     fps: float = DEFAULT_FPS,
 ) -> Path:
-    has_videos = all(key in normalized[0] for key in RGB_IMAGE_KEYS)
+    has_videos = any(key in normalized[0] for key in RGB_IMAGE_KEYS)
     if has_videos and not ffmpeg_available():
         raise RuntimeError("ffmpeg is required to write LeRobot v2.1 video episodes")
     if pa is None or pq is None:
@@ -408,6 +410,17 @@ def append_episode(
 
     episode_metadata = dict(metadata or {})
     upstream_gate = str(episode_metadata.pop("upstream_gate", "teleop"))
+    promoted = {
+        key: episode_metadata.pop(key)
+        for key in (
+            "visual_streams",
+            "capture_fps",
+            "action_type",
+            "action_semantics",
+            "action_sources",
+        )
+        if key in episode_metadata
+    }
     video_specs = {
         key: list(np.asarray(normalized[0][key], dtype=np.uint8).shape)
         for key in RGB_IMAGE_KEYS if key in normalized[0]
@@ -424,6 +437,7 @@ def append_episode(
                 "format": FORMAT_V21,
                 "success": bool(success),
                 "upstream_gate": upstream_gate,
+                **promoted,
                 "metadata": episode_metadata,
                 "video_specs": video_specs,
                 "fps": fps,

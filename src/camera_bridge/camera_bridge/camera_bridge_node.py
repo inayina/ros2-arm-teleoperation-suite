@@ -43,6 +43,7 @@ class CameraBridgeNode(Node):
         self.declare_parameter("depth_topic", "/camera/depth/image_raw")
         self.declare_parameter("camera_info_topic", "/camera/color/camera_info")
         self.declare_parameter("use_mujoco_renderer", True)
+        self.declare_parameter("publish_depth", False)
         self.declare_parameter("synthetic_fallback", True)
         self.declare_parameter("tactile_mode", False)
         self.declare_parameter("gel_depth_baseline", 0.0155)
@@ -56,6 +57,7 @@ class CameraBridgeNode(Node):
         self.frame_id = str(self.get_parameter("frame_id").value)
         self.synthetic_fallback = bool(self.get_parameter("synthetic_fallback").value)
         self.tactile_mode = bool(self.get_parameter("tactile_mode").value)
+        self.publish_depth = bool(self.get_parameter("publish_depth").value)
         self.gel_depth_baseline = float(self.get_parameter("gel_depth_baseline").value)
         self.gel_scale = float(self.get_parameter("gel_scale").value)
 
@@ -73,6 +75,7 @@ class CameraBridgeNode(Node):
         self._ee_pose = None
         self._camera = None
         self._params_poll_counter = 0
+        self._get_params_future = None
         self._get_params_client = self.create_client(
             GetParameters, f"{self._mujoco_sim_param_node}/get_parameters")
 
@@ -81,8 +84,10 @@ class CameraBridgeNode(Node):
         camera_info_topic = str(self.get_parameter("camera_info_topic").value)
         self.pub_color = self.create_publisher(
             Image, color_topic, qos_profile_sensor_data)
-        self.pub_depth = self.create_publisher(
-            Image, depth_topic, qos_profile_sensor_data)
+        self.pub_depth = (
+            self.create_publisher(Image, depth_topic, qos_profile_sensor_data)
+            if self.publish_depth else None
+        )
         self.pub_info = self.create_publisher(
             CameraInfo, camera_info_topic, qos_profile_sensor_data)
         self.create_subscription(
@@ -183,12 +188,21 @@ class CameraBridgeNode(Node):
             return
         if not self._get_params_client.service_is_ready():
             return
+        if self._get_params_future is not None and not self._get_params_future.done():
+            return
         request = GetParameters.Request()
         request.names = ["target_object_name"]
+        self._get_params_future = self._get_params_client.call_async(request)
+        self._get_params_future.add_done_callback(
+            self._on_target_object_parameters)
+
+    def _on_target_object_parameters(self, future) -> None:
         try:
-            response = self._get_params_client.call(request)
+            response = future.result()
         except Exception:
+            self._get_params_future = None
             return
+        self._get_params_future = None
         if not response or not response.values:
             return
         value = response.values[0]
@@ -290,7 +304,9 @@ class CameraBridgeNode(Node):
             return
 
         self.pub_color.publish(self._image_msg(stamp, "rgb8", rgb))
-        self.pub_depth.publish(self._image_msg(stamp, "32FC1", depth_arr.astype(np.float32)))
+        if self.pub_depth is not None:
+            self.pub_depth.publish(
+                self._image_msg(stamp, "32FC1", depth_arr.astype(np.float32)))
         self.pub_info.publish(self._camera_info(stamp))
 
     def _simulate_gelsight(self, depth_arr: np.ndarray) -> np.ndarray:

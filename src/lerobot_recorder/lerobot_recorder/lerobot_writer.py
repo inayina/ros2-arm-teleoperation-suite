@@ -33,20 +33,12 @@ except Exception:
 
 
 def _episode_features(first_frame: dict) -> "Features":
-    rgb = np.asarray(first_frame["observation.images.scene"])
-    wrist_rgb = np.asarray(first_frame["observation.images.wrist"])
-    return Features({
+    features = {
         "observation.state": Sequence(Value("float32"), length=7),
         "observation.ee_pose": Sequence(Value("float32"), length=7),
         "observation.object_pose": Sequence(Value("float32"), length=7),
         "observation.ft": Sequence(Value("float32"), length=6),
         "observation.gripper": Sequence(Value("float32"), length=1),
-        "observation.images.scene": Array3D(
-            dtype="uint8", shape=(int(rgb.shape[0]), int(rgb.shape[1]), 3)
-        ),
-        "observation.images.wrist": Array3D(
-            dtype="uint8", shape=(int(wrist_rgb.shape[0]), int(wrist_rgb.shape[1]), 3)
-        ),
         "action": Sequence(Value("float32"), length=8),
         "timestamp": Value("float64"),
         "episode_index": Value("int64"),
@@ -57,7 +49,14 @@ def _episode_features(first_frame: dict) -> "Features":
         "success": Value("bool"),
         "safety_estop": Value("bool"),
         "drive_fault": Value("bool"),
-    })
+    }
+    for key in ("observation.images.scene", "observation.images.wrist"):
+        if key in first_frame:
+            image = np.asarray(first_frame[key])
+            features[key] = Array3D(
+                dtype="uint8", shape=(int(image.shape[0]), int(image.shape[1]), 3)
+            )
+    return Features(features)
 
 
 def _normalize_frame(frame: dict) -> dict:
@@ -89,15 +88,43 @@ def _normalize_frame(frame: dict) -> dict:
 def _filter_shape_consistent_frames(frames: list[dict]) -> list[dict]:
     from collections import Counter
 
-    if "observation.images.scene" not in frames[0]:
+    image_keys = tuple(
+        key for key in ("observation.images.scene", "observation.images.wrist")
+        if key in frames[0]
+    )
+    if not image_keys:
         return frames
-    scene_shapes = [np.asarray(frame["observation.images.scene"]).shape for frame in frames]
-    most_common_scene = Counter(scene_shapes).most_common(1)[0][0]
+    most_common_shapes = {
+        key: Counter(
+            np.asarray(frame[key]).shape for frame in frames if key in frame
+        ).most_common(1)[0][0]
+        for key in image_keys
+    }
     return [
         frame
         for frame in frames
-        if np.asarray(frame["observation.images.scene"]).shape == most_common_scene
+        if all(
+            key in frame and np.asarray(frame[key]).shape == most_common_shapes[key]
+            for key in image_keys
+        )
     ]
+
+
+def _validate_capture_fps(frames: list[dict], fps: float, tolerance: float = 0.30) -> None:
+    if fps <= 0.0:
+        raise ValueError("fps must be positive")
+    if len(frames) < 3:
+        return
+    stamps = np.asarray([float(frame["timestamp"]) for frame in frames], dtype=np.float64)
+    deltas = np.diff(stamps)
+    deltas = deltas[np.isfinite(deltas) & (deltas > 0.0)]
+    if deltas.size < 2:
+        raise ValueError("timestamps must be strictly increasing to validate capture fps")
+    measured_fps = 1.0 / float(np.median(deltas))
+    if abs(measured_fps - fps) / fps > tolerance:
+        raise ValueError(
+            f"timestamp median rate {measured_fps:.3f} Hz is inconsistent with fps={fps:.3f}"
+        )
 
 
 def _write_arrow_episode(train_dir: str, normalized: list[dict]) -> None:
@@ -139,6 +166,7 @@ def write_episode(
         frame["success"] = bool(success)
     filtered[-1]["done"] = True
     normalized = [_normalize_frame(frame) for frame in filtered]
+    _validate_capture_fps(normalized, fps)
 
     dataset_root = Path(out_dir)
     use_v21 = _HAS_PYARROW and (not prefer_video or ffmpeg_available())
@@ -162,6 +190,17 @@ def write_episode(
     train_dir = os.path.join(ep_dir, "train")
     _write_arrow_episode(train_dir, normalized)
     upstream_gate = str(episode_metadata.pop("upstream_gate", "teleop"))
+    promoted = {
+        key: episode_metadata.pop(key)
+        for key in (
+            "visual_streams",
+            "capture_fps",
+            "action_type",
+            "action_semantics",
+            "action_sources",
+        )
+        if key in episode_metadata
+    }
     with open(os.path.join(ep_dir, "meta.json"), "w", encoding="utf-8") as fh:
         json.dump(
             {
@@ -173,6 +212,7 @@ def write_episode(
                 "format": FORMAT_ARROW if _HAS_DATASETS else "npz_fallback",
                 "success": bool(success),
                 "upstream_gate": upstream_gate,
+                **promoted,
                 "metadata": episode_metadata,
             },
             fh,

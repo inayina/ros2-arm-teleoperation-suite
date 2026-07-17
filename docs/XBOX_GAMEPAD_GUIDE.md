@@ -116,4 +116,4 @@ ros2 run teleop_input teleop_input_node --ros-args -p driver_type:=gamepad
    * **仿真状态异常**：如果日志里出现 `TF_NAN_INPUT`、`Very close to a singularity`，请重启全系统。当前 fallback 仿真会从合法 ready pose 启动并过滤 NaN，避免再次污染 Servo。
 
 3. **机械臂运动有轻微漂移**
-   * 项目内置了死区过滤（Deadzone = 0.15）。如果您的手柄存在摇杆漂移且超出了 15% 的范围，可以修改 [gamepad_driver.py](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/teleop_input/teleop_input/gamepad_driver.py#L71) 中的阈值进行微调。
+   * 项目内置了死区过滤（Deadzone = 0.15）。如果您的手柄存在摇杆漂移且超出了 15% 的范围，可以修改 [gamepad_driver.py](../src/teleop_input/teleop_input/gamepad_driver.py#L71) 中的阈值进行微调。

@@ -43,19 +43,18 @@ The 30/30 valid result is upstream evidence. It should not be described as real-
 
 ## Core Evidence
 
-![Canonical run evidence](media/three_repo_canonical_run_evidence.svg)
-
 ### 实验证据图解读
 
-这张图用于说明本仓在三仓实验中的上游贡献。左侧 G0 是本仓直接负责的证据；G1/G2 是中游和下游的后续消费结果，只作为跨仓上下文展示。
+下表说明本仓在三仓证据中的上游贡献。30-episode 训练/handoff run 与最新
+1-episode 下游 smoke 是两个独立 run，当前证据不足以确认后者消费了前者的 handoff。
 
 | 图中区域 | 与本仓关系 | 原始来源 | 边界 |
 | --- | --- | --- | --- |
 | G0 Upstream Dataset | 本仓通过 `batch_generator` 生成 30 个 Panda 仿真 episode，并写入 `upstream_gate=batch_generator` | 中游归档的 `evidence/upstream/validate_dataset.json`，上游 `data/episodes_mlp` | 证明 MuJoCo/Panda 仿真采集和上游 gate，不证明 real-robot deployment |
-| G1 Midstream Release | 下游链路消费本仓 raw episode 后形成 release、MLP metrics 和 handoff | 中游 `manifest.json`, `mlp_metrics.json`, `handoff_manifest.json` | 不是本仓训练能力；README 不应把 MLP/ACT 训练归到上游 |
-| G2 Downstream Replay | 下游消费 handoff 后完成 PyBullet replay smoke | 中游归档的 `evidence/downstream/benchmark_summary.json` | 不是本仓 replay/risk benchmark；不证明真实 Sim2Real 或下游物理抓取成功 |
+| G1 Midstream Release | 30-episode run 形成 release、MLP metrics 和 handoff | 中游 `manifest.json`, `mlp_metrics.json`, `handoff_manifest.json` | 不是本仓训练能力；README 不应把 MLP/ACT 训练归到上游 |
+| Independent downstream smoke | 独立的 1-episode PyBullet replay smoke | 中游归档的 `evidence/downstream/benchmark_summary.json` | 未证明与上述 30-episode handoff 属于同一 run；不证明真实 Sim2Real |
 
-图中的 30 episodes / 71,737 frames 是上游输出规模；`9.79 / 34.218 ms` 是 latest archived downstream smoke 的延迟数字，属于下游运行结果，不是上游控制层延迟指标。
+30 episodes / 71,737 frames 是上游输出规模；`9.79 / 34.218 ms` 是独立下游 smoke 的延迟数字，属于下游运行结果，不是上游控制层延迟指标。
 
 | Evidence | What it shows | What it does not show |
 | --- | --- | --- |
@@ -90,6 +89,16 @@ ros2 run synth_data_gen batch_generator
 
 For reproducible cross-repo validation, use the midstream runbook rather than treating this README as the source of experiment numbers.
 
+Project evidence query and upstream change impact are available from this checkout:
+
+```bash
+bin/ask-project "上游当前负责什么？"
+bin/project-evidence impact --base HEAD~1 --head HEAD
+```
+
+The registry and retrieval implementation remain owned by the midstream repository. Set
+`EPISODE_DATA_LAB_ROOT` when that checkout is not in a configured fallback location.
+
 ## Code Map
 
 | Path | Purpose |
@@ -123,6 +132,7 @@ Older architecture notes, CANopen/vcan0 support material, and broad learning not
 - [docs/INTER_REPO_CONTRACTS.md](docs/INTER_REPO_CONTRACTS.md)
 - [docs/MEDIA_CAPTURE_PLAN.md](docs/MEDIA_CAPTURE_PLAN.md)
 - [docs/portfolio/EVIDENCE_INDEX.md](docs/portfolio/EVIDENCE_INDEX.md)
+- [docs/AGENTS.md#7-project-evidence-agent-集成](docs/AGENTS.md#7-project-evidence-agent-集成)
 
 ## English Brief
 

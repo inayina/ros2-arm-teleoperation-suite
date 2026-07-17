@@ -1,6 +1,20 @@
 # 文档索引
 
-> **阅读顺序**：`ARCHITECTURE_V2.md` → `ROADMAP.md` → 对应里程碑 `SPEC_V2_M*.md`
+> **新人阅读顺序**：仓库根 [README](../README.md) → [AGENTS.md](./AGENTS.md) →
+> [PROJECT_SCOPE_AND_ACCEPTANCE.md](./PROJECT_SCOPE_AND_ACCEPTANCE.md) →
+> [INTER_REPO_CONTRACTS.md](./INTER_REPO_CONTRACTS.md) → [ARCHITECTURE_V2.md](./ARCHITECTURE_V2.md)。
+>
+> `ROADMAP.md` 与 `SPEC_V2_M*.md` 是设计和验收入口，不作为当前完成状态的单一事实源。
+> 当前能力以根 README 的 Verified Capabilities、代码和测试为准。
+
+跨三仓项目事实查询与本仓变更影响分析：
+
+```bash
+bin/ask-project "上游当前负责什么？"
+bin/project-evidence impact --base HEAD~1 --head HEAD
+```
+
+入口通过 `EPISODE_DATA_LAB_ROOT` 定位中游 Project Evidence Agent 核心。
 
 ---
 
@@ -19,15 +33,15 @@
 
 ## 📋 V2 里程碑细化 SPEC
 
-| 里程碑 | 状态 | 文档 | 核心内容 |
-|---|---|---|---|
-| **M1** ros2_control + MuJoCo | ✅ 完成 | [SPEC_V2_M1_CONTROL_SKELETON.md](./SPEC_V2_M1_CONTROL_SKELETON.md) | ros2_control 骨架、MuJoCo 物理服务器、joint_state_broadcaster @1kHz |
-| **M2** CANopen DS402 总线 | ✅ 完成 | [SPEC_V2_M2_CANOPEN_FIELDBUS.md](./SPEC_V2_M2_CANOPEN_FIELDBUS.md) | vcan0、DS402 状态机、PDO/SDO/EMCY、虚拟伺服驱动器 ×7 |
-| **M3** 阻抗控制器（插件） | 🔧 进行中 | [SPEC_V2_M3_IMPEDANCE_CTRL.md](./SPEC_V2_M3_IMPEDANCE_CTRL.md) | cartesian_impedance_controller、末端跟踪 <2mm、接触柔顺 |
-| **M4** MoveIt Servo 运动层 | 🔧 进行中 | [SPEC_V2_M4_MOTION_LAYER.md](./SPEC_V2_M4_MOTION_LAYER.md) | MoveIt 2 Servo、笛卡尔→关节、奇异/限位规避、端到端 <50ms |
-| **M5** 安全层 + E-Stop | 🔲 待开始 | [SPEC_V2_M5_SAFETY_LAYER.md](./SPEC_V2_M5_SAFETY_LAYER.md) | 5 监视器、心跳看门狗、DS402 Quick Stop 闭环 |
-| **M6** 视觉 + LeRobot Recorder | 🔲 待开始 | [SPEC_V2_M6_PERCEPTION_RECORDER.md](./SPEC_V2_M6_PERCEPTION_RECORDER.md) | RGB/Depth @30Hz、多模态对齐、LeRobotDataset 导出 |
-| **M7** 遥操作设备 + 合成数据 | ✅ 完成 | [SPEC_V2_M7_TELEOP_SYNTH.md](./SPEC_V2_M7_TELEOP_SYNTH.md) | TeleopDriverBase 可插拔接口、Domain Randomization、仿真数据生成 Pipeline |
+| 里程碑 | 设计 / 验收文档 | 核心内容 |
+|---|---|---|
+| **M1** ros2_control + MuJoCo | [SPEC_V2_M1_CONTROL_SKELETON.md](./SPEC_V2_M1_CONTROL_SKELETON.md) | ros2_control 骨架、MuJoCo 物理服务器、joint_state_broadcaster |
+| **M2** CANopen DS402 总线 | [SPEC_V2_M2_CANOPEN_FIELDBUS.md](./SPEC_V2_M2_CANOPEN_FIELDBUS.md) | vcan0、DS402 状态机、PDO/SDO/EMCY、虚拟伺服驱动器 |
+| **M3** 阻抗控制器 | [SPEC_V2_M3_IMPEDANCE_CTRL.md](./SPEC_V2_M3_IMPEDANCE_CTRL.md) | cartesian_impedance_controller、末端跟踪、接触柔顺 |
+| **M4** MoveIt Servo | [SPEC_V2_M4_MOTION_LAYER.md](./SPEC_V2_M4_MOTION_LAYER.md) | MoveIt Servo、笛卡尔→关节、奇异/限位规避 |
+| **M5** 安全层 | [SPEC_V2_M5_SAFETY_LAYER.md](./SPEC_V2_M5_SAFETY_LAYER.md) | 监视器、watchdog、E-Stop 与 Quick Stop 验收设计 |
+| **M6** 视觉与 Recorder | [SPEC_V2_M6_PERCEPTION_RECORDER.md](./SPEC_V2_M6_PERCEPTION_RECORDER.md) | RGB/Depth、多模态对齐、LeRobot 风格录制 |
+| **M7** 遥操作与合成数据 | [SPEC_V2_M7_TELEOP_SYNTH.md](./SPEC_V2_M7_TELEOP_SYNTH.md) | TeleopDriverBase、Domain Randomization、批量 episode |
 
 ---
 

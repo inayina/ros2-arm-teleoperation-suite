@@ -57,7 +57,7 @@ BIN_XY_TOLERANCE="${BATCH_PREFLIGHT_BIN_XY_TOLERANCE:-0.08}"
 REQUIRE_GRIPPER_CLOSE="${BATCH_PREFLIGHT_REQUIRE_GRIPPER_CLOSE:-true}"
 GRIPPER_CLOSE_MAX="${BATCH_PREFLIGHT_GRIPPER_CLOSE_MAX:-0.12}"
 # Portfolio fallback only: physics grasp may still fail without assist.
-GRASP_ASSIST="${BATCH_PREFLIGHT_GRASP_ASSIST:-true}"
+GRASP_ASSIST="${BATCH_PREFLIGHT_GRASP_ASSIST:-false}"
 GRIPPER_FORCE_MAX_N="${BATCH_PREFLIGHT_GRIPPER_FORCE_MAX_N:-30.0}"
 GRIPPER_CONTACT_HOLD_MARGIN="${BATCH_PREFLIGHT_GRIPPER_CONTACT_HOLD_MARGIN:-0.006}"
 GRIPPER_FORCE_SQUEEZE_MARGIN_MAX="${BATCH_PREFLIGHT_GRIPPER_FORCE_SQUEEZE_MARGIN_MAX:-0.008}"
@@ -216,6 +216,8 @@ setsid ros2 launch teleop_bringup full_system.launch.py \
   camera_width:="${CAMERA_WIDTH}" \
   camera_height:="${CAMERA_HEIGHT}" \
   camera_rate:="${CAMERA_RATE}" \
+  publish_depth:=false \
+  enable_wrist_camera:=false \
   scene_use_mujoco_renderer:="${SCENE_USE_MUJOCO_RENDERER}" \
   wrist_camera_width:="${WRIST_CAMERA_WIDTH}" \
   wrist_camera_height:="${WRIST_CAMERA_HEIGHT}" \
@@ -264,7 +266,7 @@ for object_name in ${OBJECTS}; do
   instruction="$(instruction_for "${object_name}")"
   log_file="${LOG_DIR}/batch_${object_name}.log"
   echo "[preflight] running ${object_name} -> ${instruction}"
-  request_safety_reset || true
+  request_safety_reset
   timeout 4s ros2 service call /servo_node/pause_servo std_srvs/srv/SetBool "{data: false}" >/dev/null 2>&1 || true
   nice -n 19 ionice -c 3 ros2 run synth_data_gen batch_generator --ros-args \
     -p target_object_name:="${object_name}" \

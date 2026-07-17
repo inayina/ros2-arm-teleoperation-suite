@@ -87,3 +87,27 @@ Validation：`scripts/validate_dataset.py data/episodes --min-frames 5`
 - PyBullet policy replay（下游）
 
 契约：[docs/INTER_REPO_CONTRACTS.md](INTER_REPO_CONTRACTS.md)
+
+---
+
+## 7. Project Evidence Agent 集成
+
+Project Evidence Agent 的 registry、检索、audit 和 impact 核心由中游
+`robot-arm-episode-data-lab/project_knowledge/` 维护；本仓只提供薄入口，不重复实现知识检索逻辑。
+
+```bash
+# 项目事实查询
+bin/ask-project "上游 batch_generator 物理门禁如何实现？"
+
+# 三仓 audit
+bin/project-evidence audit --json-out /tmp/project-audit.json --markdown-out /tmp/project-audit.md
+
+# 本仓 Git 影响分析；wrapper 自动注入 upstream repository 名
+bin/project-evidence impact --base HEAD~1 --head HEAD
+```
+
+若中游不在自动 fallback 路径，设置：
+
+```bash
+export EPISODE_DATA_LAB_ROOT=/path/to/robot-arm-episode-data-lab
+```

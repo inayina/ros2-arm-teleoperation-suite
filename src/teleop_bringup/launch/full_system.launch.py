@@ -45,6 +45,7 @@ def generate_launch_description():
     camera_width = LaunchConfiguration("camera_width")
     camera_height = LaunchConfiguration("camera_height")
     camera_rate = LaunchConfiguration("camera_rate")
+    publish_depth = LaunchConfiguration("publish_depth")
     enable_wrist_camera = LaunchConfiguration("enable_wrist_camera")
     wrist_use_mujoco_renderer = LaunchConfiguration("wrist_use_mujoco_renderer")
     enable_tactile = LaunchConfiguration("enable_tactile")
@@ -75,6 +76,7 @@ def generate_launch_description():
                               "camera_width": camera_width,
                               "camera_height": camera_height,
                               "camera_rate": camera_rate,
+                              "publish_depth": publish_depth,
                               "enable_wrist_camera": enable_wrist_camera,
                               "wrist_use_mujoco_renderer": wrist_use_mujoco_renderer,
                               "enable_tactile": enable_tactile,
@@ -114,6 +116,8 @@ def generate_launch_description():
             "auto_record_seconds": auto_record_seconds,
             "auto_record_delay_s": auto_record_delay_s,
             "capture_mode": capture_mode,
+            "enable_wrist_camera": enable_wrist_camera,
+            "expected_frame_rate_hz": camera_rate,
         },
         condition=IfCondition(record))
     grasp_monitor = _include(
@@ -139,12 +143,13 @@ def generate_launch_description():
         DeclareLaunchArgument("headless", default_value="false",
                               description="true → MuJoCo offscreen renderer (no viewer window)"),
         DeclareLaunchArgument("scene_use_mujoco_renderer", default_value="true"),
-        DeclareLaunchArgument("camera_width", default_value="640"),
-        DeclareLaunchArgument("camera_height", default_value="480"),
-        DeclareLaunchArgument("camera_rate", default_value="30.0"),
-        DeclareLaunchArgument("enable_wrist_camera", default_value="true"),
+        DeclareLaunchArgument("camera_width", default_value="320"),
+        DeclareLaunchArgument("camera_height", default_value="240"),
+        DeclareLaunchArgument("camera_rate", default_value="10.0"),
+        DeclareLaunchArgument("publish_depth", default_value="false"),
+        DeclareLaunchArgument("enable_wrist_camera", default_value="false"),
         DeclareLaunchArgument("wrist_use_mujoco_renderer", default_value="true"),
-        DeclareLaunchArgument("enable_tactile", default_value="true"),
+        DeclareLaunchArgument("enable_tactile", default_value="false"),
         DeclareLaunchArgument("wrist_camera_width", default_value="320"),
         DeclareLaunchArgument("wrist_camera_height", default_value="240"),
         DeclareLaunchArgument("contact_debug_enabled", default_value="false"),

@@ -73,22 +73,22 @@ ROS2 的软件是高度模块化的，其核心单位就是 **功能包 (Package
 ```
 
 #### A. 自定义接口层 (Interfaces)
-- **[teleop_interfaces](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/teleop_interfaces)**: 这是一个特殊的包，它不包含任何 C++ 或 Python 节点代码，只定义了自定义的消息（如 [DriveStatus.msg](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/teleop_interfaces/msg/DriveStatus.msg)）。它是整个项目数据流的基石，几乎所有其他功能包都依赖它。
+- **[teleop_interfaces](../src/teleop_interfaces)**: 这是一个特殊的包，它不包含任何 C++ 或 Python 节点代码，只定义了自定义的消息（如 [DriveStatus.msg](../src/teleop_interfaces/msg/DriveStatus.msg)）。它是整个项目数据流的基石，几乎所有其他功能包都依赖它。
 
 #### B. 控制与安全算法层 (C++ Ament CMake)
-- **[safety_monitor](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/safety_monitor)**: L1 安全监视器。用 C++ 编写以保证微秒级的响应，监控关节限位、工作空间约束及心跳守护。
-- **[teleop_controllers](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/teleop_controllers)**: L3 机器人控制插件。包含自定义的笛卡尔阻抗控制器（`cartesian_impedance_controller`），继承自 `controller_interface::ChainableControllerInterface`，作为插件插入 `ros2_control` 框架运行。
-- **[canopen_hw_interface](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/canopen_hw_interface)**: L3 硬件接口。编写自定义的 `HardwareInterface` 以对接 CANopen 总线（vcan0），实现控制器命令到电机的映射。
+- **[safety_monitor](../src/safety_monitor)**: L1 安全监视器。用 C++ 编写以保证微秒级的响应，监控关节限位、工作空间约束及心跳守护。
+- **[teleop_controllers](../src/teleop_controllers)**: L3 机器人控制插件。包含自定义的笛卡尔阻抗控制器（`cartesian_impedance_controller`），继承自 `controller_interface::ChainableControllerInterface`，作为插件插入 `ros2_control` 框架运行。
+- **[canopen_hw_interface](../src/canopen_hw_interface)**: L3 硬件接口。编写自定义的 `HardwareInterface` 以对接 CANopen 总线（vcan0），实现控制器命令到电机的映射。
 
 #### C. 仿真与感知层 (Python Ament Python)
-- **[mujoco_sim](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/mujoco_sim)**: L5 物理引擎仿真器。基于 MuJoCo 计算动力学和力矩真值。
-- **[virtual_servo_driver](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/virtual_servo_driver)**: L4 虚拟伺服驱动器。模拟 DS402 状态机和电流环控制。
-- **[camera_bridge](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/camera_bridge)**: L6 视触觉转换。将 MuJoCo 触觉深度图转为类 GelSight 图像话题发布。
-- **[lerobot_recorder](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/lerobot_recorder)**: L7 数据录制器。订阅所有多模态话题进行时间戳对齐，录制为 LeRobot 格式数据集。
+- **[mujoco_sim](../src/mujoco_sim)**: L5 物理引擎仿真器。基于 MuJoCo 计算动力学和力矩真值。
+- **[virtual_servo_driver](../src/virtual_servo_driver)**: L4 虚拟伺服驱动器。模拟 DS402 状态机和电流环控制。
+- **[camera_bridge](../src/camera_bridge)**: L6 视触觉转换。将 MuJoCo 触觉深度图转为类 GelSight 图像话题发布。
+- **[lerobot_recorder](../src/lerobot_recorder)**: L7 数据录制器。订阅所有多模态话题进行时间戳对齐，录制为 LeRobot 格式数据集。
 
 #### D. 系统集成与启动层 (Bringup & Description)
-- **[teleop_bringup](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/teleop_bringup)**: 顶层启动包。没有复杂的节点源码，只包含复杂的 Python Launch 文件（在 `launch/` 下），用来一键拉起上述所有节点并传入参数。
-- **[teleop_description](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/teleop_description)**: URDF/Xacro 机器人模型描述包，配置 Panda 机械臂的运动学与动力学参数。
+- **[teleop_bringup](../src/teleop_bringup)**: 顶层启动包。没有复杂的节点源码，只包含复杂的 Python Launch 文件（在 `launch/` 下），用来一键拉起上述所有节点并传入参数。
+- **[teleop_description](../src/teleop_description)**: URDF/Xacro 机器人模型描述包，配置 Panda 机械臂的运动学与动力学参数。
 
 ---
 
@@ -254,7 +254,7 @@ ROS2 的软件是高度模块化的，其核心单位就是 **功能包 (Package
   3. **静摩擦力 (Static Friction)**：当控制力矩小于静摩擦力时，电机根本动不起来。
 - **本项目中的死区体现**：
   - 由于是纯仿真，我们并没有建立微秒级的逆变器开关管死区数学模型。
-  - 但是，**静摩擦力死区是存在的**。在 MuJoCo 物理配置文件（[panda.xml](file:///home/ina/dev/ros2-arm-teleoperation-suite/config/models/franka_panda.xml)）中定义了关节的摩擦力矩（`frictionloss`）和粘滞阻尼。当阻抗控制器计算出的力矩指令小于该阻尼与摩擦力门限时，关节便处于“静摩擦死区”内，电机不会发生运动。
+  - 但是，**静摩擦力死区是存在的**。在 MuJoCo 物理配置文件（[panda.xml](../config/models/franka_panda.xml)）中定义了关节的摩擦力矩（`frictionloss`）和粘滞阻尼。当阻抗控制器计算出的力矩指令小于该阻尼与摩擦力门限时，关节便处于“静摩擦死区”内，电机不会发生运动。
 
 ### 7.3 PID（在本项目中为 PD）参数是如何调到最佳状态的？
 这在面试中非常考验落地经验，规范的工程调参流程如下：
@@ -271,7 +271,7 @@ ROS2 的软件是高度模块化的，其核心单位就是 **功能包 (Package
    - 观测系统的幅值裕度（Gain Margin）与相位裕度（Phase Margin）。
    - 如果发现机械共振点（幅值在特定频率异常放大），会在控制器或驱动器中配置**陷波滤波器（Notch Filter）**将其滤除，从而允许我们将 PD 参数调得更大，提升控制带宽。
 4. **第四步：在线自适应调整 (Online Adaptation)**
-   - 也就是我们在 [cartesian_impedance_controller.cpp](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/teleop_controllers/src/cartesian_impedance_controller.cpp#L327) 中实现的逻辑：当末端的六维力传感器检测到接触力（`ft_sensor`）超过设定阈值时，**在线按比例减小刚度 $K_p$**（主动顺从控制），防止产生过大的接触力，保护环境与机器人。
+   - 也就是我们在 [cartesian_impedance_controller.cpp](../src/teleop_controllers/src/cartesian_impedance_controller.cpp#L327) 中实现的逻辑：当末端的六维力传感器检测到接触力（`ft_sensor`）超过设定阈值时，**在线按比例减小刚度 $K_p$**（主动顺从控制），防止产生过大的接触力，保护环境与机器人。
 
 ### 7.4 为什么说电机通常是用 PI 调节的？本项目的 PD 控制与此矛盾吗？
 这是一个极其经典的**高频面试辩难点**。你的直觉完全正确——电机控制中确实普遍使用 **PI 控制**，但这与本项目的 **PD 控制** 运行在完全不同的**控制环路**上：
@@ -460,7 +460,7 @@ def main():
 ### 11.1 进程（Process）在项目中的体现：跨语言分布式架构
 - **项目的进程图谱**：
   在运行系统时，通过 `ros2 launch` 会拉起十信号独立的 Linux 进程：
-  - **C++ 进程**：[safety_monitor_node.cpp](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/safety_monitor/src/safety_monitor_node.cpp)（安全层）、`ros2_control` 框架进程（运行控制器插件）。
+  - **C++ 进程**：[safety_monitor_node.cpp](../src/safety_monitor/src/safety_monitor_node.cpp)（安全层）、`ros2_control` 框架进程（运行控制器插件）。
   - **Python 进程**：`mujoco_sim_node.py`（物理引擎仿真）、`virtual_servo_driver`（伺服驱动模拟）、`lerobot_recorder`（数据录制）。
 - **进程的特征**：
   这些进程各自拥有完全独立的 PID（进程标识符）和虚拟内存空间。哪怕 Python 录制器进程因为磁盘满而崩溃，底层的 C++ 安全监控进程和 `ros2_control` 控制进程依然安全运行，这体现了系统的**高可靠性（Fault Isolation）**。它们之间通过底层的 DDS 以跨进程通信（IPC）进行数据传输。
@@ -469,7 +469,7 @@ def main():
 在你的 C++ 节点中，有两处极其经典的线程并发控制，面试必讲：
 
 #### 1. 普通节点的线程互斥：`std::mutex`（安全监视器）
-在 [safety_monitor_node.cpp](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/safety_monitor/src/safety_monitor_node.cpp#L93) 中，存在多个订阅者回调（如 `/joint_states` 和 `/teleop/cmd_pose`）以及一个 250Hz 的定时器任务 `on_timer`。
+在 [safety_monitor_node.cpp](../src/safety_monitor/src/safety_monitor_node.cpp#L93) 中，存在多个订阅者回调（如 `/joint_states` 和 `/teleop/cmd_pose`）以及一个 250Hz 的定时器任务 `on_timer`。
 - **线程争抢**：这些回调函数分别由 ROS2 线程池中的不同线程异步执行，它们都需要读写类成员变量（如 `last_js_`、`watchdog_`）。
 - **解决方案**：代码中使用 C++ 标准库的互斥锁：
   ```cpp
@@ -480,7 +480,7 @@ def main():
 #### 2. 实时控制节点的无锁缓冲：`RealtimeBuffer`（阻抗控制器）⭐
 在 1kHz 的硬实时控制环路中，**绝对不能使用 `std::mutex` 互斥锁**！因为这会导致 **优先级翻转（Priority Inversion）**：
 - **概念**：如果一个低优先级线程（如 ROS2 订阅者回调线程）持有了锁，此时高优先级的实时控制线程（1kHz 的 `update()` 回调）也去申请锁，实时线程就会被阻塞挂起。如果中间有一个中优先级的线程在疯狂算点云，低优先级线程迟迟得不到 CPU 时间片去释放锁，那么**最高优先级的控制线程就会被无限期卡死，引发控制周期超时，导致机械臂飞车**。
-- **解决方案**：在你的 [cartesian_impedance_controller.hpp](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/teleop_controllers/include/teleop_controllers/cartesian_impedance_controller.hpp#L90) 中，话题订阅者写入数据与 1kHz 实时计算读取数据之间，使用的是：
+- **解决方案**：在你的 [cartesian_impedance_controller.hpp](../src/teleop_controllers/include/teleop_controllers/cartesian_impedance_controller.hpp#L90) 中，话题订阅者写入数据与 1kHz 实时计算读取数据之间，使用的是：
   ```cpp
   realtime_tools::RealtimeBuffer<std::vector<double>> target_positions_;
   ```
@@ -664,7 +664,7 @@ std::shared_ptr<rclcpp::Node> node_;
 1. **第一阶段：对比语法（用时 2-3 天）**
    - 找一篇《从 C 语言过渡到 C++》的简明教程，快速看懂：`class`、`std::shared_ptr`、`std::vector`、以及引用 `&` 的写法。
 2. **第二阶段：拆解你本尊项目中的 C++ 节点（边学边用）**
-   - 打开你的 [safety_monitor_node.cpp](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/safety_monitor/src/safety_monitor_node.cpp)。
+   - 打开你的 [safety_monitor_node.cpp](../src/safety_monitor/src/safety_monitor_node.cpp)。
    - 试着找出每一行背后的 C++ 语法。例如：
      - `class SafetyMonitorNode : public rclcpp::Node` ── **（OOP：类与公有继承）**。
      - `std::shared_ptr<rclcpp::Node> node_;` ── **（智能指针）**。
@@ -782,8 +782,8 @@ Python 是公认最容易入门的语言，因为它读起来就像**“简短�
 ### 18.3 契约式开发 / 接口驱动开发 (Contract-Based / Interface-Driven Development)
 - **软件工程定义**：系统由多个完全解耦的子模块组成，各模块之间不直接访问内部数据，而是通过**“一份严格定义的接口协议（契约）”**进行数据交换。
 - **项目体现**：
-  - 你的 C++ 控制器、安全监视器、Python 仿真器和录制器之间，全部通过自定义的 `teleop_interfaces` 消息包（如 [DriveStatus.msg](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/teleop_interfaces/msg/DriveStatus.msg)）进行数据流动。
-  - 各个 Agent 之间（如任务规划 Agent、运动规划 Agent、评测 Agent，详见 [AGENTS.md](file:///home/ina/dev/ros2-arm-teleoperation-suite/.agents/AGENTS.md)）通过标准的数据字典进行状态传递，拒绝任何模块间的硬编码。
+  - 你的 C++ 控制器、安全监视器、Python 仿真器和录制器之间，全部通过自定义的 `teleop_interfaces` 消息包（如 [DriveStatus.msg](../src/teleop_interfaces/msg/DriveStatus.msg)）进行数据流动。
+  - 各个 Agent 之间（如任务规划 Agent、运动规划 Agent、评测 Agent，详见 [AGENTS.md](AGENTS.md)）通过标准的数据字典进行状态传递，拒绝任何模块间的硬编码。
 - **面试话术**：
   > “我们团队采用了**接口驱动开发（Interface-Driven Development）**。通过定义统一的 `teleop_interfaces` 契约，将感知、控制、硬件通信和数据录制完全解耦，不仅方便了并行开发，还使得各个虚拟智能体（Agents）之间能够通过标准的数据流契约实现高内聚低耦合的闭环协作。”
 
@@ -818,7 +818,7 @@ Python 是公认最容易入门的语言，因为它读起来就像**“简短�
 ### 19.3 运行期（系统运行中）更新层 ── 动态模块热切换/热加载 (Hot-Switching / Dynamic Reconfiguration)
 这是机器人和自动驾驶系统在**运行期功能更新**最关键、最引以为傲的模式：
 - **痛点**：在传统的工业控制系统中，如果你想更换一个控制算法，你必须关掉机器、重新编译并重启操作系统。
-- **项目解决方案**：本项目利用了 `ros2_control` 提供的**动态控制器热切换机制**（对应 [ros2 control switch_controllers](file:///home/ina/dev/ros2-arm-teleoperation-suite/.agents/skills/ros2-teleop-dev/SKILL.md#L110) 调试指令）。
+- **项目解决方案**：本项目利用了 `ros2_control` 提供的**动态控制器热切换机制**（对应 [ros2 control switch_controllers](../.agents/skills/ros2-teleop-dev/SKILL.md#L110) 调试指令）。
   - 在机器人完全不停机、系统进程不重启、DDS 通信不中断的情况下，我们通过 ROS2 服务的形式发送指令，可以在线热拔插、热切换不同的控制器（比如从 `cartesian_impedance_controller` 瞬间切换到 `joint_trajectory_controller`）。
 - **面试话术**：
   - “在代码维护和版本迭代上，我们采用 **Git Flow** 配合 **CI（持续集成）** 流水线，确保每次增量更新均通过验收测试，防止发生回归缺陷；在机器人系统运行期，我们利用 `ros2_control` 的 **动态热加载与控制器热切换机制**。这使得我们能够在系统不停机的前提下，在线动态更新和替换底层控制算法，保障了工业级机器人的高可用性与热更新需求。”
@@ -1489,7 +1489,7 @@ Python 是公认最容易入门的语言，因为它读起来就像**“简短�
 如果你要开始编码改造，你需要修改这四个地方：
 
 #### 🛠️ 第一步：修改 MuJoCo 物理场景 (`franka_panda.xml`)
-在 [franka_panda.xml](file:///home/ina/dev/ros2-arm-teleoperation-suite/config/models/franka_panda.xml#L245) 中，将原来单一的 `target_object` 复制扩展为三个物体，并定义不同的形状、颜色和自由度：
+在 [franka_panda.xml](../config/models/franka_panda.xml#L245) 中，将原来单一的 `target_object` 复制扩展为三个物体，并定义不同的形状、颜色和自由度：
 ```xml
 <!-- 红色方块 -->
 <body name="object_red_box" pos="0.35 -0.1 0.05">
@@ -1532,7 +1532,7 @@ Python 是公认最容易入门的语言，因为它读起来就像**“简短�
 在真实的具身智能工程落地中，**绝对不需要人肉手动采集**！
 
 你的上游仓库里其实**已经内置了专门用于自动生成数据的秘密武器── `synth_data_gen` 功能包**：
-📂 **核心文件路径**：[batch_generator.py](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/synth_data_gen/synth_data_gen/batch_generator.py)
+📂 **核心文件路径**：[batch_generator.py](../src/synth_data_gen/synth_data_gen/batch_generator.py)
 
 ---
 
@@ -1645,7 +1645,7 @@ Python 是公认最容易入门的语言，因为它读起来就像**“简短�
 为了得到指尖受到物体的真实接触力（即“净外力”），系统必须运行**动态补偿算法**。
 
 #### 1️⃣ 数学公式与物理建模
-结合 [sensor_fusion_node.py](file:///home/ina/ros2_ws/src/ros2-moveit-pybullet-bridge/pybullet_bridge/pybullet_bridge/sensor_fusion_node.py) 的具体实现，动态补偿的核心计算公式如下：
+结合 [sensor_fusion_node.py](https://github.com/inayina/ros2-moveit-pybullet-bridge/blob/main/pybullet_bridge/pybullet_bridge/sensor_fusion_node.py) 的具体实现，动态补偿的核心计算公式如下：
 
 * **重力分量在传感器坐标系下的投影**：
   当机器人姿态改变时，传感器局部坐标系相对重力加速度的朝向改变。
@@ -1664,7 +1664,7 @@ Python 是公认最容易入门的语言，因为它读起来就像**“简短�
   \[\tau_{\text{net}} = \tau_{\text{raw}} - \tau_{\text{grav, sensor}}\]
 
 #### 2️⃣ 代码层面的高频计算步骤
-在 [sensor_fusion_node.py](file:///home/ina/ros2_ws/src/ros2-moveit-pybullet-bridge/pybullet_bridge/pybullet_bridge/sensor_fusion_node.py) 中，这一补偿计算在订阅到同步数据（`/joint_states`、图片和FT）后实时进行：
+在 [sensor_fusion_node.py](https://github.com/inayina/ros2-moveit-pybullet-bridge/blob/main/pybullet_bridge/pybullet_bridge/sensor_fusion_node.py) 中，这一补偿计算在订阅到同步数据（`/joint_states`、图片和FT）后实时进行：
 1. **提取当前位姿与速度**：读取输入的关节角，调用仿真正向运动学（FK）解算并更新机器人模型，获取当前传感器连杆的姿态四元数（转化为旋转矩阵 $R$）和线速度 $v_{\text{world}}$。
 2. **差分求加速度**：通过当前线速度与上一帧速度进行有限差分，除以时间戳增量 $\Delta t$，求出世界坐标系下的实时线加速度 $a_{\text{world}}$：
    ```python
@@ -1701,14 +1701,14 @@ Python 是公认最容易入门的语言，因为它读起来就像**“简短�
 在本项目中，这一机制被实现在上游的自动化合成数据生成包中：
 
 1. **时序高频追踪**：
-   在 [batch_generator.py](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/synth_data_gen/synth_data_gen/batch_generator.py#L802-L804) 的控制循环中，机械臂使用 Twist 速度指令向目标点运动。系统在每个控制周期高频读取当前末端实际坐标 `ee` (来自 `/ee_pose` 话题) 与期望轨迹点 `target_pos`，并调用 `update_max_tracking_error` 动态记录该 Episode 的**最大三维欧氏几何偏差**：
+   在 [batch_generator.py](../src/synth_data_gen/synth_data_gen/batch_generator.py#L802-L804) 的控制循环中，机械臂使用 Twist 速度指令向目标点运动。系统在每个控制周期高频读取当前末端实际坐标 `ee` (来自 `/ee_pose` 话题) 与期望轨迹点 `target_pos`，并调用 `update_max_tracking_error` 动态记录该 Episode 的**最大三维欧氏几何偏差**：
    ```python
    self._trial_max_ee_tracking_error = update_max_tracking_error(
        ee, target_pos, self._trial_max_ee_tracking_error
    )
    ```
 2. **物理门禁校验**：
-   在 Episode 结束并进行物理验证时（见 [batch_generator.py](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/synth_data_gen/synth_data_gen/batch_generator.py#L706-L713) 的 `_validate_episode` 函数），系统会检查该 Episode 的最大偏差是否超标。如果偏差大于设定的硬性阈值 `ee_tracking_tolerance_m`（例如 $2\text{cm}$），该数据会被判定为 **Failed** 并直接丢弃，**绝不写入落盘的数据集**：
+   在 Episode 结束并进行物理验证时（见 [batch_generator.py](../src/synth_data_gen/synth_data_gen/batch_generator.py#L706-L713) 的 `_validate_episode` 函数），系统会检查该 Episode 的最大偏差是否超标。如果偏差大于设定的硬性阈值 `ee_tracking_tolerance_m`（例如 $2\text{cm}$），该数据会被判定为 **Failed** 并直接丢弃，**绝不写入落盘的数据集**：
    ```python
    if self._trial_max_ee_tracking_error > self.ee_tracking_tolerance_m:
        return {
@@ -1742,7 +1742,7 @@ Python 是公认最容易入门的语言，因为它读起来就像**“简短�
 ---
 
 ### 38.2 本项目中的具体代码实现
-在 [recorder_node.py](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/lerobot_recorder/lerobot_recorder/recorder_node.py#L145-L173) 中，这一逻辑在 `/lerobot_recorder/end_episode` 服务回调中完美体现：
+在 [recorder_node.py](../src/lerobot_recorder/lerobot_recorder/recorder_node.py#L145-L173) 中，这一逻辑在 `/lerobot_recorder/end_episode` 服务回调中完美体现：
 ```python
 def _on_end_episode(self, request, response):
     frame_count = len(self.frames)
@@ -1786,9 +1786,9 @@ def _on_end_episode(self, request, response):
 
 * **Modbus (电动夹爪控制协议)**：
   * **应用点与 V2 优化**：真实的电动夹爪采用的是 **RS485 Modbus RTU 协议**。在项目 V1 设计中，我们运行了一个真实的 PyModbus TCP 端口侦听服务。但在 **V2 架构优化中，为了彻底消除网络端口占用、简化环境依赖并提高仿真稳定性，我们去掉了（Removed）真实的 Modbus 套接字服务与物理端口监听**。
-  * **代码实现**：在 [gripper_modbus_node.py](file:///home/ina/dev/ros2-arm-teleoperation-suite/src/gripper_driver/gripper_driver/gripper_modbus_node.py) 中，我们改为在进程内使用 `MockModbusClient` 进行寄存器级 Mock 仿真。虽然去掉了网络传输，本设计**依然完整保留了寄存器级地址读写逻辑**（写入开度至 `0x0040` 寄存器，读取状态自 `0x0041` 寄存器），从而在不依赖真实物理硬件和端口监听的前提下，完美模拟了 Modbus 夹爪的寄存器交互行为。
+  * **代码实现**：在 [gripper_modbus_node.py](../src/gripper_driver/gripper_driver/gripper_modbus_node.py) 中，我们改为在进程内使用 `MockModbusClient` 进行寄存器级 Mock 仿真。虽然去掉了网络传输，本设计**依然完整保留了寄存器级地址读写逻辑**（写入开度至 `0x0040` 寄存器，读取状态自 `0x0041` 寄存器），从而在不依赖真实物理硬件和端口监听的前提下，完美模拟了 Modbus 夹爪的寄存器交互行为。
 * **PLC (硬件安全急停电路)**：
-  * **应用点**：在真机就绪度规范 [REAL_MACHINE_READINESS.md](file:///home/ina/ros2_ws/src/ros2-moveit-pybullet-bridge/docs/REAL_MACHINE_READINESS.md#L36) 的 `HW-04` 条款中，明确规定实机必须配备**安全 PLC (Safety PLC)** 或安全继电器。
+  * **应用点**：在真机就绪度规范 [REAL_MACHINE_READINESS.md](https://github.com/inayina/ros2-moveit-pybullet-bridge/blob/main/docs/REAL_MACHINE_READINESS.md#L36) 的 `HW-04` 条款中，明确规定实机必须配备**安全 PLC (Safety PLC)** 或安全继电器。
   * **设计逻辑**：软件急停（ROS2 节点）只能防君子不能防小人，一旦 Linux 假死或 DDS 卡顿，软件急停就会失效。因此真实的工业现场必须通过物理急停按钮接通安全 PLC，实现**硬件级别的断电回路**。
 
 ---
@@ -1995,7 +1995,6 @@ def _on_end_episode(self, request, response):
   * **功能码**：使用功能码 `0x03` 读取保持寄存器，`0x10` 写入多个寄存器。
 * **面试话术 💡**：
   > “末端电动夹爪我们采用的是工业常用的 **RS485 Modbus 协议** 进行控制。在 V2 仿真中，我们通过进程内 `MockModbusClient` 规避了网络套接字监听，但完整保留了寄存器级的交互逻辑：ROS 节点作为 Modbus 客户端，高频向 `0x0040` 寄存器写入期望开度（使用 `0x10` 功能码），并读取 `0x0041` 寄存器获取夹爪实际状态反馈。实机迁移时，只需在参数配置中将 Mock Client 切换为真正的 PyModbus `ModbusSerialClient`，话题与算法层完全不需要任何修改。”
-
 
 
 

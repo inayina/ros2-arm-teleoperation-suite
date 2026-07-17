@@ -116,6 +116,7 @@
   <material name="floor" rgba="0.35 0.35 0.35 1" /></asset>
 
   <worldbody>
+    <camera name="scene_camera" pos="0.55 -0.75 0.55" xyaxes="0.82 0.57 0 -0.25 0.36 0.90" fovy="45" />
     <light name="top" pos="0 0 2" mode="trackcom" />
     <body name="link0" childclass="panda">
       <inertial mass="0.629769" pos="-0.041018 -0.00014 0.049974" fullinertia="0.00315 0.00388 0.004285 8.2904e-7 0.00015 8.2299e-6" />
@@ -233,7 +234,7 @@
                         <geom class="fingertip_pad_collision_5" />
                         <camera name="right_tactile_camera" pos="0 -0.01 0.0445" xyaxes="1 0 0 0 0 1" fovy="90" />
                       </body>
-                    <site name="panda_ee" pos="0 0 0.10" size="0.015" rgba="0 0.8 1 0" /><camera name="scene_camera" pos="0.55 -0.75 0.55" xyaxes="0.82 0.57 0 -0.25 0.36 0.90" fovy="45" /><camera name="wrist_camera" pos="0 -0.08 0.03" xyaxes="1 0 0 0 0 1" fovy="70" /></body>
+                    <site name="panda_ee" pos="0 0 0.10" size="0.015" rgba="0 0.8 1 0" /><camera name="wrist_camera" pos="0 -0.08 0.03" xyaxes="1 0 0 0 0 1" fovy="70" /></body>
                   </body>
                 </body>
               </body>

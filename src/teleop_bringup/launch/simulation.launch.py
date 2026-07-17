@@ -14,6 +14,7 @@ def generate_launch_description():
     camera_width = LaunchConfiguration("camera_width")
     camera_height = LaunchConfiguration("camera_height")
     camera_rate = LaunchConfiguration("camera_rate")
+    publish_depth = LaunchConfiguration("publish_depth")
     enable_wrist_camera = LaunchConfiguration("enable_wrist_camera")
     wrist_use_mujoco_renderer = LaunchConfiguration("wrist_use_mujoco_renderer")
     wrist_camera_width = LaunchConfiguration("wrist_camera_width")
@@ -35,14 +36,15 @@ def generate_launch_description():
         DeclareLaunchArgument("randomize", default_value="false"),
         DeclareLaunchArgument("camera_name", default_value="scene_camera"),
         DeclareLaunchArgument("scene_use_mujoco_renderer", default_value="true"),
-        DeclareLaunchArgument("camera_width", default_value="640"),
-        DeclareLaunchArgument("camera_height", default_value="480"),
-        DeclareLaunchArgument("camera_rate", default_value="30.0"),
-        DeclareLaunchArgument("enable_wrist_camera", default_value="true"),
+        DeclareLaunchArgument("camera_width", default_value="320"),
+        DeclareLaunchArgument("camera_height", default_value="240"),
+        DeclareLaunchArgument("camera_rate", default_value="10.0"),
+        DeclareLaunchArgument("publish_depth", default_value="false"),
+        DeclareLaunchArgument("enable_wrist_camera", default_value="false"),
         DeclareLaunchArgument("wrist_use_mujoco_renderer", default_value="true"),
         DeclareLaunchArgument("wrist_camera_width", default_value="320"),
         DeclareLaunchArgument("wrist_camera_height", default_value="240"),
-        DeclareLaunchArgument("enable_tactile", default_value="true"),
+        DeclareLaunchArgument("enable_tactile", default_value="false"),
         DeclareLaunchArgument("contact_debug_enabled", default_value="false"),
         DeclareLaunchArgument("contact_debug_period_s", default_value="1.0"),
         DeclareLaunchArgument(
@@ -87,6 +89,7 @@ def generate_launch_description():
                 "depth_topic": "/camera/depth/image_raw",
                 "camera_info_topic": "/camera/color/camera_info",
                 "use_mujoco_renderer": scene_use_mujoco_renderer,
+                "publish_depth": publish_depth,
             }],
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("capture_mode"), "' == 'portfolio'"
@@ -109,6 +112,7 @@ def generate_launch_description():
                 "depth_topic": "/camera/wrist/depth/image_raw",
                 "camera_info_topic": "/camera/wrist/color/camera_info",
                 "use_mujoco_renderer": wrist_use_mujoco_renderer,
+                "publish_depth": publish_depth,
             }],
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("capture_mode"), "' == 'portfolio' and '",

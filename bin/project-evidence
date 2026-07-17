@@ -1,0 +1,40 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+MIDSTREAM_ROOT=""
+
+if [ -n "${EPISODE_DATA_LAB_ROOT:-}" ]; then
+  if [ ! -f "$EPISODE_DATA_LAB_ROOT/project_knowledge/cli.py" ]; then
+    echo "Project Evidence Agent core not found at EPISODE_DATA_LAB_ROOT=$EPISODE_DATA_LAB_ROOT. Set EPISODE_DATA_LAB_ROOT to a valid robot-arm-episode-data-lab checkout." >&2
+    exit 2
+  fi
+  MIDSTREAM_ROOT=$(CDPATH= cd -- "$EPISODE_DATA_LAB_ROOT" && pwd)
+else
+  for candidate in \
+    "$REPO_ROOT/../robot-arm-episode-data-lab" \
+    "$REPO_ROOT/../robot-sim-lab/robot-arm-episode-data-lab" \
+    "${HOME}/robot-sim-lab/robot-arm-episode-data-lab"
+  do
+    if [ -f "$candidate/project_knowledge/cli.py" ]; then
+      MIDSTREAM_ROOT=$(CDPATH= cd -- "$candidate" && pwd)
+      break
+    fi
+  done
+fi
+
+if [ -z "$MIDSTREAM_ROOT" ]; then
+  echo "Project Evidence Agent core not found. Set EPISODE_DATA_LAB_ROOT to the robot-arm-episode-data-lab checkout." >&2
+  exit 2
+fi
+
+export PYTHONPATH="$MIDSTREAM_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+
+if [ "${1:-}" = "impact" ]; then
+  shift
+  exec python3 -m project_knowledge.cli impact \
+    --repository ros2-arm-teleoperation-suite "$@"
+fi
+
+exec python3 -m project_knowledge.cli "$@"

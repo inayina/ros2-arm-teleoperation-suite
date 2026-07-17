@@ -1,6 +1,7 @@
 """L7: multi-modal LeRobot recorder."""
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -14,6 +15,9 @@ def generate_launch_description():
     auto_record_seconds = LaunchConfiguration("auto_record_seconds")
     auto_record_delay_s = LaunchConfiguration("auto_record_delay_s")
     capture_mode = LaunchConfiguration("capture_mode")
+    enable_wrist_camera = LaunchConfiguration("enable_wrist_camera")
+    expected_frame_rate_hz = LaunchConfiguration("expected_frame_rate_hz")
+    enable_system_telemetry = LaunchConfiguration("enable_system_telemetry")
     return LaunchDescription([
         DeclareLaunchArgument("output_dir", default_value="data/episodes"),
         DeclareLaunchArgument("task", default_value="teleop"),
@@ -22,6 +26,9 @@ def generate_launch_description():
         DeclareLaunchArgument("auto_record_seconds", default_value="0.0"),
         DeclareLaunchArgument("auto_record_delay_s", default_value="0.0"),
         DeclareLaunchArgument("capture_mode", default_value="portfolio"),
+        DeclareLaunchArgument("enable_wrist_camera", default_value="false"),
+        DeclareLaunchArgument("expected_frame_rate_hz", default_value="10.0"),
+        DeclareLaunchArgument("enable_system_telemetry", default_value="true"),
         Node(
             package="lerobot_recorder",
             executable="lerobot_recorder_node",
@@ -35,6 +42,17 @@ def generate_launch_description():
                 "auto_record_seconds": ParameterValue(auto_record_seconds, value_type=float),
                 "auto_record_delay_s": ParameterValue(auto_record_delay_s, value_type=float),
                 "capture_mode": capture_mode,
+                "enable_wrist_camera": ParameterValue(
+                    enable_wrist_camera, value_type=bool),
+                "expected_frame_rate_hz": ParameterValue(
+                    expected_frame_rate_hz, value_type=float),
             }],
+        ),
+        Node(
+            package="lerobot_recorder",
+            executable="system_telemetry_node",
+            name="system_telemetry",
+            output="screen",
+            condition=IfCondition(enable_system_telemetry),
         ),
     ])

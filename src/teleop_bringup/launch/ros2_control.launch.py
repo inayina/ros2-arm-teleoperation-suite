@@ -14,6 +14,7 @@ def generate_launch_description():
     use_sim = LaunchConfiguration("use_sim")
     can_interface = LaunchConfiguration("can_interface")
     controller = LaunchConfiguration("controller")  # impedance | forward
+    sim_backend = LaunchConfiguration("sim_backend")
 
     is_impedance = PythonExpression(["'", controller, "' == 'impedance'"])
 
@@ -26,7 +27,14 @@ def generate_launch_description():
         ]), value_type=str)
     }
     controllers_yaml = PathJoinSubstitution(
-        [FindPackageShare("teleop_bringup"), "config", "controllers.yaml"])
+        [
+            FindPackageShare("teleop_bringup"),
+            "config",
+            PythonExpression([
+                "'controllers_isaac.yaml' if '", sim_backend,
+                "' == 'isaac' else 'controllers.yaml'",
+            ]),
+        ])
 
     cm = Node(
         package="controller_manager",
@@ -61,6 +69,7 @@ def generate_launch_description():
         DeclareLaunchArgument("use_sim", default_value="true"),
         DeclareLaunchArgument("can_interface", default_value="vcan0"),
         DeclareLaunchArgument("controller", default_value="impedance"),
+        DeclareLaunchArgument("sim_backend", default_value="mujoco"),
         cm,
         TimerAction(period=3.0, actions=[impedance_spawner, forward_spawner]),
     ])

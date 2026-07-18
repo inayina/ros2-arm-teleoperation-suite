@@ -89,7 +89,9 @@ cleanup() {
   if [[ -n "${ROS_HB_PID}" ]]; then kill "${ROS_HB_PID}" 2>/dev/null || true; fi
   if [[ -n "${HB_PID}" ]]; then kill "${HB_PID}" 2>/dev/null || true; fi
   if [[ -n "${LAUNCH_PID}" ]]; then
-    kill -INT "${LAUNCH_PID}" 2>/dev/null || true
+    # setsid makes LAUNCH_PID the process-group id. Interrupt the complete
+    # launch tree so renderer/recorder children cannot be orphaned.
+    kill -INT -- "-${LAUNCH_PID}" 2>/dev/null || kill -INT "${LAUNCH_PID}" 2>/dev/null || true
     wait_with_timeout "${LAUNCH_PID}" "${LAUNCH_SHUTDOWN_TIMEOUT_S}" "ROS 2 launch shutdown" || true
     LAUNCH_PID=""
   fi
@@ -326,7 +328,7 @@ cat "${LOG_DIR}/dataset_validation.json"
 if [[ -n "${ROS_HB_PID}" ]]; then kill "${ROS_HB_PID}" 2>/dev/null || true; ROS_HB_PID=""; fi
 if [[ -n "${HB_PID}" ]]; then kill "${HB_PID}" 2>/dev/null || true; HB_PID=""; fi
 if [[ -n "${LAUNCH_PID}" ]]; then
-  kill -INT "${LAUNCH_PID}" 2>/dev/null || true
+  kill -INT -- "-${LAUNCH_PID}" 2>/dev/null || kill -INT "${LAUNCH_PID}" 2>/dev/null || true
   wait_with_timeout "${LAUNCH_PID}" "${LAUNCH_SHUTDOWN_TIMEOUT_S}" "ROS 2 launch shutdown" || true
   LAUNCH_PID=""
 fi

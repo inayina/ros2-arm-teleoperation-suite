@@ -565,21 +565,21 @@ class BatchGenerator(Node):
         defaults = {
             "object_red_box": (
                 "pick up the red box and place it in the left bin",
-                -0.2,
+                -0.35,
             ),
             "object_blue_cylinder": (
                 "pick up the blue cylinder and place it in the right bin",
-                0.2,
+                0.35,
             ),
             "object_green_sphere": (
                 "pick up the green sphere and place it in the left bin",
-                -0.2,
+                -0.35,
             ),
         }
         if self.target_object_name:
             instruction, bin_y = defaults.get(
                 self.target_object_name,
-                (f"pick up {self.target_object_name}", -0.2),
+                (f"pick up {self.target_object_name}", -0.35),
             )
             if self.language_instruction:
                 instruction = self.language_instruction

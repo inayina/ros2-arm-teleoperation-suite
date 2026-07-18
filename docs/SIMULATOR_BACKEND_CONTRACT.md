@@ -280,7 +280,7 @@ colcon test-result --verbose
 - 顶层仍保留 MuJoCo 参数以保证命令兼容；P2 不应继续增加 backend 专属顶层参数。
 - camera bridge 和 telemetry 尚未 backend-neutral；它们已被明确隔离/记录，不阻塞 P1。
 - P1 不改变 recorder，因此没有 `meta.json` provenance；这是刻意保持 schema 稳定。
-- Isaac 的 joint/object/reset/scene RGB/EE/FT 已完成 P3/P4 最小验证；wrist/depth、effort command、randomization、batch/grasp gate 尚未实现或验证。
+- Isaac 的 joint/object/reset/scene RGB/EE/FT 已完成 P3/P4 最小验证；E1 已实现带双层 watchdog 的 effort command consumption。wrist/depth、randomization、batch/grasp gate 尚未实现或验证。
 
 ---
 
@@ -295,5 +295,16 @@ colcon test-result --verbose
 | `/isaac/ee_pose` | `/ee_pose` | 已实测 |
 | `/isaac/ft_sensor` | `/ft_sensor` | 已实测；panda_hand incoming-joint reaction，local frame |
 | `/isaac/camera/color/image_raw` | `/camera/color/image_raw` + `/camera/scene/image_raw` | 已实测 320×240 |
+| `/sim/joint_effort_cmd` | `/isaac/joint_effort_cmd` → Panda articulation effort | E1 已实现；7 维/finite/限幅、SensorDataQoS、latest-value、adapter/backend 双 watchdog |
 
 相机 helper 使用 simulation time，而 recorder 其余链路使用 ROS system time；adapter 在 canonical camera boundary 重写 header stamp，避免跨时钟域同步失败。Isaac runtime 始终由隔离 venv/远程环境管理，普通 ROS workspace 只依赖 `isaac_sim_adapter`。
+
+E1 reset 会同时清空 adapter 和 backend command history。reset completion 后 adapter 必须先收到
+新 epoch 的 joint state 才接受 command；backend 还会丢弃 bounded grace interval 内可能晚到的
+pre-reset raw effort。实现与验收边界见 `docs/ISAAC_E1_ACTION_EXECUTION.md`。
+
+2026-07-18 canonical E1 证据位于
+`evidence/isaac_e1_action_execution_20260718_final/`：5/5 固定 effort sequence 完成，双端
+BEST_EFFORT/VOLATILE QoS 匹配，断开 adapter 后 backend watchdog 在 104.080 ms 触发
+zero-effort。相同序列的 trajectory RMSE 最大 0.360 rad、终态 L2 最大 1.337 rad，因此
+只确认 action execution 与 fail-safe 已闭合，不声称稳定控制或 learned-policy success。

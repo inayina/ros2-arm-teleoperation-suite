@@ -14,3 +14,11 @@ _namespace = runpy.run_path(
 for _name, _value in _namespace.items():
     if _name.startswith('test_') or _name.startswith('Test'):
         globals()[_name] = _value
+
+_policy_namespace = runpy.run_path(
+    str(Path(__file__).resolve().parents[3] / 'tests/test_isaac_policy_inference.py')
+)
+
+for _name, _value in _policy_namespace.items():
+    if _name.startswith('test_') or _name.startswith('Test'):
+        globals()[_name] = _value

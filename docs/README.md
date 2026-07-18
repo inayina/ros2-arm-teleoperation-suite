@@ -49,6 +49,7 @@ bin/project-evidence impact --base HEAD~1 --head HEAD
 |---|---|---|
 | [SPEC_V2_SIM_BACKENDS_ISAAC.md](./SPEC_V2_SIM_BACKENDS_ISAAC.md) | P0–P4 functional / P5 evidence-only complete | 保留 MuJoCo 默认行为；Isaac adapter、单 episode PoC 和首轮 Sim2Sim 观测分布对比已实测 |
 | [SIMULATOR_BACKEND_CONTRACT.md](./SIMULATOR_BACKEND_CONTRACT.md) | P0–P5 evidenced contract | MuJoCo 硬编码审计、稳定 ROS contract、Isaac raw→canonical 映射与能力缺口 |
+| [ISAAC_E1_ACTION_EXECUTION.md](./ISAAC_E1_ACTION_EXECUTION.md) | E1 action execution | Isaac effort consumption、latest-value/watchdog/reset/QoS 边界与 5-repeat 验收 |
 
 ---
 

@@ -108,8 +108,27 @@ def _write_v21_rows(dest_root: Path, dest_index: int, rows: list[dict]) -> Path:
     return parquet_file
 
 
+def _declared_rgb_video_keys(root: Path) -> tuple[str, ...]:
+    """Return RGB streams declared by the source LeRobot v2.1 dataset.
+
+    Scene-only collection intentionally omits the wrist stream. Requiring every
+    camera supported by the recorder turns that valid dataset into an import
+    failure, so archive import follows ``meta/info.json`` instead.
+    """
+    info_path = dataset_root(root) / "meta" / "info.json"
+    if not info_path.is_file():
+        return ()
+    info = json.loads(info_path.read_text(encoding="utf-8"))
+    features = info.get("features") or {}
+    return tuple(
+        key for key in RGB_IMAGE_KEYS
+        if isinstance(features.get(key), dict)
+        and features[key].get("dtype") == "video"
+    )
+
+
 def _copy_v21_media(source_root: Path, source_index: int, dest_root: Path, dest_index: int) -> None:
-    for key in RGB_IMAGE_KEYS:
+    for key in _declared_rgb_video_keys(source_root):
         source_video = video_episode_path(source_root, key, source_index)
         if not source_video.is_file():
             raise FileNotFoundError(f"missing v2.1 video: {source_video}")

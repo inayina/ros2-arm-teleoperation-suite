@@ -17,6 +17,12 @@ def generate_launch_description():
     target_object_name = LaunchConfiguration("target_object_name")
     source_namespace = LaunchConfiguration("isaac_source_namespace")
     startup_timeout_s = LaunchConfiguration("isaac_startup_timeout_s")
+    reset_timeout_s = LaunchConfiguration("isaac_reset_timeout_s")
+    command_timeout_s = LaunchConfiguration("isaac_command_timeout_s")
+    state_timeout_s = LaunchConfiguration("isaac_state_timeout_s")
+    command_forward_rate_hz = LaunchConfiguration(
+        "isaac_command_forward_rate_hz"
+    )
 
     adapter = Node(
         package="isaac_sim_adapter",
@@ -27,6 +33,10 @@ def generate_launch_description():
             "target_object_name": target_object_name,
             "source_namespace": source_namespace,
             "startup_timeout_s": startup_timeout_s,
+            "reset_timeout_s": reset_timeout_s,
+            "command_timeout_s": command_timeout_s,
+            "state_timeout_s": state_timeout_s,
+            "command_forward_rate_hz": command_forward_rate_hz,
         }],
     )
 
@@ -45,6 +55,12 @@ def generate_launch_description():
             "isaac_startup_timeout_s",
             default_value="45.0",
             description="Fail if no raw Isaac joint state arrives in this interval.",
+        ),
+        DeclareLaunchArgument("isaac_reset_timeout_s", default_value="5.0"),
+        DeclareLaunchArgument("isaac_command_timeout_s", default_value="0.1"),
+        DeclareLaunchArgument("isaac_state_timeout_s", default_value="0.1"),
+        DeclareLaunchArgument(
+            "isaac_command_forward_rate_hz", default_value="250.0"
         ),
         LogInfo(msg=(
             "Isaac backend selected. Start scripts/isaac_panda_backend.py with "

@@ -34,3 +34,29 @@ def test_camera_parameter_poll_is_async() -> None:
     ).read_text(encoding="utf-8")
     assert "call_async(request)" in source
     assert "_get_params_client.call(request)" not in source
+
+
+def test_scene_rgb_only_path_skips_depth_render() -> None:
+    source = Path(
+        "src/camera_bridge/camera_bridge/camera_bridge_node.py"
+    ).read_text(encoding="utf-8")
+    assert "needs_depth = self.publish_depth or self.tactile_mode" in source
+    assert "rgb = self._camera.render_rgb(self._data)" in source
+
+
+def test_camera_publish_path_has_monotonic_burst_gate() -> None:
+    source = Path(
+        "src/camera_bridge/camera_bridge/camera_bridge_node.py"
+    ).read_text(encoding="utf-8")
+    assert "now_wall_s = time.monotonic()" in source
+    assert "self._min_publish_period_s * 0.9" in source
+
+
+def test_mujoco_publish_path_preserves_renderer_orientation() -> None:
+    source = Path(
+        "src/camera_bridge/camera_bridge/camera_bridge_node.py"
+    ).read_text(encoding="utf-8")
+
+    assert "np.ascontiguousarray(rgb)" in source
+    assert "np.flipud(rgb)" not in source
+    assert "np.flipud(depth_arr)" not in source

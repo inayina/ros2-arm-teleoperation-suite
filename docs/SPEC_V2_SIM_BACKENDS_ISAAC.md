@@ -449,12 +449,21 @@ timeout 20s ros2 run tf2_ros tf2_echo panda_link0 panda_ee
 - raw 维度保持现有契约：`observation.state[7]`、`action[8]`。
 - 中游现有 adapter 使用 `--derive-ee-delta-action` 后得到 `state[8]`、`action[7]`；`inspect_dataset.py` 对 1 episode / 25 frames 返回 `Status: PASS`。
 
-### 11.4 未实现/未验证
+### 11.4 E1 action execution 更新
 
-- `/sim/joint_effort_cmd` 尚未驱动 Isaac articulation，因此不能用现有控制链执行 Isaac 抓取任务。
+- `/sim/joint_effort_cmd` 已通过 ROS-only adapter 驱动 Isaac articulation；边界固定为 Panda arm
+  7 维 N·m，带 finite/limit 校验、SensorDataQoS、latest-value、双层 monotonic watchdog 和
+  reset history 清理。E1 使用固定 effort sequence 做 5 次 repeatability 验收，不是 learned-policy
+  或抓取成功率验证。
 - wrist RGB/depth、camera info、Isaac domain randomization、grasp validation 和 batch generation 未完成。
 - P4 是固定 PoC action 的 recorder/schema 验证，不是任务成功率或物理抓取成功证据。
-- Isaac 闭环任务执行尚未实现，因此 P5 只能比较 matched recorder 输入下的观测分布，不能比较两后端抓取成功率。
+- E1 只闭合 effort execution infrastructure；自动 ground-truth task evaluator 尚未完成，因此
+  P5 仍不能比较两后端抓取成功率。
+
+E1 canonical run（2026-07-18）完成 5/5 reset/action repeat，backend 报告 `PASS`，
+双端 command QoS 为 BEST_EFFORT/VOLATILE；adapter 断连后 simulator-local watchdog 在
+104.080 ms 进入 zero-effort。repeat 终态差异仍大（最大 L2 1.337 rad），因此该证据只证明
+执行链和 fail-safe，不证明闭环稳定性或模型任务成功。
 
 ### 11.5 P5 实测证据（EVIDENCE_ONLY）
 

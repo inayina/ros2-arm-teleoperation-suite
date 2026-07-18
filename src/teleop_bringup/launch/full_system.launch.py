@@ -69,6 +69,11 @@ def generate_launch_description():
     target_object_name = LaunchConfiguration("target_object_name")
     isaac_source_namespace = LaunchConfiguration("isaac_source_namespace")
     isaac_startup_timeout_s = LaunchConfiguration("isaac_startup_timeout_s")
+    isaac_reset_timeout_s = LaunchConfiguration("isaac_reset_timeout_s")
+    isaac_command_timeout_s = LaunchConfiguration("isaac_command_timeout_s")
+    isaac_state_timeout_s = LaunchConfiguration("isaac_state_timeout_s")
+    isaac_command_forward_rate_hz = LaunchConfiguration(
+        "isaac_command_forward_rate_hz")
     simulator_version = LaunchConfiguration("simulator_version")
     scene_id = LaunchConfiguration("scene_id")
 
@@ -81,6 +86,10 @@ def generate_launch_description():
                               "target_object_name": target_object_name,
                               "isaac_source_namespace": isaac_source_namespace,
                               "isaac_startup_timeout_s": isaac_startup_timeout_s,
+                              "isaac_reset_timeout_s": isaac_reset_timeout_s,
+                              "isaac_command_timeout_s": isaac_command_timeout_s,
+                              "isaac_state_timeout_s": isaac_state_timeout_s,
+                              "isaac_command_forward_rate_hz": isaac_command_forward_rate_hz,
                               "model_path": model_path,
                               "randomize": randomize,
                               "headless": headless,
@@ -105,7 +114,7 @@ def generate_launch_description():
     fieldbus = _include("teleop_bringup", "fieldbus.launch.py", common)
     ros2_control = _include(
         "teleop_bringup", "ros2_control.launch.py",
-        {**common, "controller": controller})
+        {**common, "controller": controller, "sim_backend": sim_backend})
     safety = _include(
         "safety_monitor", "safety.launch.py",
         {"watchdog_timeout": watchdog_timeout})
@@ -159,6 +168,10 @@ def generate_launch_description():
         DeclareLaunchArgument("target_object_name", default_value="object_red_box"),
         DeclareLaunchArgument("isaac_source_namespace", default_value="/isaac"),
         DeclareLaunchArgument("isaac_startup_timeout_s", default_value="45.0"),
+        DeclareLaunchArgument("isaac_reset_timeout_s", default_value="5.0"),
+        DeclareLaunchArgument("isaac_command_timeout_s", default_value="0.1"),
+        DeclareLaunchArgument("isaac_state_timeout_s", default_value="0.1"),
+        DeclareLaunchArgument("isaac_command_forward_rate_hz", default_value="250.0"),
         DeclareLaunchArgument("simulator_version", default_value=""),
         DeclareLaunchArgument("scene_id", default_value=""),
         DeclareLaunchArgument("output_dir", default_value="data/episodes"),

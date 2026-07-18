@@ -2,6 +2,7 @@
 """L6 camera bridge: MuJoCo virtual camera to ROS Image topics."""
 import math
 import os
+import time
 
 import numpy as np
 
@@ -54,6 +55,8 @@ class CameraBridgeNode(Node):
         self.w = int(self.get_parameter("width").value)
         self.h = int(self.get_parameter("height").value)
         self.rate = float(self.get_parameter("rate").value)
+        self._min_publish_period_s = 1.0 / self.rate
+        self._last_publish_wall_s: float | None = None
         self.frame_id = str(self.get_parameter("frame_id").value)
         self.synthetic_fallback = bool(self.get_parameter("synthetic_fallback").value)
         self.tactile_mode = bool(self.get_parameter("tactile_mode").value)
@@ -285,16 +288,33 @@ class CameraBridgeNode(Node):
         return info
 
     def _tick(self):
+        now_wall_s = time.monotonic()
+        if (
+            self._last_publish_wall_s is not None
+            and now_wall_s - self._last_publish_wall_s
+            < self._min_publish_period_s * 0.9
+        ):
+            return
+        self._last_publish_wall_s = now_wall_s
         stamp = self.get_clock().now().to_msg()
         self._k += 1
 
         if self._camera is not None:
             self._poll_target_object_name()
             self._set_model_joints(self._q)
-            rgb, depth_arr = self._camera.render(self._data)
-            rgb = np.ascontiguousarray(np.flipud(rgb))
-            depth_arr = np.ascontiguousarray(np.flipud(depth_arr))
+            needs_depth = self.publish_depth or self.tactile_mode
+            if needs_depth:
+                rgb, depth_arr = self._camera.render(self._data)
+            else:
+                rgb = self._camera.render_rgb(self._data)
+                depth_arr = None
+            # mujoco.Renderer already returns top-left-origin image arrays.
+            # A legacy OpenGL flip here made recorded RGB/depth appear upside-down.
+            rgb = np.ascontiguousarray(rgb)
+            if depth_arr is not None:
+                depth_arr = np.ascontiguousarray(depth_arr)
             if self.tactile_mode:
+                assert depth_arr is not None
                 rgb = self._simulate_gelsight(depth_arr)
         elif self.synthetic_fallback:
             rgb, depth_arr = self._synthetic_frame()
@@ -305,6 +325,7 @@ class CameraBridgeNode(Node):
 
         self.pub_color.publish(self._image_msg(stamp, "rgb8", rgb))
         if self.pub_depth is not None:
+            assert depth_arr is not None
             self.pub_depth.publish(
                 self._image_msg(stamp, "32FC1", depth_arr.astype(np.float32)))
         self.pub_info.publish(self._camera_info(stamp))
@@ -424,7 +445,7 @@ class CameraBridgeNode(Node):
     def _draw_table_scene(self, rgb: np.ndarray, depth: np.ndarray) -> None:
         table_color = (210, 216, 220)
         self._draw_rect(rgb, 0, int(self.h * 0.16), self.w, self.h, table_color)
-        for y, color in [(-0.2, (128, 144, 154)), (0.2, (148, 158, 164))]:
+        for y, color in [(-0.35, (128, 144, 154)), (0.35, (148, 158, 164))]:
             center = self._world_to_px((0.40, y, 0.02))
             self._draw_box_outline(
                 rgb,

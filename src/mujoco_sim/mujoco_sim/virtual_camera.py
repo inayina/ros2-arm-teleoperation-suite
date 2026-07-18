@@ -47,20 +47,26 @@ class VirtualCamera:
         if self._camera_id < 0:
             raise RuntimeError(f"MuJoCo camera '{camera.name}' not found")
 
-    def render(self, data) -> tuple[np.ndarray, np.ndarray]:
-        """Return `(rgb8, depth_m)` arrays."""
-
+    def render_rgb(self, data) -> np.ndarray:
+        """Return one RGB frame without paying for an unused depth pass."""
         self._renderer.disable_depth_rendering()
         self._renderer.update_scene(data, camera=self._camera_id)
-        rgb = np.asarray(self._renderer.render(), dtype=np.uint8)
+        return np.asarray(self._renderer.render(), dtype=np.uint8).copy()
 
+    def render_depth(self, data) -> np.ndarray:
+        """Return one metric-depth frame."""
         self._renderer.enable_depth_rendering()
         self._renderer.update_scene(data, camera=self._camera_id)
-        depth_raw = np.asarray(self._renderer.render(), dtype=np.float32)
+        depth_raw = np.asarray(self._renderer.render(), dtype=np.float32).copy()
         self._renderer.disable_depth_rendering()
 
         extent = float(data.model.stat.extent)
         near = float(data.model.vis.map.znear) * extent
         far = float(data.model.vis.map.zfar) * extent
-        depth_m = near / (1.0 - depth_raw * (1.0 - near / far))
-        return rgb, depth_m.astype(np.float32, copy=False)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            depth_m = near / (1.0 - depth_raw * (1.0 - near / far))
+        return depth_m.astype(np.float32, copy=False)
+
+    def render(self, data) -> tuple[np.ndarray, np.ndarray]:
+        """Return `(rgb8, depth_m)` arrays for depth-enabled consumers."""
+        return self.render_rgb(data), self.render_depth(data)

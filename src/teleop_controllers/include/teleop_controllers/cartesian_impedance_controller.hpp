@@ -91,7 +91,7 @@ private:
   // ── RT-safe shared state ──────────────────────────────────────────────────
   /// Target joint positions from /joint_target (latest point, RT-safe).
   realtime_tools::RealtimeBuffer<std::vector<double>> target_positions_;
-  /// Until the first explicit target arrives, hold the measured pose.
+  /// Holds the activation snapshot, then the latest explicit Servo target.
   std::atomic<bool> target_received_{false};
   /// Latest contact wrench from /ft_sensor.
   realtime_tools::RealtimeBuffer<geometry_msgs::msg::WrenchStamped> ft_buffer_;

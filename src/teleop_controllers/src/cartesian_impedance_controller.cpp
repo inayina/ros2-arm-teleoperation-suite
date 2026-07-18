@@ -201,6 +201,10 @@ controller_interface::CallbackReturn CartesianImpedanceController::on_activate(
     current[i] = state_interfaces_[position_indices_[i]].get_optional().value_or(0.0);
   }
   target_positions_.writeFromNonRT(current);
+  // Hold the activation snapshot until Servo publishes an explicit target.
+  // Leaving this false makes q_des follow q on every update, so there is no
+  // restorative posture torque while waiting for the first command.
+  target_received_.store(true);
 
   RCLCPP_INFO(get_node()->get_logger(), "CartesianImpedanceController activated.");
   return controller_interface::CallbackReturn::SUCCESS;

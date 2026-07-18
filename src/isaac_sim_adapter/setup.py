@@ -25,6 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'isaac_sim_adapter = isaac_sim_adapter.adapter_node:main',
+            'isaac_e1_action_sequence = isaac_sim_adapter.e1_action_sequence:main',
+            'isaac_policy_inference = isaac_sim_adapter.policy_inference_node:main',
         ],
     },
 )

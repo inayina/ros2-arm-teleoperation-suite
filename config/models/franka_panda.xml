@@ -116,7 +116,9 @@
   <material name="floor" rgba="0.35 0.35 0.35 1" /></asset>
 
   <worldbody>
-    <camera name="scene_camera" pos="0.55 -0.75 0.55" xyaxes="0.82 0.57 0 -0.25 0.36 0.90" fovy="45" />
+    <!-- Canonical front-oblique view: world -Y/left bin is image-left,
+         world +Y/right bin is image-right, and world +Z is image-up. -->
+    <camera name="scene_camera" pos="1.45 -0.55 1.25" xyaxes="0.431456 0.902134 0 -0.539075 0.257818 0.801828" fovy="45" />
     <light name="top" pos="0 0 2" mode="trackcom" />
     <body name="link0" childclass="panda">
       <inertial mass="0.629769" pos="-0.041018 -0.00014 0.049974" fullinertia="0.00315 0.00388 0.004285 8.2904e-7 0.00015 8.2299e-6" />
@@ -264,7 +266,7 @@
   </body>
 
   <!-- 左回收筐 -->
-  <body name="bin_left" pos="0.4 -0.2 0.02">
+  <body name="bin_left" pos="0.4 -0.35 0.02">
     <geom name="bin_left_base" type="box" size="0.1 0.1 0.005" rgba="0.5 0.5 0.5 0.5" />
     <geom name="bin_left_side1" type="box" size="0.1 0.005 0.03" pos="0 0.095 0.015" rgba="0.5 0.5 0.5 0.5" />
     <geom name="bin_left_side2" type="box" size="0.1 0.005 0.03" pos="0 -0.095 0.015" rgba="0.5 0.5 0.5 0.5" />
@@ -273,7 +275,7 @@
   </body>
 
   <!-- 右回收筐 -->
-  <body name="bin_right" pos="0.4 0.2 0.02">
+  <body name="bin_right" pos="0.4 0.35 0.02">
     <geom name="bin_right_base" type="box" size="0.1 0.1 0.005" rgba="0.5 0.5 0.5 0.5" />
     <geom name="bin_right_side1" type="box" size="0.1 0.005 0.03" pos="0 0.095 0.015" rgba="0.5 0.5 0.5 0.5" />
     <geom name="bin_right_side2" type="box" size="0.1 0.005 0.03" pos="0 -0.095 0.015" rgba="0.5 0.5 0.5 0.5" />

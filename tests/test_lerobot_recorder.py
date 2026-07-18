@@ -304,6 +304,9 @@ class TestLeRobotRecorder(unittest.TestCase):
                     "capture_fps": 10.0,
                     "action_type": "ee_pose_gripper",
                     "action_semantics": "ee_pose_gripper_cmd_v1",
+                    "simulator_backend": "isaac",
+                    "simulator_version": "6.0.0.0",
+                    "scene_id": "p3_single_panda_red_box_v1",
                 },
             )
             meta = json.loads(
@@ -311,6 +314,9 @@ class TestLeRobotRecorder(unittest.TestCase):
             assert meta["visual_streams"] == ["scene"]
             assert meta["capture_fps"] == 10.0
             assert meta["action_semantics"] == "ee_pose_gripper_cmd_v1"
+            assert meta["simulator_backend"] == "isaac"
+            assert meta["simulator_version"] == "6.0.0.0"
+            assert meta["scene_id"] == "p3_single_panda_red_box_v1"
             if _HAS_PYARROW and ffmpeg_available():
                 scene_video = os.path.join(
                     temp_dir, "videos", "chunk-000",

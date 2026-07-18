@@ -198,6 +198,9 @@ def write_episode(
             "action_type",
             "action_semantics",
             "action_sources",
+            "simulator_backend",
+            "simulator_version",
+            "scene_id",
         )
         if key in episode_metadata
     }

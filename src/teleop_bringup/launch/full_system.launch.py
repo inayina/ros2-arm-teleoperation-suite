@@ -5,6 +5,8 @@ safety -> motion -> recording). Use TimerAction to stagger dependent layers.
 
 Examples:
   ros2 launch teleop_bringup full_system.launch.py
+  ros2 launch teleop_bringup full_system.launch.py sim_backend:=mujoco
+  ros2 launch teleop_bringup full_system.launch.py sim_backend:=isaac
   ros2 launch teleop_bringup full_system.launch.py use_sim:=false can_interface:=can0
   ros2 launch teleop_bringup full_system.launch.py controller:=forward record:=true
 """
@@ -28,6 +30,7 @@ def _include(pkg, rel, args=None, condition=None):
 
 
 def generate_launch_description():
+    sim_backend = LaunchConfiguration("sim_backend")
     use_sim = LaunchConfiguration("use_sim")
     can_interface = LaunchConfiguration("can_interface")
     controller = LaunchConfiguration("controller")
@@ -63,12 +66,21 @@ def generate_launch_description():
     teleop_driver = LaunchConfiguration("teleop_driver")
     servo_mode = LaunchConfiguration("servo_mode")
     capture_mode = LaunchConfiguration("capture_mode")
+    target_object_name = LaunchConfiguration("target_object_name")
+    isaac_source_namespace = LaunchConfiguration("isaac_source_namespace")
+    isaac_startup_timeout_s = LaunchConfiguration("isaac_startup_timeout_s")
+    simulator_version = LaunchConfiguration("simulator_version")
+    scene_id = LaunchConfiguration("scene_id")
 
     common = {"use_sim": use_sim, "can_interface": can_interface}
 
     description = _include("teleop_description", "description.launch.py", common)
     simulation = _include("teleop_bringup", "simulation.launch.py",
                           {
+                              "sim_backend": sim_backend,
+                              "target_object_name": target_object_name,
+                              "isaac_source_namespace": isaac_source_namespace,
+                              "isaac_startup_timeout_s": isaac_startup_timeout_s,
                               "model_path": model_path,
                               "randomize": randomize,
                               "headless": headless,
@@ -118,6 +130,9 @@ def generate_launch_description():
             "capture_mode": capture_mode,
             "enable_wrist_camera": enable_wrist_camera,
             "expected_frame_rate_hz": camera_rate,
+            "simulator_backend": sim_backend,
+            "simulator_version": simulator_version,
+            "scene_id": scene_id,
         },
         condition=IfCondition(record))
     grasp_monitor = _include(
@@ -125,6 +140,15 @@ def generate_launch_description():
         condition=IfCondition(enable_grasp_monitor))
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            "sim_backend",
+            default_value="mujoco",
+            choices=["mujoco", "isaac"],
+            description=(
+                "Simulation backend. MuJoCo remains the default; Isaac uses an "
+                "isolated external runtime and the isaac_sim_adapter package."
+            ),
+        ),
         DeclareLaunchArgument("use_sim", default_value="true"),
         DeclareLaunchArgument("can_interface", default_value="vcan0"),
         DeclareLaunchArgument("controller", default_value="impedance",
@@ -132,6 +156,11 @@ def generate_launch_description():
         DeclareLaunchArgument("record", default_value="false"),
         DeclareLaunchArgument("capture_mode", default_value="portfolio",
                               description="training (low-dimensional only) | portfolio (scene/wrist video)"),
+        DeclareLaunchArgument("target_object_name", default_value="object_red_box"),
+        DeclareLaunchArgument("isaac_source_namespace", default_value="/isaac"),
+        DeclareLaunchArgument("isaac_startup_timeout_s", default_value="45.0"),
+        DeclareLaunchArgument("simulator_version", default_value=""),
+        DeclareLaunchArgument("scene_id", default_value=""),
         DeclareLaunchArgument("output_dir", default_value="data/episodes"),
         DeclareLaunchArgument("task", default_value="teleop"),
         DeclareLaunchArgument("sync_slop", default_value="0.05"),
@@ -141,7 +170,7 @@ def generate_launch_description():
         DeclareLaunchArgument("model_path", default_value="config/models/franka_panda.xml"),
         DeclareLaunchArgument("randomize", default_value="false"),
         DeclareLaunchArgument("headless", default_value="false",
-                              description="true → MuJoCo offscreen renderer (no viewer window)"),
+                              description="MuJoCo renderer mode; Isaac is started externally"),
         DeclareLaunchArgument("scene_use_mujoco_renderer", default_value="true"),
         DeclareLaunchArgument("camera_width", default_value="320"),
         DeclareLaunchArgument("camera_height", default_value="240"),

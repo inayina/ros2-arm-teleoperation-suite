@@ -18,6 +18,9 @@ def generate_launch_description():
     enable_wrist_camera = LaunchConfiguration("enable_wrist_camera")
     expected_frame_rate_hz = LaunchConfiguration("expected_frame_rate_hz")
     enable_system_telemetry = LaunchConfiguration("enable_system_telemetry")
+    simulator_backend = LaunchConfiguration("simulator_backend")
+    simulator_version = LaunchConfiguration("simulator_version")
+    scene_id = LaunchConfiguration("scene_id")
     return LaunchDescription([
         DeclareLaunchArgument("output_dir", default_value="data/episodes"),
         DeclareLaunchArgument("task", default_value="teleop"),
@@ -29,6 +32,9 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_wrist_camera", default_value="false"),
         DeclareLaunchArgument("expected_frame_rate_hz", default_value="10.0"),
         DeclareLaunchArgument("enable_system_telemetry", default_value="true"),
+        DeclareLaunchArgument("simulator_backend", default_value=""),
+        DeclareLaunchArgument("simulator_version", default_value=""),
+        DeclareLaunchArgument("scene_id", default_value=""),
         Node(
             package="lerobot_recorder",
             executable="lerobot_recorder_node",
@@ -46,6 +52,9 @@ def generate_launch_description():
                     enable_wrist_camera, value_type=bool),
                 "expected_frame_rate_hz": ParameterValue(
                     expected_frame_rate_hz, value_type=float),
+                "simulator_backend": simulator_backend,
+                "simulator_version": simulator_version,
+                "scene_id": scene_id,
             }],
         ),
         Node(

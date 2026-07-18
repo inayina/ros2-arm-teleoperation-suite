@@ -63,6 +63,9 @@ class RecorderNode(Node):
         self.declare_parameter("expected_frame_rate_hz", 10.0)
         self.declare_parameter("close_command_threshold", 0.12)
         self.declare_parameter("require_close_command_for_batch", True)
+        self.declare_parameter("simulator_backend", "")
+        self.declare_parameter("simulator_version", "")
+        self.declare_parameter("scene_id", "")
         self.out_dir = self.get_parameter("output_dir").value
         self.task = self.get_parameter("task").value
         self.capture_mode = str(self.get_parameter("capture_mode").value)
@@ -203,6 +206,16 @@ class RecorderNode(Node):
                 "gripper_observation": "/gripper/state",
             },
         })
+        for provenance_key in (
+            "simulator_backend",
+            "simulator_version",
+            "scene_id",
+        ):
+            provenance_value = str(
+                self.get_parameter(provenance_key).value
+            ).strip()
+            if provenance_value:
+                metadata[provenance_key] = provenance_value
         write_started = time.perf_counter()
         try:
             path = write_episode(

@@ -37,6 +37,7 @@ class BatchGenerator(Node):
         self.declare_parameter('pose_step_m', 0.006)
         self.declare_parameter('pose_cmd_rate_hz', 100.0)
         self.declare_parameter('reset_timeout', 5.0)
+        self.declare_parameter('simulator_node_name', '/mujoco_sim')
         self.declare_parameter('target_object_name', '')
         self.declare_parameter('language_instruction', '')
         self.declare_parameter('target_bin_y', 999.0)
@@ -78,6 +79,9 @@ class BatchGenerator(Node):
         )
         self.pose_cmd_rate_hz = float(self.get_parameter('pose_cmd_rate_hz').value)
         self.reset_timeout = float(self.get_parameter('reset_timeout').value)
+        self.simulator_node_name = self._normalize_node_name(
+            self.get_parameter('simulator_node_name').value
+        )
         self.target_object_name = str(self.get_parameter('target_object_name').value).strip()
         self.language_instruction = str(self.get_parameter('language_instruction').value).strip()
         self.target_bin_y = float(self.get_parameter('target_bin_y').value)
@@ -205,7 +209,9 @@ class BatchGenerator(Node):
             )
 
             # 0. 更新仿真器目标物体参数（在 Reset 之前，使仿真器切换追踪目标）
-            target_set = self._set_node_parameter('/mujoco_sim', 'target_object_name', target_obj)
+            target_set = self._set_node_parameter(
+                self.simulator_node_name, 'target_object_name', target_obj
+            )
             # 更新录制器语言指令与 upstream gate（供中游识别物理评测边界）
             language_set = self._set_node_parameter(
                 '/lerobot_recorder', 'language_instruction', instruction, timeout=8.0
@@ -616,6 +622,16 @@ class BatchGenerator(Node):
         self.get_logger().warn('/safety/reset timed out')
         return False
 
+    @staticmethod
+    def _normalize_node_name(node_name: str) -> str:
+        """Normalize a configurable simulator parameter node name."""
+        normalized = str(node_name).strip().rstrip('/')
+        if not normalized:
+            raise ValueError('simulator_node_name must not be empty')
+        if not normalized.startswith('/'):
+            normalized = f'/{normalized}'
+        return normalized
+
     def _reset_scene(self, timeout=5.0):
         if not self.cli_reset.wait_for_service(timeout_sec=timeout):
             self.get_logger().warn('/sim/reset_scene unavailable; continuing without scene reset.')
@@ -946,7 +962,10 @@ class BatchGenerator(Node):
         if self.validation_mode in ("none", "off", "disabled"):
             return {"success": True, "reason": "validation disabled"}
         if not target_set:
-            return {"success": False, "reason": "failed to set mujoco target_object_name"}
+            return {
+                "success": False,
+                "reason": "failed to set simulator target_object_name",
+            }
         if not language_set:
             # Metadata only: do not discard a successful physical lift for a
             # transient recorder set_parameters timeout under multi-object load.

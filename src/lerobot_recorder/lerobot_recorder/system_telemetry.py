@@ -13,6 +13,7 @@ from rclpy.node import Node
 
 PROCESS_PATTERNS = {
     "mujoco_sim": ("mujoco_sim_node", "__node:=mujoco_sim"),
+    "isaac_sim_adapter": ("isaac_sim_adapter", "__node:=isaac_sim_adapter"),
     "scene_camera": ("camera_bridge_node", "__node:=camera_bridge"),
     "recorder": ("lerobot_recorder_node", "__node:=lerobot_recorder"),
     "ros2_control": ("ros2_control_node",),

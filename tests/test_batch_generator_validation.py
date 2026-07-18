@@ -40,6 +40,20 @@ def test_object_xyz_helper_handles_missing_pose():
     assert BatchGenerator._object_xyz(_pose(0.1, 0.2, 0.3)) == (0.1, 0.2, 0.3)
 
 
+def test_simulator_node_name_is_backend_configurable():
+    assert BatchGenerator._normalize_node_name('/mujoco_sim') == '/mujoco_sim'
+    assert BatchGenerator._normalize_node_name('isaac_sim_adapter/') == '/isaac_sim_adapter'
+
+
+def test_empty_simulator_node_name_is_rejected():
+    try:
+        BatchGenerator._normalize_node_name('  ')
+    except ValueError as exc:
+        assert 'simulator_node_name' in str(exc)
+    else:
+        raise AssertionError('empty simulator_node_name should be rejected')
+
+
 def test_place_validation_requires_lift_and_bin_proximity():
     node = _validator(_pose(0.41, -0.21, 0.05))
     result = node._validate_episode(

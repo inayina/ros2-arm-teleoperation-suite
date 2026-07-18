@@ -43,6 +43,13 @@ bin/project-evidence impact --base HEAD~1 --head HEAD
 | **M6** 视觉与 Recorder | [SPEC_V2_M6_PERCEPTION_RECORDER.md](./SPEC_V2_M6_PERCEPTION_RECORDER.md) | RGB/Depth、多模态对齐、LeRobot 风格录制 |
 | **M7** 遥操作与合成数据 | [SPEC_V2_M7_TELEOP_SYNTH.md](./SPEC_V2_M7_TELEOP_SYNTH.md) | TeleopDriverBase、Domain Randomization、批量 episode |
 
+## 🧩 Simulator Backend 扩展 SPEC
+
+| 文档 | 状态 | 核心内容 |
+|---|---|---|
+| [SPEC_V2_SIM_BACKENDS_ISAAC.md](./SPEC_V2_SIM_BACKENDS_ISAAC.md) | P0–P4 functional / P5 evidence-only complete | 保留 MuJoCo 默认行为；Isaac adapter、单 episode PoC 和首轮 Sim2Sim 观测分布对比已实测 |
+| [SIMULATOR_BACKEND_CONTRACT.md](./SIMULATOR_BACKEND_CONTRACT.md) | P0–P5 evidenced contract | MuJoCo 硬编码审计、稳定 ROS contract、Isaac raw→canonical 映射与能力缺口 |
+
 ---
 
 ## 🗄 V1 历史存档（参照用）

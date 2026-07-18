@@ -30,6 +30,7 @@
   <exec_depend>teleop_input</exec_depend>
   <exec_depend>virtual_servo_driver</exec_depend>
   <exec_depend>mujoco_sim</exec_depend>
+  <exec_depend>isaac_sim_adapter</exec_depend>
   <exec_depend>camera_bridge</exec_depend>
   <exec_depend>gripper_driver</exec_depend>
   <exec_depend>grasp_monitor</exec_depend>

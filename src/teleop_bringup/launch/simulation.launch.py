@@ -1,36 +1,108 @@
-"""L5/L6: MuJoCo physics server + camera bridge."""
+"""Select the backend-neutral L5/L6 simulation implementation."""
+
+# MuJoCo remains the default in P2/P3.  Isaac starts only the ROS-side adapter;
+# its heavyweight runtime is intentionally managed by an isolated environment.
+
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+)
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PythonExpression
-from launch_ros.actions import Node
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import (
+    LaunchConfiguration,
+    PathJoinSubstitution,
+    PythonExpression,
+)
+from launch_ros.substitutions import FindPackageShare
+
+
+SUPPORTED_SIM_BACKENDS = ("mujoco", "isaac")
+IMPLEMENTED_SIM_BACKENDS = SUPPORTED_SIM_BACKENDS
+
+
+def validate_backend_name(backend: str) -> str:
+    """Return a normalized implemented backend or raise a diagnostic error."""
+    normalized = str(backend).strip().lower()
+    if normalized not in SUPPORTED_SIM_BACKENDS:
+        choices = ", ".join(SUPPORTED_SIM_BACKENDS)
+        raise ValueError(f"sim_backend must be one of: {choices}; got {backend!r}")
+    if normalized not in IMPLEMENTED_SIM_BACKENDS:
+        raise RuntimeError(f"sim_backend={normalized} has no installed adapter")
+    return normalized
+
+
+def _validate_backend(context):
+    validate_backend_name(LaunchConfiguration("sim_backend").perform(context))
+    return []
 
 
 def generate_launch_description():
-    model_path = LaunchConfiguration("model_path")
-    randomize = LaunchConfiguration("randomize")
-    camera_name = LaunchConfiguration("camera_name")
-    scene_use_mujoco_renderer = LaunchConfiguration("scene_use_mujoco_renderer")
-    camera_width = LaunchConfiguration("camera_width")
-    camera_height = LaunchConfiguration("camera_height")
-    camera_rate = LaunchConfiguration("camera_rate")
-    publish_depth = LaunchConfiguration("publish_depth")
-    enable_wrist_camera = LaunchConfiguration("enable_wrist_camera")
-    wrist_use_mujoco_renderer = LaunchConfiguration("wrist_use_mujoco_renderer")
-    wrist_camera_width = LaunchConfiguration("wrist_camera_width")
-    wrist_camera_height = LaunchConfiguration("wrist_camera_height")
-    contact_debug_enabled = LaunchConfiguration("contact_debug_enabled")
-    contact_debug_period_s = LaunchConfiguration("contact_debug_period_s")
-    grasp_assist_enabled = LaunchConfiguration("grasp_assist_enabled")
-    gripper_force_max_n = LaunchConfiguration("gripper_force_max_n")
-    gripper_contact_hold_margin = LaunchConfiguration("gripper_contact_hold_margin")
-    gripper_force_squeeze_margin_max = LaunchConfiguration("gripper_force_squeeze_margin_max")
+    sim_backend = LaunchConfiguration("sim_backend")
+    mujoco_backend_launch = PathJoinSubstitution([
+        FindPackageShare("teleop_bringup"),
+        "launch",
+        "backends",
+        "mujoco.launch.py",
+    ])
+    isaac_backend_launch = PathJoinSubstitution([
+        FindPackageShare("teleop_bringup"),
+        "launch",
+        "backends",
+        "isaac.launch.py",
+    ])
+
+    backend_arguments = {
+        "capture_mode": LaunchConfiguration("capture_mode"),
+        "model_path": LaunchConfiguration("model_path"),
+        "headless": LaunchConfiguration("headless"),
+        "randomize": LaunchConfiguration("randomize"),
+        "camera_name": LaunchConfiguration("camera_name"),
+        "scene_use_mujoco_renderer": LaunchConfiguration("scene_use_mujoco_renderer"),
+        "camera_width": LaunchConfiguration("camera_width"),
+        "camera_height": LaunchConfiguration("camera_height"),
+        "camera_rate": LaunchConfiguration("camera_rate"),
+        "publish_depth": LaunchConfiguration("publish_depth"),
+        "enable_wrist_camera": LaunchConfiguration("enable_wrist_camera"),
+        "wrist_use_mujoco_renderer": LaunchConfiguration("wrist_use_mujoco_renderer"),
+        "wrist_camera_width": LaunchConfiguration("wrist_camera_width"),
+        "wrist_camera_height": LaunchConfiguration("wrist_camera_height"),
+        "enable_tactile": LaunchConfiguration("enable_tactile"),
+        "contact_debug_enabled": LaunchConfiguration("contact_debug_enabled"),
+        "contact_debug_period_s": LaunchConfiguration("contact_debug_period_s"),
+        "grasp_assist_enabled": LaunchConfiguration("grasp_assist_enabled"),
+        "gripper_force_max_n": LaunchConfiguration("gripper_force_max_n"),
+        "gripper_contact_hold_margin": LaunchConfiguration("gripper_contact_hold_margin"),
+        "gripper_force_squeeze_margin_max": LaunchConfiguration(
+            "gripper_force_squeeze_margin_max"
+        ),
+    }
+    isaac_backend_arguments = {
+        "target_object_name": LaunchConfiguration("target_object_name"),
+        "isaac_source_namespace": LaunchConfiguration("isaac_source_namespace"),
+        "isaac_startup_timeout_s": LaunchConfiguration("isaac_startup_timeout_s"),
+    }
+
     return LaunchDescription([
+        DeclareLaunchArgument(
+            "sim_backend",
+            default_value="mujoco",
+            choices=list(SUPPORTED_SIM_BACKENDS),
+            description=(
+                "Simulation backend. MuJoCo remains the default; Isaac uses "
+                "an externally managed runtime plus the ROS adapter."
+            ),
+        ),
         DeclareLaunchArgument("capture_mode", default_value="portfolio"),
+        DeclareLaunchArgument("target_object_name", default_value="object_red_box"),
+        DeclareLaunchArgument("isaac_source_namespace", default_value="/isaac"),
+        DeclareLaunchArgument("isaac_startup_timeout_s", default_value="45.0"),
         DeclareLaunchArgument(
             "model_path",
             default_value="config/models/franka_panda.xml",
-            description="MuJoCo XML path. Relative paths resolve from launch cwd.",
+            description="Legacy MuJoCo XML path retained for P1 compatibility.",
         ),
         DeclareLaunchArgument("headless", default_value="false"),
         DeclareLaunchArgument("randomize", default_value="false"),
@@ -50,123 +122,27 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "grasp_assist_enabled",
             default_value="false",
-            description="Enable synthetic grasp assist. Must stay false for training-grade data collection.",
+            description=(
+                "Legacy MuJoCo grasp assist. Must stay false for training-grade "
+                "data collection."
+            ),
         ),
         DeclareLaunchArgument("gripper_force_max_n", default_value="45.0"),
         DeclareLaunchArgument("gripper_contact_hold_margin", default_value="0.008"),
         DeclareLaunchArgument("gripper_force_squeeze_margin_max", default_value="0.010"),
-        Node(
-            package="mujoco_sim",
-            executable="mujoco_sim_node",
-            name="mujoco_sim",
-            output="screen",
-            parameters=[{
-                "model_path": model_path,
-                "headless": LaunchConfiguration("headless"),
-                "randomize": randomize,
-                "contact_debug_enabled": contact_debug_enabled,
-                "contact_debug_period_s": contact_debug_period_s,
-                "grasp_assist_enabled": grasp_assist_enabled,
-                "gripper_force_max_n": gripper_force_max_n,
-                "gripper_contact_hold_margin": gripper_contact_hold_margin,
-                "gripper_force_squeeze_margin_max": gripper_force_squeeze_margin_max,
-            }],
-        ),
-        Node(
-            package="camera_bridge",
-            executable="camera_bridge_node",
-            name="camera_bridge",
-            output="screen",
-            parameters=[{
-                "model_path": model_path,
-                "camera_name": camera_name,
-                "width": camera_width,
-                "height": camera_height,
-                "rate": camera_rate,
-                "fovy_deg": 45.0,
-                "frame_id": "scene_camera_optical_frame",
-                "color_topic": "/camera/color/image_raw",
-                "depth_topic": "/camera/depth/image_raw",
-                "camera_info_topic": "/camera/color/camera_info",
-                "use_mujoco_renderer": scene_use_mujoco_renderer,
-                "publish_depth": publish_depth,
-            }],
+        OpaqueFunction(function=_validate_backend),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource([mujoco_backend_launch]),
+            launch_arguments=backend_arguments.items(),
             condition=IfCondition(PythonExpression([
-                "'", LaunchConfiguration("capture_mode"), "' == 'portfolio'"
+                "'", sim_backend, "' == 'mujoco'"
             ])),
         ),
-        Node(
-            package="camera_bridge",
-            executable="camera_bridge_node",
-            name="wrist_camera_bridge",
-            output="screen",
-            parameters=[{
-                "model_path": model_path,
-                "camera_name": "wrist_camera",
-                "width": wrist_camera_width,
-                "height": wrist_camera_height,
-                "rate": camera_rate,
-                "fovy_deg": 70.0,
-                "frame_id": "wrist_camera_optical_frame",
-                "color_topic": "/camera/wrist/color/image_raw",
-                "depth_topic": "/camera/wrist/depth/image_raw",
-                "camera_info_topic": "/camera/wrist/color/camera_info",
-                "use_mujoco_renderer": wrist_use_mujoco_renderer,
-                "publish_depth": publish_depth,
-            }],
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource([isaac_backend_launch]),
+            launch_arguments=isaac_backend_arguments.items(),
             condition=IfCondition(PythonExpression([
-                "'", LaunchConfiguration("capture_mode"), "' == 'portfolio' and '",
-                enable_wrist_camera, "' == 'true'"
-            ])),
-        ),
-        Node(
-            package="camera_bridge",
-            executable="camera_bridge_node",
-            name="left_tactile_bridge",
-            output="screen",
-            parameters=[{
-                "model_path": model_path,
-                "camera_name": "left_tactile_camera",
-                "width": 320,
-                "height": 240,
-                "rate": camera_rate,
-                "fovy_deg": 90.0,
-                "frame_id": "left_tactile_optical_frame",
-                "color_topic": "/camera/tactile_left/image_raw",
-                "depth_topic": "/camera/tactile_left/depth/image_raw",
-                "camera_info_topic": "/camera/tactile_left/camera_info",
-                "tactile_mode": True,
-                "gel_depth_baseline": 0.0155,
-                "gel_scale": 300.0,
-            }],
-            condition=IfCondition(PythonExpression([
-                "'", LaunchConfiguration("capture_mode"), "' == 'portfolio' and '",
-                LaunchConfiguration("enable_tactile"), "' == 'true'"
-            ])),
-        ),
-        Node(
-            package="camera_bridge",
-            executable="camera_bridge_node",
-            name="right_tactile_bridge",
-            output="screen",
-            parameters=[{
-                "model_path": model_path,
-                "camera_name": "right_tactile_camera",
-                "width": 320,
-                "height": 240,
-                "rate": camera_rate,
-                "fovy_deg": 90.0,
-                "frame_id": "right_tactile_optical_frame",
-                "color_topic": "/camera/tactile_right/image_raw",
-                "depth_topic": "/camera/tactile_right/depth/image_raw",
-                "camera_info_topic": "/camera/tactile_right/camera_info",
-                "tactile_mode": True,
-                "gel_depth_baseline": 0.0155,
-                "gel_scale": 300.0,
-            }],
-            condition=IfCondition(PythonExpression([
-                "'", LaunchConfiguration("capture_mode"), "' == 'portfolio' and '",
-                LaunchConfiguration("enable_tactile"), "' == 'true'"
+                "'", sim_backend, "' == 'isaac'"
             ])),
         ),
     ])

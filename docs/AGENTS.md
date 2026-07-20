@@ -27,7 +27,7 @@ Canonical 总览：中游仓 `robot-arm-episode-data-lab/AGENTS.md` V2.1。
 |----|-----------|------|
 | L1 | `safety_monitor` | 限位、watchdog、E-stop |
 | L2 | `moveit_servo` / `servo_node` | 笛卡尔伺服 → `/joint_target` |
-| L3 | `cartesian_impedance_controller` | 1kHz 阻抗力矩 |
+| L3 | `cartesian_impedance_controller` | 阻抗力矩（仿真 `500 Hz` / 真机 `1 kHz`） |
 | L4–L5 | CANopen + `mujoco_sim` | 仿真物理 |
 
 **注意**：实时栈使用 MoveIt Servo 笛卡尔跟踪，**不使用 RRT**。

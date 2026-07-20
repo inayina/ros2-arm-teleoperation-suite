@@ -12,13 +12,14 @@ EPISODES="${BATCH_PREFLIGHT_EPISODES:-1}"
 MAX_ATTEMPTS="${BATCH_PREFLIGHT_MAX_ATTEMPTS:-8}"
 RANDOMIZE="${BATCH_PREFLIGHT_RANDOMIZE:-false}"
 HEADLESS="${BATCH_PREFLIGHT_HEADLESS:-true}"
+CAPTURE_MODE="${BATCH_PREFLIGHT_CAPTURE_MODE:-portfolio}"
 WATCHDOG_TIMEOUT="${BATCH_PREFLIGHT_WATCHDOG_TIMEOUT:-2.0}"
 SYNC_SLOP="${BATCH_PREFLIGHT_SYNC_SLOP:-2.5}"
 SYNC_QUEUE_SIZE="${BATCH_PREFLIGHT_SYNC_QUEUE_SIZE:-120}"
 VALIDATION_MODE="${BATCH_PREFLIGHT_VALIDATION_MODE:-place}"
 ENABLE_GRASP_MONITOR="${BATCH_PREFLIGHT_ENABLE_GRASP_MONITOR:-true}"
 ENABLE_TACTILE="${BATCH_PREFLIGHT_ENABLE_TACTILE:-false}"
-SCENE_USE_MUJOCO_RENDERER="${BATCH_PREFLIGHT_SCENE_USE_MUJOCO_RENDERER:-false}"
+SCENE_USE_MUJOCO_RENDERER="${BATCH_PREFLIGHT_SCENE_USE_MUJOCO_RENDERER:-true}"
 WRIST_USE_MUJOCO_RENDERER="${BATCH_PREFLIGHT_WRIST_USE_MUJOCO_RENDERER:-false}"
 #
 # IMPORTANT: downstream Panda schema expects scene RGB shape [240, 320, 3].
@@ -42,13 +43,16 @@ MUJOCO_GL="${MUJOCO_GL:-egl}"
 HOVER_DURATION="${BATCH_PREFLIGHT_HOVER_DURATION:-4.0}"
 HOVER_HEIGHT="${BATCH_PREFLIGHT_HOVER_HEIGHT:-0.12}"
 DESCEND_DURATION="${BATCH_PREFLIGHT_DESCEND_DURATION:-4.0}"
+APPROACH_XY_DURATION="${BATCH_PREFLIGHT_APPROACH_XY_DURATION:-0.0}"
+USE_READY_POSE="${BATCH_PREFLIGHT_USE_READY_POSE:-true}"
 CLOSE_DURATION="${BATCH_PREFLIGHT_CLOSE_DURATION:-3.0}"
 GRASP_PAUSE="${BATCH_PREFLIGHT_GRASP_PAUSE:-3.0}"
 # Use M7-proven absolute pick offset (docs/M7_GRASP_DEBUGGING.md), not shape sentinel.
 PICK_HEIGHT_OFFSET="${BATCH_PREFLIGHT_PICK_HEIGHT_OFFSET:-0.015}"
 GRIPPER_CLOSE_TARGET="${BATCH_PREFLIGHT_GRIPPER_CLOSE_TARGET:-0.0}"
-POSE_STEP_M="${BATCH_PREFLIGHT_POSE_STEP_M:-0.008}"
+POSE_STEP_M="${BATCH_PREFLIGHT_POSE_STEP_M:-0.003}"
 POSE_CMD_RATE_HZ="${BATCH_PREFLIGHT_POSE_CMD_RATE_HZ:-100.0}"
+POSE_MAX_ACCELERATION_MPS2="${BATCH_PREFLIGHT_POSE_MAX_ACCELERATION_MPS2:-0.5}"
 LIFT_DURATION="${BATCH_PREFLIGHT_LIFT_DURATION:-10.0}"
 LIFT_TARGET_Z="${BATCH_PREFLIGHT_LIFT_TARGET_Z:-0.12}"
 POST_LIFT_HOLD="${BATCH_PREFLIGHT_POST_LIFT_HOLD:-8.0}"
@@ -69,7 +73,12 @@ EE_TRACKING_TOLERANCE_M="${BATCH_PREFLIGHT_EE_TRACKING_TOLERANCE_M:-0.08}"
 # 0.05 is too tight leaving Panda home singularity; 0.08 is enough for G0 without
 # the old 0.12 false-reach problem near home.
 EE_XY_TOLERANCE="${BATCH_PREFLIGHT_EE_XY_TOLERANCE:-0.08}"
+# Stage-specific: approach_xy must center above the object (not early-exit at ~0.08).
+APPROACH_XY_TOLERANCE="${BATCH_PREFLIGHT_APPROACH_XY_TOLERANCE:-0.025}"
 EE_Z_TOLERANCE="${BATCH_PREFLIGHT_EE_Z_TOLERANCE:-0.01}"
+# Evaluation Contract continuous GT → episode_results.jsonl (empty disables).
+EPISODE_RESULTS_PATH="${BATCH_PREFLIGHT_EPISODE_RESULTS_PATH:-${OUT_ROOT}/episode_results.jsonl}"
+EVALUATION_RUN_ID="${BATCH_PREFLIGHT_EVALUATION_RUN_ID:-batch_preflight}"
 RECORD_WARMUP_S="${BATCH_PREFLIGHT_RECORD_WARMUP_S:-3.0}"
 
 LAUNCH_PID=""
@@ -122,6 +131,21 @@ wait_for_controller() {
       | grep -A 1 cartesian_impedance_controller \
       | grep active >/dev/null; then
       return 0
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
+wait_for_scene_renderer() {
+  local deadline=$((SECONDS + CONTROLLER_TIMEOUT_S))
+  while (( SECONDS < deadline )); do
+    if grep -q "camera_bridge up .* MuJoCo renderer" "${LOG_DIR}/full_system.log"; then
+      return 0
+    fi
+    if grep -Eq "synthetic fallback|MuJoCo camera init failed|camera_bridge_node.*process has died" \
+      "${LOG_DIR}/full_system.log"; then
+      return 1
     fi
     sleep 0.5
   done
@@ -208,7 +232,7 @@ setsid ros2 launch teleop_bringup full_system.launch.py \
   headless:="${HEADLESS}" \
   record:=true \
   output_dir:="${OUT_ROOT}" \
-  capture_mode:="${BATCH_PREFLIGHT_CAPTURE_MODE:-portfolio}" \
+  capture_mode:="${CAPTURE_MODE}" \
   servo_mode:="${SERVO_MODE}" \
   sync_slop:="${SYNC_SLOP}" \
   sync_queue_size:="${SYNC_QUEUE_SIZE}" \
@@ -239,6 +263,13 @@ sleep 3
 if ! wait_for_controller; then
   echo "[preflight] controller did not become active; see ${LOG_DIR}/full_system.log" >&2
   exit 1
+fi
+if [[ "${CAPTURE_MODE}" == "portfolio" ]]; then
+  if [[ "${SCENE_USE_MUJOCO_RENDERER}" != "true" ]] || ! wait_for_scene_renderer; then
+    echo "[preflight] real MuJoCo scene renderer is required; refusing synthetic training video" >&2
+    exit 1
+  fi
+  echo "[preflight] verified real MuJoCo scene renderer."
 fi
 echo "[preflight] waiting 12s for late-running nodes to settle..."
 sleep 12
@@ -285,7 +316,10 @@ for object_name in ${OBJECTS}; do
     -p hover_height:="${HOVER_HEIGHT}" \
     -p pose_step_m:="${POSE_STEP_M}" \
     -p pose_cmd_rate_hz:="${POSE_CMD_RATE_HZ}" \
+    -p pose_max_acceleration_mps2:="${POSE_MAX_ACCELERATION_MPS2}" \
     -p descend_duration:="${DESCEND_DURATION}" \
+    -p approach_xy_duration:="${APPROACH_XY_DURATION}" \
+    -p use_ready_pose:="${USE_READY_POSE}" \
     -p close_duration:="${CLOSE_DURATION}" \
     -p grasp_pause:="${GRASP_PAUSE}" \
     -p pick_height_offset:="${PICK_HEIGHT_OFFSET}" \
@@ -296,7 +330,10 @@ for object_name in ${OBJECTS}; do
     -p recorder_settle_s:="${RECORDER_SETTLE_S}" \
     -p record_warmup_s:="${RECORD_WARMUP_S}" \
     -p ee_xy_tolerance:="${EE_XY_TOLERANCE}" \
+    -p approach_xy_tolerance:="${APPROACH_XY_TOLERANCE}" \
     -p ee_z_tolerance:="${EE_Z_TOLERANCE}" \
+    -p episode_results_path:="${EPISODE_RESULTS_PATH}" \
+    -p evaluation_run_id:="${EVALUATION_RUN_ID}" \
     -p motion_mode:="${MOTION_MODE}" \
     -p twist_max_linear_mps:="${TWIST_MAX_LINEAR_MPS}" \
     -p twist_descend_linear_mps:="${TWIST_DESCEND_LINEAR_MPS}" \

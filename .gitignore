@@ -38,6 +38,10 @@ media/*.mkv
 .vscode/settings.json
 .idea/
 *.swp
+*.code-workspace
+
+# Local ROS / DDS runtime (locks, logs, machine-local Fast DDS profiles)
+.ros_runtime/
 
 # MuJoCo cache
 *.mjb

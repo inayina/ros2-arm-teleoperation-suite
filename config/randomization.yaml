@@ -1,6 +1,9 @@
 domain_randomization:
   enabled: true
-  seed: 42
+  # Seed 52/53: align→close→lift 阶段补采（validation_mode=lift，短 descend）。
+  # 禁止再扩普通下降包（46/47）或同类 XY-align 量（48–51）。
+  # Seeds 42–47 remain the existing 30 accepted episodes (descend pack).
+  seed: 53
   camera:
     scene_camera:
       pos_noise: [-0.05, 0.05]   # xyz offset range (m)
@@ -14,8 +17,13 @@ domain_randomization:
     sphere_friction_min: 4.0
     sphere_friction_max: 6.0
     initial_pos_range:
-      x: [0.38, 0.48]
-      y: [-0.08, 0.12]
+      # Keep inside validated pick workspace; shift vs seeds 50/51 for new ICs.
+      x: [0.35, 0.43]
+      y: [-0.14, 0.14]
+    yaw_range_deg_by_object:
+      object_red_box: [-15.0, 15.0]
+      object_blue_cylinder: [-180.0, 180.0]
+      object_green_sphere: [-180.0, 180.0]
   lighting:
     key:
       diffuse_noise: [-0.2, 0.2]

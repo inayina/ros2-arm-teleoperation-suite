@@ -34,6 +34,32 @@ def position_error(current: Sequence[float], target: Sequence[float]) -> tuple[f
     return xy_err, z_err, total
 
 
+def acceleration_limited_step(
+    distance_m: float,
+    current_speed_mps: float,
+    max_speed_mps: float,
+    max_acceleration_mps2: float,
+    dt_s: float,
+) -> tuple[float, float]:
+    """Return a bounded path step and next speed with acceleration/braking limits."""
+    distance = max(0.0, float(distance_m))
+    if distance <= 1e-9:
+        return 0.0, 0.0
+    dt = max(1e-4, float(dt_s))
+    max_speed = max(1e-4, float(max_speed_mps))
+    max_acceleration = max(1e-4, float(max_acceleration_mps2))
+    current_speed = clamp(float(current_speed_mps), 0.0, max_speed)
+    braking_speed = math.sqrt(2.0 * max_acceleration * distance)
+    target_speed = min(max_speed, braking_speed)
+    max_speed_delta = max_acceleration * dt
+    if target_speed >= current_speed:
+        next_speed = min(target_speed, current_speed + max_speed_delta)
+    else:
+        next_speed = max(target_speed, current_speed - max_speed_delta)
+    step = min(distance, 0.5 * (current_speed + next_speed) * dt)
+    return step, next_speed
+
+
 def compute_twist_linear(
     current: Sequence[float],
     target: Sequence[float],

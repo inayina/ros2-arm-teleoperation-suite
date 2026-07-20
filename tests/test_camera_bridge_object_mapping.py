@@ -60,3 +60,18 @@ def test_mujoco_publish_path_preserves_renderer_orientation() -> None:
     assert "np.ascontiguousarray(rgb)" in source
     assert "np.flipud(rgb)" not in source
     assert "np.flipud(depth_arr)" not in source
+
+
+def test_production_camera_can_fail_closed_instead_of_drawing_frames() -> None:
+    source = Path(
+        "src/camera_bridge/camera_bridge/camera_bridge_node.py"
+    ).read_text(encoding="utf-8")
+    assert "self._camera is None and not self.synthetic_fallback" in source
+    assert "refusing synthetic camera data" in source
+
+
+def test_batch_preflight_requires_real_mujoco_scene_renderer() -> None:
+    source = Path("scripts/run_batch_preflight_smoke.sh").read_text(encoding="utf-8")
+    assert 'BATCH_PREFLIGHT_SCENE_USE_MUJOCO_RENDERER:-true' in source
+    assert "wait_for_scene_renderer" in source
+    assert "refusing synthetic training video" in source

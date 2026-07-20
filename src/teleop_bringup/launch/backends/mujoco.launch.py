@@ -30,6 +30,7 @@ def generate_launch_description():
     gripper_force_squeeze_margin_max = LaunchConfiguration(
         "gripper_force_squeeze_margin_max"
     )
+    encoder_publish_rate = LaunchConfiguration("encoder_publish_rate")
 
     return LaunchDescription([
         DeclareLaunchArgument("capture_mode", default_value="portfolio"),
@@ -51,6 +52,7 @@ def generate_launch_description():
         DeclareLaunchArgument("contact_debug_period_s", default_value="1.0"),
         DeclareLaunchArgument("grasp_assist_enabled", default_value="false"),
         DeclareLaunchArgument("gripper_force_max_n", default_value="45.0"),
+        DeclareLaunchArgument("encoder_publish_rate", default_value="500.0"),
         DeclareLaunchArgument(
             "gripper_contact_hold_margin", default_value="0.008"
         ),
@@ -72,6 +74,7 @@ def generate_launch_description():
                 "gripper_force_max_n": gripper_force_max_n,
                 "gripper_contact_hold_margin": gripper_contact_hold_margin,
                 "gripper_force_squeeze_margin_max": gripper_force_squeeze_margin_max,
+                "encoder_publish_rate": encoder_publish_rate,
             }],
         ),
         Node(
@@ -91,6 +94,9 @@ def generate_launch_description():
                 "depth_topic": "/camera/depth/image_raw",
                 "camera_info_topic": "/camera/color/camera_info",
                 "use_mujoco_renderer": scene_use_mujoco_renderer,
+                # Production collection must never silently substitute drawn
+                # frames when OpenGL/MuJoCo rendering is unavailable.
+                "synthetic_fallback": False,
                 "publish_depth": publish_depth,
             }],
             condition=IfCondition(PythonExpression([
@@ -114,6 +120,7 @@ def generate_launch_description():
                 "depth_topic": "/camera/wrist/depth/image_raw",
                 "camera_info_topic": "/camera/wrist/color/camera_info",
                 "use_mujoco_renderer": wrist_use_mujoco_renderer,
+                "synthetic_fallback": False,
                 "publish_depth": publish_depth,
             }],
             condition=IfCondition(PythonExpression([
@@ -138,6 +145,7 @@ def generate_launch_description():
                 "depth_topic": "/camera/tactile_left/depth/image_raw",
                 "camera_info_topic": "/camera/tactile_left/camera_info",
                 "tactile_mode": True,
+                "synthetic_fallback": False,
                 "gel_depth_baseline": 0.0155,
                 "gel_scale": 300.0,
             }],
@@ -163,6 +171,7 @@ def generate_launch_description():
                 "depth_topic": "/camera/tactile_right/depth/image_raw",
                 "camera_info_topic": "/camera/tactile_right/camera_info",
                 "tactile_mode": True,
+                "synthetic_fallback": False,
                 "gel_depth_baseline": 0.0155,
                 "gel_scale": 300.0,
             }],

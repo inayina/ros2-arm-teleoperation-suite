@@ -30,14 +30,14 @@ L1 safety_monitor      C++     /safe_master_pose（JointLimit·Workspace·Veloci
    ↓
 L2 moveit_servo        C++     /joint_target（笛卡尔→关节, 奇异/限位规避）
    ↓
-L3 ros2_control        C++     controller_manager @1kHz
+L3 ros2_control        C++     controller_manager @500Hz sim / 1kHz real
      · cartesian_impedance_controller（controller_interface 插件, effort 命令）
      · joint_state_broadcaster → /joint_states
      · canopen_system（SystemInterface 硬件接口）
    ↓ vcan0 (CANopen DS402: RPDO/TPDO/SDO/NMT/EMCY)
 L4 virtual_servo_driver Python DS402 状态机 + 电流环 + 编码器 + 故障注入 ×7
    ↓ /sim/joint_effort_cmd  ↑ /sim/encoder_state
-L5 mujoco_sim          Python  物理引擎 + FT 真值 + 虚拟相机 @1kHz/100Hz
+L5 mujoco_sim          Python  物理 1kHz · 编码器 500Hz · 其它观测/相机 100Hz/30Hz
    ↓
 L6 camera_bridge       Python  Scene/Wrist RGBD + 左/右 GelSight-like 视触觉 @30Hz
 L7 lerobot_recorder    Python  多模态对齐 → LeRobot Dataset

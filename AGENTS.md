@@ -28,7 +28,7 @@ Canonical 三仓 Agent 总览。各仓实现映射见：
 
 ### Motion Planning & Control Agent
 - **位置**：L2 `moveit_servo` + L3 `cartesian_impedance_controller`
-- **行为**：笛卡尔伺服 + 1kHz 阻抗力矩；**不含** RRT（RRT 在 legacy/下游）
+- **行为**：笛卡尔伺服 + 阻抗力矩（仿真 `500 Hz` / 真机路径 `1 kHz`，见 `control_rate_{sim,real}.yaml`）；**不含** RRT（RRT 在 legacy/下游）
 
 ### Evaluation Agent（双轨）
 | 轨道 | 实现 | 批采默认 |

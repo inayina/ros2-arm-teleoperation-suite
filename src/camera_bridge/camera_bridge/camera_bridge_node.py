@@ -105,6 +105,11 @@ class CameraBridgeNode(Node):
         if bool(self.get_parameter("use_mujoco_renderer").value):
             self._try_init_mujoco()
 
+        if self._camera is None and not self.synthetic_fallback:
+            raise RuntimeError(
+                "MuJoCo renderer is required but unavailable; refusing synthetic camera data"
+            )
+
         self.create_timer(1.0 / self.rate, self._tick)
         mode = "MuJoCo renderer" if self._camera is not None else "synthetic fallback"
         self.get_logger().info(

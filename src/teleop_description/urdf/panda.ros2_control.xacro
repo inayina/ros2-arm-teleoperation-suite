@@ -33,6 +33,8 @@
         <param name="use_sim">${use_sim}</param>
         <param name="can_interface">${can_interface}</param>
         <param name="num_joints">${num_joints}</param>
+        <!-- DDS publication is isolated from controller_manager::write(). -->
+        <param name="sim_effort_publish_rate_hz">500.0</param>
       </hardware>
       <xacro:ros2_control_joints index="1" last_index="${num_joints}"/>
     </ros2_control>

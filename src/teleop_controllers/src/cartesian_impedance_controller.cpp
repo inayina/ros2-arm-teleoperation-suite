@@ -27,6 +27,7 @@
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "pluginlib/class_list_macros.hpp"
 #include "teleop_controllers/impedance_math.hpp"
+#include "teleop_controllers/joint_target_guard.hpp"
 #include "teleop_controllers/joint_trajectory_mapping.hpp"
 
 namespace teleop_controllers
@@ -55,6 +56,7 @@ controller_interface::CallbackReturn CartesianImpedanceController::on_init()
     auto_declare<double>("contact_threshold_n", 5.0);
     auto_declare<double>("stiffness_scale", 50.0);
     auto_declare<double>("max_cartesian_error_m", 0.1);
+    auto_declare<double>("max_target_excursion_rad", 0.35);
   } catch (const std::exception & e) {
     RCLCPP_ERROR(get_node()->get_logger(), "on_init exception: %s", e.what());
     return controller_interface::CallbackReturn::ERROR;
@@ -109,6 +111,8 @@ controller_interface::CallbackReturn CartesianImpedanceController::on_configure(
   contact_threshold_n_ = get_node()->get_parameter("contact_threshold_n").as_double();
   stiffness_scale_ = get_node()->get_parameter("stiffness_scale").as_double();
   max_cart_error_m_ = get_node()->get_parameter("max_cartesian_error_m").as_double();
+  max_target_excursion_rad_ =
+    get_node()->get_parameter("max_target_excursion_rad").as_double();
 
   // ── Seed RT buffers ─────────────────────────────────────────────────────
   target_positions_.writeFromNonRT(std::vector<double>(num_joints_, 0.0));
@@ -119,6 +123,26 @@ controller_interface::CallbackReturn CartesianImpedanceController::on_configure(
     [this](const trajectory_msgs::msg::JointTrajectory::SharedPtr msg) {
       std::vector<double> mapped;
       if (map_joint_trajectory_target(*msg, joint_names_, mapped)) {
+        if (!joint_state_snapshot_ready_.load(std::memory_order_acquire)) {
+          RCLCPP_WARN_THROTTLE(
+            get_node()->get_logger(), *get_node()->get_clock(), 1000,
+            "Ignoring /joint_target before the controller has a measured-state snapshot.");
+          return;
+        }
+        std::vector<double> measured(num_joints_, 0.0);
+        for (size_t i = 0; i < num_joints_; ++i) {
+          measured[i] = latest_joint_positions_[i].load(std::memory_order_relaxed);
+        }
+        double observed_excursion = 0.0;
+        if (!joint_target_within_excursion(
+            mapped, measured, max_target_excursion_rad_, observed_excursion))
+        {
+          RCLCPP_WARN_THROTTLE(
+            get_node()->get_logger(), *get_node()->get_clock(), 1000,
+            "Rejected discontinuous /joint_target: max excursion %.3f rad exceeds %.3f rad.",
+            observed_excursion, max_target_excursion_rad_);
+          return;
+        }
         target_positions_.writeFromNonRT(mapped);
         target_received_.store(true);
       }
@@ -199,12 +223,14 @@ controller_interface::CallbackReturn CartesianImpedanceController::on_activate(
   std::vector<double> current(num_joints_, 0.0);
   for (size_t i = 0; i < num_joints_; ++i) {
     current[i] = state_interfaces_[position_indices_[i]].get_optional().value_or(0.0);
+    latest_joint_positions_[i].store(current[i], std::memory_order_relaxed);
   }
   target_positions_.writeFromNonRT(current);
   // Hold the activation snapshot until Servo publishes an explicit target.
   // Leaving this false makes q_des follow q on every update, so there is no
   // restorative posture torque while waiting for the first command.
   target_received_.store(true);
+  joint_state_snapshot_ready_.store(true, std::memory_order_release);
 
   RCLCPP_INFO(get_node()->get_logger(), "CartesianImpedanceController activated.");
   return controller_interface::CallbackReturn::SUCCESS;
@@ -216,6 +242,7 @@ controller_interface::CallbackReturn CartesianImpedanceController::on_activate(
 controller_interface::CallbackReturn CartesianImpedanceController::on_deactivate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
+  joint_state_snapshot_ready_.store(false, std::memory_order_release);
   set_zero_torque();
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -237,6 +264,7 @@ controller_interface::return_type CartesianImpedanceController::update(
   for (size_t i = 0; i < num_joints_; ++i) {
     q(i) = state_interfaces_[position_indices_[i]].get_optional().value_or(0.0);
     dq(i) = state_interfaces_[velocity_indices_[i]].get_optional().value_or(0.0);
+    latest_joint_positions_[i].store(q(i), std::memory_order_relaxed);
   }
 
   // ── 2. Forward kinematics: q → T_current ────────────────────────────────

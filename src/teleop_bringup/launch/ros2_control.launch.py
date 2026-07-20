@@ -15,6 +15,7 @@ def generate_launch_description():
     can_interface = LaunchConfiguration("can_interface")
     controller = LaunchConfiguration("controller")  # impedance | forward
     sim_backend = LaunchConfiguration("sim_backend")
+    controller_thread_priority = LaunchConfiguration("controller_thread_priority")
 
     is_impedance = PythonExpression(["'", controller, "' == 'impedance'"])
 
@@ -35,12 +36,36 @@ def generate_launch_description():
                 "' == 'isaac' else 'controllers.yaml'",
             ]),
         ])
+    control_rate_profile = PathJoinSubstitution(
+        [
+            FindPackageShare("teleop_bringup"),
+            "config",
+            PythonExpression([
+                "'control_rate_sim.yaml' if '", use_sim,
+                "' == 'true' else 'control_rate_real.yaml'",
+            ]),
+        ])
 
     cm = Node(
         package="controller_manager",
         executable="ros2_control_node",
         output="screen",
-        parameters=[robot_description, controllers_yaml],
+        parameters=[
+            robot_description,
+            controllers_yaml,
+            {
+                # The simulated CanopenSystem write() publishes over DDS. Running
+                # that path as FIFO can block behind non-RT middleware workers and
+                # cause priority-inversion stalls. Keep simulation best-effort;
+                # retain FIFO 50 for the direct CAN hardware path.
+                "thread_priority": ParameterValue(
+                    controller_thread_priority, value_type=int),
+            },
+            # Use an exact /controller_manager YAML key. A launch-generated
+            # parameter dict is emitted under /** and loses precedence to the
+            # exact key in controllers.yaml.
+            control_rate_profile,
+        ],
     )
     impedance_spawner = Node(
         package="controller_manager", executable="spawner",
@@ -70,6 +95,13 @@ def generate_launch_description():
         DeclareLaunchArgument("can_interface", default_value="vcan0"),
         DeclareLaunchArgument("controller", default_value="impedance"),
         DeclareLaunchArgument("sim_backend", default_value="mujoco"),
+        DeclareLaunchArgument(
+            "controller_thread_priority",
+            default_value=PythonExpression([
+                "'0' if '", use_sim, "' == 'true' else '50'",
+            ]),
+            description="controller_manager FIFO priority; simulation defaults to 0",
+        ),
         cm,
         TimerAction(period=3.0, actions=[impedance_spawner, forward_spawner]),
     ])

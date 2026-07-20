@@ -136,5 +136,34 @@ def test_backend_source_applies_bounded_effort_and_local_watchdog():
     assert "'/joint_target'" in adapter
     assert 'franka.gripper.set_joint_positions' in backend
     assert 'franka.disable_gravity()' in backend
+    assert 'NOMINAL_ARM_HOME = (0.0, -0.785' in backend
+    assert 'NOMINAL_RED_BOX_POSITION = (0.35, -0.07, 0.025)' in backend
+    assert "add_bin('bin_left', NOMINAL_BIN_Y[0])" in backend
+    assert 'position=NOMINAL_CAMERA_POSITION' in backend
+    assert '--object-seed' in backend
+    assert 'resolve_red_box_pose' in backend
     assert 'qos_profile_sensor_data' in adapter
     assert 'self._effort.begin_reset()' in adapter
+
+
+def test_object_pose_seed_is_deterministic_in_training_distribution():
+    from isaac_sim_adapter.object_pose_seed import (
+        OBJECT_X_RANGE,
+        OBJECT_Y_RANGE,
+        resolve_red_box_pose,
+        sample_red_box_pose,
+    )
+
+    a = sample_red_box_pose(2000)
+    b = sample_red_box_pose(2000)
+    c = sample_red_box_pose(2001)
+    assert a == b
+    assert a != c
+    assert OBJECT_X_RANGE[0] <= a[0] <= OBJECT_X_RANGE[1]
+    assert OBJECT_Y_RANGE[0] <= a[1] <= OBJECT_Y_RANGE[1]
+    assert abs(a[2] - 0.025) < 1e-9
+
+    nominal = resolve_red_box_pose(object_seed=None)
+    assert nominal[:3] == (0.35, -0.07, 0.025)
+    override = resolve_red_box_pose(object_seed=2000, object_xy=(0.40, 0.0))
+    assert override[:2] == (0.40, 0.0)

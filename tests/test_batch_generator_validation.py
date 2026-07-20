@@ -184,3 +184,14 @@ def test_validate_episode_rejects_excessive_ee_tracking_error():
     )
     assert result["success"] is False
     assert "ee tracking error" in result["reason"]
+
+
+def test_position_reached_honors_stage_xy_tolerance():
+    node = BatchGenerator.__new__(BatchGenerator)
+    node.ee_xy_tolerance = 0.08
+    node.ee_z_tolerance = 0.04
+    ee = (0.35, 0.0, 0.49)
+    target = (0.42, 0.0, 0.49)  # err_xy = 0.07
+    assert node._position_reached(ee, target, axes="xy") is True
+    assert node._position_reached(ee, target, axes="xy", xy_tol=0.025) is False
+    assert node._position_reached(ee, (0.37, 0.0, 0.49), axes="xy", xy_tol=0.025) is True

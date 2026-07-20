@@ -1,0 +1,4 @@
+/controller_manager:
+  ros__parameters:
+    # The direct CAN hardware path retains the intended 1 kHz control loop.
+    update_rate: 1000

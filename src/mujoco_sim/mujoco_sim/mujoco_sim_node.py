@@ -138,6 +138,7 @@ class MujocoSimNode(Node):
         self.declare_parameter("randomize", True)
         self.declare_parameter("randomization_path", "config/randomization.yaml")
         self.declare_parameter("physics_rate", 1000.0)
+        self.declare_parameter("encoder_publish_rate", 500.0)
         self.declare_parameter("publish_rate", 100.0)
         self.declare_parameter("base_frame", "panda_link0")
         self.declare_parameter("ee_site", "panda_ee")
@@ -172,6 +173,7 @@ class MujocoSimNode(Node):
         )
 
         self.physics_rate = self.get_parameter("physics_rate").value
+        self.encoder_publish_rate = self.get_parameter("encoder_publish_rate").value
         self.publish_rate = self.get_parameter("publish_rate").value
         self.base_frame = self.get_parameter("base_frame").value
         self.gravity_compensation = bool(self.get_parameter("gravity_compensation").value)
@@ -304,7 +306,12 @@ class MujocoSimNode(Node):
         if self.contact_debug_publish_rate > 0.0:
             self.create_timer(
                 1.0 / self.contact_debug_publish_rate, self._publish_contact_debug)
-        self._pub_decim = max(1, int(self.physics_rate / self.publish_rate))
+        self._encoder_pub_decim = max(
+            1, int(self.physics_rate / self.encoder_publish_rate)
+        )
+        self._observation_pub_decim = max(
+            1, int(self.physics_rate / self.publish_rate)
+        )
         self._k = 0
 
         mode = "MuJoCo" if self.model is not None else "fallback integrator"
@@ -541,12 +548,14 @@ class MujocoSimNode(Node):
             self._sanitize_fallback_state()
 
         self._k += 1
-        if self._k % self._pub_decim == 0:
+        if self._k % self._encoder_pub_decim == 0:
+            self._publish_encoder()
+        if self._k % self._observation_pub_decim == 0:
             if hasattr(self, 'viewer') and self.viewer is not None:
                 self.viewer.sync()
-            self._publish()
+            self._publish_observations()
 
-    def _publish(self):
+    def _publish_encoder(self):
         stamp = self.get_clock().now().to_msg()
         js = JointState()
         js.header.stamp = stamp
@@ -556,6 +565,8 @@ class MujocoSimNode(Node):
         js.effort = self._finite_tau(self.tau).tolist()
         self.pub_encoder.publish(js)
 
+    def _publish_observations(self):
+        stamp = self.get_clock().now().to_msg()
         ft = WrenchStamped()
         ft.header.stamp = stamp
         ft.header.frame_id = "panda_ee"

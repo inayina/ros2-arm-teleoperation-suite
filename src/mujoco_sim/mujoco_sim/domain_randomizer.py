@@ -44,6 +44,10 @@ class DomainRandomizer:
         pos_range = obj_cfg.get("initial_pos_range", {}) if randomize else {}
         x_range = pos_range.get("x")
         y_range = pos_range.get("y")
+        yaw_range_deg_by_object = (
+            obj_cfg.get("yaw_range_deg_by_object", {}) if randomize else {}
+        )
+        default_yaw_range_deg = obj_cfg.get("yaw_range_deg", [-180.0, 180.0])
         mass_range = obj_cfg.get("mass_range") if randomize else None
         friction_range = obj_cfg.get("friction_range") if randomize else None
 
@@ -108,7 +112,20 @@ class DomainRandomizer:
             data.qpos[qpos_adr] = x
             data.qpos[qpos_adr + 1] = y
             data.qpos[qpos_adr + 2] = z_rest
-            yaw = random.uniform(-math.pi, math.pi) if randomize else 0.0
+            yaw = 0.0
+            if randomize:
+                yaw_range_deg = yaw_range_deg_by_object.get(
+                    obj_name, default_yaw_range_deg)
+                if not isinstance(yaw_range_deg, (list, tuple)) or len(yaw_range_deg) != 2:
+                    raise ValueError(
+                        f"yaw range for {obj_name} must be [min_deg, max_deg]"
+                    )
+                yaw_min_deg, yaw_max_deg = map(float, yaw_range_deg)
+                if yaw_min_deg > yaw_max_deg:
+                    raise ValueError(
+                        f"yaw range for {obj_name} has min > max: {yaw_range_deg}"
+                    )
+                yaw = math.radians(random.uniform(yaw_min_deg, yaw_max_deg))
             cy = math.cos(yaw * 0.5)
             sy = math.sin(yaw * 0.5)
             data.qpos[qpos_adr + 3] = cy

@@ -1,4 +1,31 @@
+// Copyright 2026 ros2-arm-teleoperation-suite contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #include "canopen_hw_interface/canopen_system.hpp"
+
+#include <linux/can.h>
+#include <linux/can/raw.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
@@ -6,13 +33,6 @@
 #include <cctype>
 #include <cstring>
 #include <limits>
-#include <net/if.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
-#include <linux/can.h>
-#include <linux/can/raw.h>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "pluginlib/class_list_macros.hpp"
@@ -53,15 +73,28 @@ hardware_interface::CallbackReturn CanopenSystem::on_init(
   }
 
   auto get_param = [&](const std::string & key, const std::string & def) {
-    auto it = info_.hardware_parameters.find(key);
-    return it != info_.hardware_parameters.end() ? it->second : def;
-  };
+      auto it = info_.hardware_parameters.find(key);
+      return it != info_.hardware_parameters.end() ? it->second : def;
+    };
   auto use_sim_text = get_param("use_sim", "true");
-  std::transform(use_sim_text.begin(), use_sim_text.end(), use_sim_text.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
+  std::transform(use_sim_text.begin(), use_sim_text.end(), use_sim_text.begin(),
+    [](unsigned char c) {
+      return static_cast<char>(std::tolower(c));
   });
-  use_sim_ = (use_sim_text == "true" || use_sim_text == "1" || use_sim_text == "yes");
+  use_sim_ =
+    (use_sim_text == "true" || use_sim_text == "1" || use_sim_text == "yes");
   can_interface_ = get_param("can_interface", "vcan0");
+  try {
+    sim_effort_publish_rate_hz_ = std::stod(
+      get_param("sim_effort_publish_rate_hz", "500.0"));
+  } catch (const std::exception &) {
+    sim_effort_publish_rate_hz_ = 500.0;
+  }
+  if (!std::isfinite(sim_effort_publish_rate_hz_) || sim_effort_publish_rate_hz_ <= 0.0) {
+    RCLCPP_WARN(
+      get_logger(), "Invalid sim_effort_publish_rate_hz; using 500 Hz.");
+    sim_effort_publish_rate_hz_ = 500.0;
+  }
 
   num_joints_ = info_.joints.size();
   node_ids_.resize(num_joints_);
@@ -84,12 +117,16 @@ hardware_interface::CallbackReturn CanopenSystem::on_init(
   hw_state_position_.assign(num_joints_, 0.0);
   hw_state_velocity_.assign(num_joints_, 0.0);
   hw_state_effort_.assign(num_joints_, 0.0);
+  sim_effort_command_ = std::make_unique<std::atomic<double>[]>(num_joints_);
   encoder_position_.assign(num_joints_, 0.0);
   encoder_velocity_.assign(num_joints_, 0.0);
   encoder_effort_.assign(num_joints_, 0.0);
   tpdo_position_.assign(num_joints_, 0.0);
   tpdo_velocity_.assign(num_joints_, 0.0);
   tpdo_torque_.assign(num_joints_, 0.0);
+  for (size_t i = 0; i < num_joints_; ++i) {
+    sim_effort_command_[i].store(0.0, std::memory_order_relaxed);
+  }
 
   if (num_joints_ == kReadyPose.size()) {
     for (size_t i = 0; i < num_joints_; ++i) {
@@ -317,7 +354,8 @@ hardware_interface::CallbackReturn CanopenSystem::on_activate(
 
   if (use_sim_) {
     pub_sim_effort_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>(
-      "/sim/joint_effort_cmd", rclcpp::SensorDataQoS());
+      "/sim/joint_effort_cmd",
+      rclcpp::QoS(rclcpp::KeepLast(1)).best_effort().durability_volatile());
     sub_sim_encoder_ = node_->create_subscription<sensor_msgs::msg::JointState>(
       "/sim/encoder_state", rclcpp::SensorDataQoS(),
       std::bind(&CanopenSystem::on_encoder_state, this, std::placeholders::_1));
@@ -327,7 +365,7 @@ hardware_interface::CallbackReturn CanopenSystem::on_activate(
       running_.store(false);
       return hardware_interface::CallbackReturn::ERROR;
     }
-    can_rx_thread_ = std::thread([this]() { can_rx_loop(); });
+    can_rx_thread_ = std::thread([this]() {can_rx_loop();});
     ds402_enable_all();
     RCLCPP_INFO(
       get_logger(), "CanopenSystem activated in CAN mode on '%s'.", can_interface_.c_str());
@@ -335,7 +373,13 @@ hardware_interface::CallbackReturn CanopenSystem::on_activate(
 
   executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
   executor_->add_node(node_);
-  spin_thread_ = std::thread([this]() { executor_->spin(); });
+  spin_thread_ = std::thread([this]() {executor_->spin();});
+  if (use_sim_) {
+    sim_publish_thread_ = std::thread([this]() {sim_effort_publish_loop();});
+    RCLCPP_INFO(
+      get_logger(), "SIM effort DDS publisher isolated at %.1f Hz.",
+      sim_effort_publish_rate_hz_);
+  }
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -349,12 +393,48 @@ hardware_interface::CallbackReturn CanopenSystem::on_deactivate(
     if (spin_thread_.joinable()) {
       spin_thread_.join();
     }
+    if (sim_publish_thread_.joinable()) {
+      sim_publish_thread_.join();
+    }
     if (can_rx_thread_.joinable()) {
       can_rx_thread_.join();
     }
   }
   close_can_socket();
   return hardware_interface::CallbackReturn::SUCCESS;
+}
+
+void CanopenSystem::sim_effort_publish_loop()
+{
+  using SteadyClock = std::chrono::steady_clock;
+  const auto period = std::chrono::duration_cast<SteadyClock::duration>(
+    std::chrono::duration<double>(1.0 / sim_effort_publish_rate_hz_));
+  auto next_wakeup = SteadyClock::now();
+  std_msgs::msg::Float64MultiArray cmd;
+  cmd.data.resize(num_joints_);
+
+  while (running_.load(std::memory_order_acquire)) {
+    const bool estop = estop_active_.load(std::memory_order_relaxed);
+    for (size_t i = 0; i < num_joints_; ++i) {
+      const double effort = sim_effort_command_[i].load(std::memory_order_relaxed);
+      cmd.data[i] = estop || !std::isfinite(effort) ? 0.0 : effort;
+    }
+    if (pub_sim_effort_) {
+      // DDS can occasionally block for hundreds of milliseconds. This thread is
+      // deliberately separate from controller_manager::write(), so middleware
+      // latency cannot stall the control loop or its encoder read path.
+      pub_sim_effort_->publish(cmd);
+    }
+
+    next_wakeup += period;
+    const auto now = SteadyClock::now();
+    if (next_wakeup <= now) {
+      // Do not burst-publish missed samples after a middleware stall. The sim
+      // consumes only the latest torque command.
+      next_wakeup = now + period;
+    }
+    std::this_thread::sleep_until(next_wakeup);
+  }
 }
 
 void CanopenSystem::on_encoder_state(const sensor_msgs::msg::JointState::SharedPtr msg)
@@ -411,14 +491,9 @@ hardware_interface::return_type CanopenSystem::write(
   const bool estop = estop_active_.load();
 
   if (use_sim_) {
-    std_msgs::msg::Float64MultiArray cmd;
-    cmd.data.resize(num_joints_);
     for (size_t i = 0; i < num_joints_; ++i) {
       const double effort = std::isfinite(hw_cmd_effort_[i]) ? hw_cmd_effort_[i] : 0.0;
-      cmd.data[i] = estop ? 0.0 : effort;
-    }
-    if (pub_sim_effort_) {
-      pub_sim_effort_->publish(cmd);
+      sim_effort_command_[i].store(estop ? 0.0 : effort, std::memory_order_relaxed);
     }
     return hardware_interface::return_type::OK;
   }

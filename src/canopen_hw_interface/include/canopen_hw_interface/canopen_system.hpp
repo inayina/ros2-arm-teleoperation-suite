@@ -1,7 +1,28 @@
+// Copyright 2026 ros2-arm-teleoperation-suite contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef CANOPEN_HW_INTERFACE__CANOPEN_SYSTEM_HPP_
 #define CANOPEN_HW_INTERFACE__CANOPEN_SYSTEM_HPP_
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -68,7 +89,10 @@ private:
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr sub_estop_;
   rclcpp::executors::SingleThreadedExecutor::SharedPtr executor_;
   std::thread spin_thread_;
+  std::thread sim_publish_thread_;
   std::atomic<bool> running_{false};
+  double sim_effort_publish_rate_hz_{500.0};
+  std::unique_ptr<std::atomic<double>[]> sim_effort_command_;
 
   // Latest encoder feedback from sim, guarded for the read() thread.
   std::mutex encoder_mutex_;
@@ -78,6 +102,7 @@ private:
   bool encoder_received_{false};
 
   void on_encoder_state(const sensor_msgs::msg::JointState::SharedPtr msg);
+  void sim_effort_publish_loop();
 
   // ---- SocketCAN (use_sim=false) ----
   int can_socket_{-1};

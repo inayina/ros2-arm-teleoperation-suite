@@ -26,6 +26,7 @@
 #include <Eigen/Geometry>
 
 #include <atomic>
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -83,6 +84,7 @@ private:
   /// Joint-space posture stabilizer, used to keep the redundant arm near q_des.
   std::vector<double> joint_stiffness_;
   std::vector<double> joint_damping_;
+  double max_target_excursion_rad_{0.35};
 
   // ── Contact-adaptive stiffness ────────────────────────────────────────────
   double contact_threshold_n_{5.0};   ///< Force threshold [N]
@@ -93,6 +95,8 @@ private:
   realtime_tools::RealtimeBuffer<std::vector<double>> target_positions_;
   /// Holds the activation snapshot, then the latest explicit Servo target.
   std::atomic<bool> target_received_{false};
+  std::array<std::atomic<double>, 7> latest_joint_positions_{};
+  std::atomic<bool> joint_state_snapshot_ready_{false};
   /// Latest contact wrench from /ft_sensor.
   realtime_tools::RealtimeBuffer<geometry_msgs::msg::WrenchStamped> ft_buffer_;
   /// E-Stop flag: set true by /safety/estop → τ immediately zeroed.

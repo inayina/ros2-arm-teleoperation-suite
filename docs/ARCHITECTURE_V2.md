@@ -7,6 +7,8 @@
 
 **技术栈**：ROS 2 Jazzy · MuJoCo v3 · MoveIt 2 Servo · ros2_control · CANopen DS402 · LeRobot
 
+**当前控制频率（2026-07）**：仿真主线 `controller_manager` / 编码器 / effort 背板为 **500 Hz**（`control_rate_sim.yaml`）；真机 CAN 路径保留 **1000 Hz**（`control_rate_real.yaml`）。MuJoCo physics 仍为 1000 Hz；EE/FT/object 等观测默认 100 Hz。下文里程碑表中的「1kHz」多为历史验收口径，以本节与 launch 配置为准。
+
 ---
 
 ## 0. V1 → V2 重构动机
@@ -44,7 +46,7 @@ flowchart TB
         SV["moveit_servo<br/>(MoveIt 2 Servo)<br/>Cartesian → Joint, 奇异/限位规避"]
     end
 
-    subgraph L3["L3 · Control Layer (ros2_control 1kHz)"]
+    subgraph L3["L3 · Control Layer (sim 500 Hz / real 1 kHz)"]
         CM["controller_manager"]
         IMP["cartesian_impedance_controller<br/>(C++ controller plugin)"]
         JSB["joint_state_broadcaster"]
@@ -61,7 +63,7 @@ flowchart TB
     end
 
     subgraph L5["L5 · Physics Simulation"]
-        MJ["mujoco_sim<br/>(MuJoCo v3, Franka Panda)<br/>1kHz 物理 · FT 真值 · 虚拟相机"]
+        MJ["mujoco_sim<br/>(MuJoCo v3, Franka Panda)<br/>1kHz 物理 · 500Hz 编码器 · FT/相机 100Hz"]
     end
 
     subgraph L6["L6 · Perception"]
@@ -152,10 +154,10 @@ flowchart LR
 | `/teleop_input` | `teleop_input` | Python | 主端输入 + 心跳 | 100 Hz | SingleThreaded |
 | `/safety_monitor` | `safety_monitor` | C++ | 安全监督 + E-Stop | 250 Hz | MultiThreaded |
 | `/servo_node` | `teleop_moveit_config` | C++ | MoveIt Servo 运动层 | 125 Hz | MoveIt 内置 |
-| `/controller_manager` | `teleop_bringup` | C++ | ros2_control 实时主循环 | **1000 Hz** | RT 线程 |
+| `/controller_manager` | `teleop_bringup` | C++ | ros2_control 主循环 | **仿真 500 Hz** / 真机 **1000 Hz**（`control_rate_{sim,real}.yaml`） | 仿真普通调度；真机 RT |
 | `/robot_state_publisher` | `teleop_description` | C++ | URDF → TF | 按需 | — |
-| `/virtual_servo_driver` | `virtual_servo_driver` | Python | DS402 伺服仿真 ×7 | 1000 Hz | MultiThreaded |
-| `/mujoco_sim` | `mujoco_sim` | Python | 物理引擎 + 虚拟相机 | 1000 Hz 步进 / 100 Hz 发布 | 物理线程 |
+| `/virtual_servo_driver` | `virtual_servo_driver` | Python | DS402 伺服仿真 ×7 | 与 CM / 背板同阶 | MultiThreaded |
+| `/mujoco_sim` | `mujoco_sim` | Python | 物理引擎 + 虚拟相机 | 1000 Hz 步进 / **500 Hz 编码器** / 100 Hz 其它观测 | 物理线程 |
 | `/camera_bridge` | `camera_bridge` | Python | RGB/Depth 发布 | 30 Hz | SingleThreaded |
 | `/gripper_driver` | `gripper_driver` | Python | RS485 Modbus 夹爪 (Mock 仿真) | 20 Hz | SingleThreaded |
 | `/lerobot_recorder` | `lerobot_recorder` | Python | 多模态数据录制 | 30 Hz（对齐相机） | MultiThreaded |
@@ -224,10 +226,10 @@ flowchart TB
 | `/safety/status` | `teleop_interfaces/SafetyStatus` | safety_monitor | recorder, rqt | 50 Hz | Reliable |
 | `/safety/diagnostics` | `diagnostic_msgs/DiagnosticArray` | safety_monitor | diagnostic_aggregator | 10 Hz | Reliable |
 | `/joint_target` | `trajectory_msgs/JointTrajectory` | servo_node | cartesian_impedance_controller | 125 Hz | Reliable |
-| `/joint_states` | `sensor_msgs/JointState` | joint_state_broadcaster | servo, impedance, recorder | 100 Hz | Best Effort |
-| `/dynamic_joint_states` | `control_msgs/DynamicJointState` | joint_state_broadcaster | rqt | 100 Hz | Best Effort |
-| `/sim/joint_effort_cmd` | `std_msgs/Float64MultiArray` | virtual_servo_driver | mujoco_sim | 1000 Hz | Best Effort |
-| `/sim/encoder_state` | `sensor_msgs/JointState` | mujoco_sim | virtual_servo_driver | 1000 Hz | Best Effort |
+| `/joint_states` | `sensor_msgs/JointState` | joint_state_broadcaster | servo, impedance, recorder | 随 CM（仿真约 500 Hz） | Best Effort |
+| `/dynamic_joint_states` | `control_msgs/DynamicJointState` | joint_state_broadcaster | rqt | 随 CM（仿真约 500 Hz） | Best Effort |
+| `/sim/joint_effort_cmd` | `std_msgs/Float64MultiArray` | canopen_hw / virtual_servo | mujoco_sim | **500 Hz**（仿真 DDS 背板） | Best Effort |
+| `/sim/encoder_state` | `sensor_msgs/JointState` | mujoco_sim | canopen_hw / virtual_servo | **500 Hz** | Best Effort |
 | `/servo_drive/status` | `teleop_interfaces/DriveStatus` (array) | virtual_servo_driver | recorder, rqt | 50 Hz | Reliable |
 | `/ft_sensor` | `geometry_msgs/WrenchStamped` | mujoco_sim | impedance ctrl, recorder | 100 Hz | Best Effort |
 | `/ee_pose` | `geometry_msgs/PoseStamped` | mujoco_sim | recorder | 100 Hz | Best Effort |
@@ -566,7 +568,7 @@ flowchart LR
 
 ## 8. 作品集叙事（按岗位）
 
-- **机器人软件工程师**：实现 `ros2_control` 自定义硬件接口（CANopen DS402）+ 笛卡尔阻抗控制器插件，1kHz 实时控制；MoveIt Servo 运动层解耦运动生成与伺服控制。
+- **机器人软件工程师**：实现 `ros2_control` 自定义硬件接口（CANopen DS402）+ 笛卡尔阻抗控制器插件（仿真主线 500 Hz，真机路径 1 kHz）；MoveIt Servo 运动层解耦运动生成与伺服控制。
 - **系统集成工程师**：打通 Teleop → Safety → Motion → Control → CANopen Fieldbus → Drive → Physics 七层栈；`use_sim`/`can_interface` 参数一键在 vcan0 仿真与 can0 实体间切换，协议层零改动。
 - **测试工程师**：独立安全层含 5 类监视器 + E-Stop 闭环，故障可主动注入（EMCY/超速/通信中断），诊断经 DiagnosticArray 可观测；分层 launch 支持按层回归；区分 sim 真值与总线测得值，定位可观测性边界。
 

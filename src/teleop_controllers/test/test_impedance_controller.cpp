@@ -18,12 +18,14 @@
 #include <cmath>
 
 #include "teleop_controllers/impedance_math.hpp"
+#include "teleop_controllers/joint_target_guard.hpp"
 #include "teleop_controllers/joint_trajectory_mapping.hpp"
 
 using teleop_controllers::impedance_math::cartesian_error;
 using teleop_controllers::impedance_math::forward_kinematics;
 using teleop_controllers::impedance_math::jacobian;
 using teleop_controllers::map_joint_trajectory_target;
+using teleop_controllers::joint_target_within_excursion;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers: simplified control law mirror (mirrors update() logic)
@@ -173,6 +175,33 @@ TEST(JointTrajectoryMappingTest, RejectsMissingOrUnknownJointNames)
   unknown.points.resize(1);
   unknown.points.back().positions = {1.0, 2.0, 4.0};
   EXPECT_FALSE(map_joint_trajectory_target(unknown, joints, mapped));
+}
+
+TEST(JointTargetGuardTest, AcceptsIncrementalServoTarget)
+{
+  const std::vector<double> measured = {0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785};
+  const std::vector<double> target = {0.01, -0.80, 0.0, -2.34, 0.0, 1.58, 0.80};
+  double observed = 0.0;
+  EXPECT_TRUE(joint_target_within_excursion(target, measured, 0.35, observed));
+  EXPECT_LT(observed, 0.02);
+}
+
+TEST(JointTargetGuardTest, RejectsStartupJumpTowardJointSevenLimit)
+{
+  const std::vector<double> measured = {0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785};
+  const std::vector<double> target = {0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 2.85};
+  double observed = 0.0;
+  EXPECT_FALSE(joint_target_within_excursion(target, measured, 0.35, observed));
+  EXPECT_GT(observed, 2.0);
+}
+
+TEST(JointTargetGuardTest, RejectsNonFiniteTarget)
+{
+  const std::vector<double> measured(7, 0.0);
+  std::vector<double> target(7, 0.0);
+  target[6] = std::numeric_limits<double>::quiet_NaN();
+  double observed = 0.0;
+  EXPECT_FALSE(joint_target_within_excursion(target, measured, 0.35, observed));
 }
 
 int main(int argc, char ** argv)

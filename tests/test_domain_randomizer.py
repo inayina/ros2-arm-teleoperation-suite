@@ -103,7 +103,10 @@ class TestDomainRandomizer(unittest.TestCase):
                     "initial_pos_range": {
                         "x": [0.35, 0.55],
                         "y": [-0.2, 0.2]
-                    }
+                    },
+                    "yaw_range_deg_by_object": {
+                        "object_red_box": [-10.0, 10.0],
+                    },
                 },
                 "lighting": {
                     "key": {
@@ -146,6 +149,11 @@ class TestDomainRandomizer(unittest.TestCase):
                 f"object[{idx}] Y {data.qpos[adr + 1]} out of range")
             assert abs(data.qpos[adr + 2] - expected_z[idx]) < 1e-9, (
                 f"object[{idx}] Z {data.qpos[adr + 2]} != {expected_z[idx]}")
+
+        # The xyz-only scripted expert uses a fixed gripper yaw, so the box
+        # randomization is intentionally bounded to face-on grasps.
+        red_yaw = 2.0 * np.arctan2(data.qpos[6], data.qpos[3])
+        assert np.deg2rad(-10.0) <= red_yaw <= np.deg2rad(10.0)
 
         # Velocity should all be zero
         assert all(v == 0.0 for v in data.qvel)

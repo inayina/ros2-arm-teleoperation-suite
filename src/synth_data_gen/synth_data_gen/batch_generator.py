@@ -13,9 +13,15 @@ from rcl_interfaces.srv import SetParameters
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 
 from synth_data_gen.motion_primitives import (
+    acceleration_limited_step,
     compute_twist_linear,
     position_error,
     update_max_tracking_error,
+)
+from synth_data_gen.continuous_evaluator import (
+    ContinuousTaskEvaluator,
+    EvaluatorSample,
+    append_episode_result,
 )
 
 class BatchGenerator(Node):
@@ -26,6 +32,9 @@ class BatchGenerator(Node):
         self.declare_parameter('hover_duration', 3.0)
         self.declare_parameter('descend_duration', 2.5)
         self.declare_parameter('close_duration', 1.0)
+        # 0 = use hover_duration. Longer values emphasize constant-Z XY alignment
+        # before hover/descend (XY-align-then-descend demos).
+        self.declare_parameter('approach_xy_duration', 0.0)
         self.declare_parameter('grasp_pause', 1.0)
         self.declare_parameter('lift_duration', 2.0)
         self.declare_parameter('lift_target_z', 0.0)
@@ -36,6 +45,7 @@ class BatchGenerator(Node):
         self.declare_parameter('reach_confirm_frames', 12)
         self.declare_parameter('pose_step_m', 0.006)
         self.declare_parameter('pose_cmd_rate_hz', 100.0)
+        self.declare_parameter('pose_max_acceleration_mps2', 0.5)
         self.declare_parameter('reset_timeout', 5.0)
         self.declare_parameter('simulator_node_name', '/mujoco_sim')
         self.declare_parameter('target_object_name', '')
@@ -53,6 +63,9 @@ class BatchGenerator(Node):
         self.declare_parameter('record_warmup_s', 2.0)
         self.declare_parameter('use_ready_pose', True)
         self.declare_parameter('ee_xy_tolerance', 0.10)
+        # Tighter than ee_xy_tolerance: approach_xy must actually center above the
+        # object before hover/descend. 0.08 early-exits ~home→object residual.
+        self.declare_parameter('approach_xy_tolerance', 0.025)
         self.declare_parameter('ee_z_tolerance', 0.04)
         self.declare_parameter('ee_arrival_timeout_s', 12.0)
         self.declare_parameter('motion_mode', 'pose')
@@ -60,12 +73,24 @@ class BatchGenerator(Node):
         self.declare_parameter('twist_descend_linear_mps', 0.04)
         self.declare_parameter('ready_pose', [0.45, 0.0, 0.55])
         self.declare_parameter('ee_tracking_tolerance_m', 0.08)
+        # Evaluation Contract: when episode_results_path is set, stream continuous
+        # GT into episode_results.jsonl (runtime_observed rows).
+        self.declare_parameter('episode_results_path', '')
+        self.declare_parameter('evaluation_run_id', '')
+        self.declare_parameter('evaluation_backend', 'mujoco')
+        self.declare_parameter('evaluation_scene_id', 'panda_pick_place_v1')
+        self.declare_parameter('evaluation_suite_id', 'nominal')
+        self.declare_parameter('evaluation_model_id', 'batch_generator_expert')
         
         self.episodes = self.get_parameter('episodes').value
         self.seed = self.get_parameter('seed').value
         self.hover_duration = float(self.get_parameter('hover_duration').value)
         self.descend_duration = float(self.get_parameter('descend_duration').value)
         self.close_duration = float(self.get_parameter('close_duration').value)
+        approach_xy_duration = float(self.get_parameter('approach_xy_duration').value)
+        self.approach_xy_duration = (
+            approach_xy_duration if approach_xy_duration > 0.0 else self.hover_duration
+        )
         self.grasp_pause = float(self.get_parameter('grasp_pause').value)
         self.lift_duration = float(self.get_parameter('lift_duration').value)
         self.lift_target_z = float(self.get_parameter('lift_target_z').value)
@@ -78,6 +103,9 @@ class BatchGenerator(Node):
             1, int(self.get_parameter('reach_confirm_frames').value)
         )
         self.pose_cmd_rate_hz = float(self.get_parameter('pose_cmd_rate_hz').value)
+        self.pose_max_acceleration_mps2 = max(
+            0.01, float(self.get_parameter('pose_max_acceleration_mps2').value)
+        )
         self.reset_timeout = float(self.get_parameter('reset_timeout').value)
         self.simulator_node_name = self._normalize_node_name(
             self.get_parameter('simulator_node_name').value
@@ -99,6 +127,16 @@ class BatchGenerator(Node):
         self.record_warmup_s = float(self.get_parameter('record_warmup_s').value)
         self.use_ready_pose = bool(self.get_parameter('use_ready_pose').value)
         self.ee_xy_tolerance = float(self.get_parameter('ee_xy_tolerance').value)
+        self.approach_xy_tolerance = float(
+            self.get_parameter('approach_xy_tolerance').value
+        )
+        if self.approach_xy_tolerance <= 0.0:
+            raise ValueError('approach_xy_tolerance must be positive')
+        if self.approach_xy_tolerance > self.ee_xy_tolerance:
+            self.get_logger().warn(
+                'approach_xy_tolerance > ee_xy_tolerance; approach gate is looser '
+                'than pick gate (usually unintended)'
+            )
         self.ee_z_tolerance = float(self.get_parameter('ee_z_tolerance').value)
         self.ee_arrival_timeout_s = float(self.get_parameter('ee_arrival_timeout_s').value)
         self.motion_mode = str(self.get_parameter('motion_mode').value).strip().lower()
@@ -106,6 +144,29 @@ class BatchGenerator(Node):
         self.twist_descend_linear_mps = float(self.get_parameter('twist_descend_linear_mps').value)
         self.ready_pose = [float(v) for v in self.get_parameter('ready_pose').value]
         self.ee_tracking_tolerance_m = float(self.get_parameter('ee_tracking_tolerance_m').value)
+        self.episode_results_path = str(
+            self.get_parameter('episode_results_path').value or ''
+        ).strip()
+        self.evaluation_run_id = str(
+            self.get_parameter('evaluation_run_id').value or ''
+        ).strip()
+        self.evaluation_backend = str(
+            self.get_parameter('evaluation_backend').value or 'mujoco'
+        ).strip().lower()
+        self.evaluation_scene_id = str(
+            self.get_parameter('evaluation_scene_id').value or 'panda_pick_place_v1'
+        ).strip()
+        self.evaluation_suite_id = str(
+            self.get_parameter('evaluation_suite_id').value or 'nominal'
+        ).strip()
+        self.evaluation_model_id = str(
+            self.get_parameter('evaluation_model_id').value or 'batch_generator_expert'
+        ).strip()
+        self._continuous_evaluator = None
+        self._eval_episode_index = 0
+        self._eval_bin_xy = None
+        if self.episode_results_path and not self.evaluation_run_id:
+            self.evaluation_run_id = f"batch_generator_{int(time.time())}"
         
         self.initial_pose = None
         self.latest_object_pose = None
@@ -240,6 +301,7 @@ class BatchGenerator(Node):
                 self._hold_nominal_home(duration=3.0)
                 object_pose = self._wait_for_reachable_object_pose(timeout=4.0)
             self._start_trial_tracking(object_pose)
+            self._set_eval_bin_xy(BIN_X, bin_y)
 
             try:
                 trans = self.tf_buffer.lookup_transform('panda_link0', 'panda_ee', rclpy.time.Time())
@@ -304,16 +366,34 @@ class BatchGenerator(Node):
                 )
 
             self.get_logger().info(
-                f'FSM Phase 1a: Approach XY. Moving to approach_xy_p={approach_xy_p}'
+                f'FSM Phase 1a: Approach XY. Moving to approach_xy_p={approach_xy_p} '
+                f'(xy_tol={self.approach_xy_tolerance:.3f} m)'
             )
             if motion_ok:
                 motion_ok = self._move_toward(
                     xy_start,
                     approach_xy_p,
-                    duration=self.hover_duration,
+                    duration=self.approach_xy_duration,
                     label='approach_xy',
                     axes='xy',
+                    xy_tol=self.approach_xy_tolerance,
                 )
+            if motion_ok:
+                ee = self._ee_xyz()
+                if ee is None:
+                    motion_ok = False
+                else:
+                    xy_err = math.hypot(ee[0] - approach_xy_p[0], ee[1] - approach_xy_p[1])
+                    if xy_err > self.approach_xy_tolerance:
+                        self.get_logger().warn(
+                            f'Approach XY gate failed after move: err_xy={xy_err:.3f} > '
+                            f'{self.approach_xy_tolerance:.3f}'
+                        )
+                        motion_ok = False
+                    else:
+                        self.get_logger().info(
+                            f'Approach XY gate PASS: err_xy={xy_err:.3f} m'
+                        )
 
             self.get_logger().info(
                 f'FSM Phase 1b: Hover. Moving to hover_p={hover_p}'
@@ -403,7 +483,9 @@ class BatchGenerator(Node):
 
             if self.validation_mode == "lift":
                 if motion_ok and self.post_lift_hold > 0.0:
-                    time.sleep(self.post_lift_hold)
+                    self._publish_motion_hold(
+                        lift_p, down_q, duration=self.post_lift_hold
+                    )
             elif motion_ok:
                 # 阶段5：平移至目标筐正上方
                 bin_hover_p = [BIN_X, bin_y, lift_p[2]]
@@ -428,10 +510,18 @@ class BatchGenerator(Node):
                 time.sleep(0.5)
 
                 if self.post_lift_hold > 0.0:
-                    time.sleep(self.post_lift_hold)
+                    self._publish_motion_hold(
+                        bin_place_p, down_q, duration=self.post_lift_hold
+                    )
 
             # 4. Validate before committing the buffered episode.
-            time.sleep(max(0.0, self.validation_settle_s))
+            if motion_ok and self.validation_settle_s > 0.0:
+                final_hold = lift_p if self.validation_mode == "lift" else bin_place_p
+                self._publish_motion_hold(
+                    final_hold, down_q, duration=self.validation_settle_s
+                )
+            else:
+                time.sleep(max(0.0, self.validation_settle_s))
             validation = self._validate_episode(
                 target_obj=target_obj,
                 bin_x=BIN_X,
@@ -442,6 +532,16 @@ class BatchGenerator(Node):
                 reset_ok=reset_ok,
                 motion_ok=motion_ok,
             )
+            try:
+                self._write_episode_result_row(
+                    validation=validation,
+                    motion_ok=motion_ok,
+                    reset_ok=reset_ok,
+                    bin_x=BIN_X,
+                    bin_y=bin_y,
+                )
+            except Exception as exc:
+                self.get_logger().warn(f'continuous evaluator write failed: {exc}')
             if validation["success"]:
                 if self._commit_recording():
                     success_count += 1
@@ -675,9 +775,13 @@ class BatchGenerator(Node):
             z = float(msg.pose.position.z)
             if math.isfinite(z):
                 self._trial_max_object_z = max(self._trial_max_object_z, z)
+        if self._continuous_evaluator is not None:
+            self._observe_continuous_sample()
 
     def _on_ee_pose(self, msg):
         self.latest_ee_pose = msg
+        if self._continuous_evaluator is not None:
+            self._observe_continuous_sample()
 
     def _ee_xyz(self):
         if self.latest_ee_pose is None:
@@ -688,23 +792,36 @@ class BatchGenerator(Node):
             float(self.latest_ee_pose.pose.position.z),
         )
 
-    def _position_reached(self, ee, target_pos, axes='all'):
+    def _position_reached(
+        self, ee, target_pos, axes='all', *, xy_tol=None, z_tol=None
+    ):
+        xy_tol = self.ee_xy_tolerance if xy_tol is None else float(xy_tol)
+        z_tol = self.ee_z_tolerance if z_tol is None else float(z_tol)
         xy_err = math.hypot(ee[0] - target_pos[0], ee[1] - target_pos[1])
         z_err = abs(ee[2] - target_pos[2])
         if axes == 'xy':
-            return xy_err <= self.ee_xy_tolerance
+            return xy_err <= xy_tol
         if axes == 'z':
-            return z_err <= self.ee_z_tolerance and xy_err <= self.ee_xy_tolerance
-        return xy_err <= self.ee_xy_tolerance and z_err <= self.ee_z_tolerance
+            return z_err <= z_tol and xy_err <= xy_tol
+        return xy_err <= xy_tol and z_err <= z_tol
 
-    def _confirm_ee_at_target(self, target_pos, axes='all', timeout=2.0):
+    def _confirm_ee_at_target(
+        self, target_pos, axes='all', timeout=2.0, *, xy_tol=None, z_tol=None
+    ):
         """Require consecutive /ee_pose samples at target to reject transient false reaches."""
         deadline = time.monotonic() + max(0.2, float(timeout))
         confirm = 0
         needed = self.reach_confirm_frames
+        next_pose_keepalive = 0.0
         while time.monotonic() < deadline:
+            now = time.monotonic()
+            if self.motion_mode == 'pose' and now >= next_pose_keepalive:
+                self._move_arm(target_pos, self._last_cmd_ori)
+                next_pose_keepalive = now + 1.0 / max(1.0, self.pose_cmd_rate_hz)
             ee = self._ee_xyz()
-            if ee is not None and self._position_reached(ee, target_pos, axes=axes):
+            if ee is not None and self._position_reached(
+                ee, target_pos, axes=axes, xy_tol=xy_tol, z_tol=z_tol
+            ):
                 confirm += 1
                 if confirm >= needed:
                     return True
@@ -713,7 +830,17 @@ class BatchGenerator(Node):
             time.sleep(0.02)
         return False
 
-    def _wait_for_ee_near(self, target_pos, label="target", timeout=None, hold_ori=None, axes='all'):
+    def _wait_for_ee_near(
+        self,
+        target_pos,
+        label="target",
+        timeout=None,
+        hold_ori=None,
+        axes='all',
+        *,
+        xy_tol=None,
+        z_tol=None,
+    ):
         timeout = self.ee_arrival_timeout_s if timeout is None else timeout
         deadline = time.monotonic() + max(0.5, float(timeout))
         last_log = 0.0
@@ -728,9 +855,15 @@ class BatchGenerator(Node):
             if ee is not None:
                 xy_err = math.hypot(ee[0] - target_pos[0], ee[1] - target_pos[1])
                 z_err = abs(ee[2] - target_pos[2])
-                if self._position_reached(ee, target_pos, axes=axes):
+                if self._position_reached(
+                    ee, target_pos, axes=axes, xy_tol=xy_tol, z_tol=z_tol
+                ):
                     if self._confirm_ee_at_target(
-                        target_pos, axes=axes, timeout=0.5
+                        target_pos,
+                        axes=axes,
+                        timeout=0.5,
+                        xy_tol=xy_tol,
+                        z_tol=z_tol,
                     ):
                         self.get_logger().info(
                             f"EE reached {label}: err_xy={xy_err:.3f} err_z={z_err:.3f}"
@@ -806,10 +939,129 @@ class BatchGenerator(Node):
             self._trial_initial_object_z = None
             self._trial_initial_object_xyz = None
             self._trial_max_object_z = None
+        else:
+            self._trial_initial_object_xyz = xyz
+            self._trial_initial_object_z = xyz[2]
+            self._trial_max_object_z = xyz[2]
+        if self.episode_results_path:
+            self._continuous_evaluator = ContinuousTaskEvaluator(
+                lift_success_delta=self.lift_success_delta,
+                bin_xy_tolerance=self.bin_xy_tolerance,
+                gripper_close_max=self.gripper_close_max,
+                reach_xy_tolerance=min(0.08, max(0.03, self.approach_xy_tolerance)),
+                validation_mode=self.validation_mode,
+            )
+            # bin_xy filled on first observe/finalize via _eval_bin_xy
+            self._eval_bin_xy = None
+            self._continuous_evaluator.reset(
+                initial_object_xyz=xyz,
+                bin_xy=(0.4, 0.0),
+                reset_monotonic_s=time.monotonic(),
+            )
+            self._continuous_evaluator.set_phase('reset')
+            self._observe_continuous_sample(phase_hint='reset')
+        else:
+            self._continuous_evaluator = None
+
+    def _set_eval_bin_xy(self, bin_x: float, bin_y: float) -> None:
+        self._eval_bin_xy = (float(bin_x), float(bin_y))
+        if self._continuous_evaluator is not None:
+            self._continuous_evaluator._bin_xy = self._eval_bin_xy
+
+    def _observe_continuous_sample(self, phase_hint=None) -> None:
+        ev = self._continuous_evaluator
+        if ev is None:
             return
-        self._trial_initial_object_xyz = xyz
-        self._trial_initial_object_z = xyz[2]
-        self._trial_max_object_z = xyz[2]
+        grip = self._gripper_hold_value
+        if grip is None:
+            grip = 1.0
+        cmd = None
+        if self._cmd_pos is not None:
+            cmd = (float(self._cmd_pos[0]), float(self._cmd_pos[1]), float(self._cmd_pos[2]))
+        obj = self._object_xyz(self.latest_object_pose)
+        ee = self._ee_xyz()
+        ev.observe(
+            EvaluatorSample(
+                t_monotonic=time.monotonic(),
+                object_xyz=obj,
+                ee_xyz=ee,
+                gripper=float(grip),
+                ee_cmd_xyz=cmd,
+                phase_hint=phase_hint,
+            )
+        )
+
+    def _write_episode_result_row(
+        self,
+        *,
+        validation: dict,
+        motion_ok: bool,
+        reset_ok: bool,
+        bin_x: float,
+        bin_y: float,
+    ) -> None:
+        if not self.episode_results_path or self._continuous_evaluator is None:
+            return
+        self._set_eval_bin_xy(bin_x, bin_y)
+        self._observe_continuous_sample(phase_hint='validate')
+        execution_status = 'completed'
+        if not reset_ok:
+            execution_status = 'infrastructure_failure'
+            self._continuous_evaluator._abort_reason = 'scene reset failed'
+        elif not motion_ok and not validation.get('success'):
+            # Still runtime-evaluated; physical attempt completed with motion miss.
+            execution_status = 'completed'
+
+        run_id = self.evaluation_run_id
+        evidence_dir = self.episode_results_path
+        # Prefer sibling evidence stubs next to the jsonl file.
+        from pathlib import Path
+
+        base = Path(self.episode_results_path).resolve().parent
+        ep_idx = int(self._eval_episode_index)
+        runtime_log = str(base / f'runtime_ep{ep_idx:04d}.log')
+        event_log = str(base / f'events_ep{ep_idx:04d}.jsonl')
+        nfr_sample = str(base / f'nfr_ep{ep_idx:04d}.json')
+        Path(runtime_log).write_text(
+            f"validation={validation}\nmotion_ok={motion_ok}\nreset_ok={reset_ok}\n",
+            encoding='utf-8',
+        )
+        Path(event_log).write_text('', encoding='utf-8')
+        Path(nfr_sample).write_text('{}\n', encoding='utf-8')
+        raw_episode = str(base / f'raw_episode_{ep_idx:04d}')
+        row = self._continuous_evaluator.finalize(
+            evaluation_run_id=run_id,
+            identity={
+                'model_id': self.evaluation_model_id,
+                'backend': self.evaluation_backend,
+                'scene_id': self.evaluation_scene_id,
+                'suite_id': self.evaluation_suite_id,
+                'seed': int(self.seed),
+                'episode_index': ep_idx,
+            },
+            evidence={
+                'raw_episode_path': raw_episode,
+                'video_path': None,
+                'runtime_log_path': runtime_log,
+                'event_log_path': event_log,
+                'nfr_sample_path': nfr_sample,
+            },
+            execution_status=execution_status,
+        )
+        # Keep batch gate and continuous GT aligned on success when both ran.
+        if execution_status == 'completed' and 'success' in validation:
+            row['outcome']['success'] = bool(validation['success'])
+            if validation['success']:
+                row['outcome']['failure_stage'] = None
+                row['outcome']['failure_reason'] = None
+            else:
+                row['outcome']['failure_reason'] = str(validation.get('reason') or 'failed')
+        append_episode_result(self.episode_results_path, row)
+        self.get_logger().info(
+            f'Wrote continuous evaluator row episode_index={ep_idx} '
+            f"success={row['outcome'].get('success')} → {self.episode_results_path}"
+        )
+        self._eval_episode_index += 1
 
     def _current_command_pos(self):
         ee = self._ee_xyz()
@@ -1092,7 +1344,18 @@ class BatchGenerator(Node):
         """Deprecated path: hold home in place instead of Cartesian recovery from bad EE."""
         self._hold_nominal_home(duration=max(3.0, float(duration) * 0.6))
 
-    def _move_toward(self, start_pos, end_pos, duration=1.0, label="target", descend=False, axes='all'):
+    def _move_toward(
+        self,
+        start_pos,
+        end_pos,
+        duration=1.0,
+        label="target",
+        descend=False,
+        axes='all',
+        *,
+        xy_tol=None,
+        z_tol=None,
+    ):
         actual_start, hold_ori = self._motion_start_from_ee()
         if self.motion_mode == 'twist':
             return self._stream_twist_toward(
@@ -1100,6 +1363,8 @@ class BatchGenerator(Node):
                 duration=duration,
                 label=label,
                 descend=descend,
+                xy_tol=xy_tol,
+                z_tol=z_tol,
             )
         move_duration = float(duration)
         if descend:
@@ -1111,9 +1376,21 @@ class BatchGenerator(Node):
             duration=move_duration,
             label=label,
             axes=axes,
+            xy_tol=xy_tol,
+            z_tol=z_tol,
         )
 
-    def _stream_pose_toward(self, target_pos, hold_ori, duration=1.0, label="target", axes='all'):
+    def _stream_pose_toward(
+        self,
+        target_pos,
+        hold_ori,
+        duration=1.0,
+        label="target",
+        axes='all',
+        *,
+        xy_tol=None,
+        z_tol=None,
+    ):
         """Small incremental pose commands (teleop-style); avoids singular diagonal jumps."""
         rate_hz = max(1.0, float(self.pose_cmd_rate_hz))
         dt = 1.0 / rate_hz
@@ -1128,10 +1405,16 @@ class BatchGenerator(Node):
             cmd_pos[1] = float(target_pos[1])
         deadline = time.monotonic() + max(0.5, float(duration))
         last_log = 0.0
+        command_speed_mps = 0.0
+        max_speed_mps = step_m * rate_hz
         while time.monotonic() < deadline:
             ee = self._ee_xyz()
-            if ee is not None and self._position_reached(ee, target_pos, axes=axes):
-                if self._confirm_ee_at_target(target_pos, axes=axes, timeout=0.4):
+            if ee is not None and self._position_reached(
+                ee, target_pos, axes=axes, xy_tol=xy_tol, z_tol=z_tol
+            ):
+                if self._confirm_ee_at_target(
+                    target_pos, axes=axes, timeout=0.4, xy_tol=xy_tol, z_tol=z_tol
+                ):
                     xy_err, z_err, _ = position_error(ee, target_pos)
                     self.get_logger().info(
                         f'Pose reached {label}: err_xy={xy_err:.3f} err_z={z_err:.3f}'
@@ -1160,7 +1443,14 @@ class BatchGenerator(Node):
                 self._sync_cmd_setpoint(cmd_pos, hold_ori)
                 self._move_arm(cmd_pos, hold_ori)
                 break
-            scale = min(1.0, step_m / dist) if dist > 1e-9 else 1.0
+            distance_step, command_speed_mps = acceleration_limited_step(
+                dist,
+                command_speed_mps,
+                max_speed_mps,
+                self.pose_max_acceleration_mps2,
+                dt,
+            )
+            scale = min(1.0, distance_step / dist) if dist > 1e-9 else 1.0
             cmd_pos = [cmd_pos[i] + err[i] * scale for i in range(3)]
             self._sync_cmd_setpoint(cmd_pos, hold_ori)
             self._move_arm(cmd_pos, hold_ori)
@@ -1181,6 +1471,8 @@ class BatchGenerator(Node):
             hold_ori=hold_ori,
             timeout=max(4.0, float(duration) * 0.5),
             axes=axes,
+            xy_tol=xy_tol,
+            z_tol=z_tol,
         )
 
     def _record_motion_segment_error(self, segment_max: float):
@@ -1188,10 +1480,21 @@ class BatchGenerator(Node):
             float(self._trial_max_ee_tracking_error), float(segment_max)
         )
 
-    def _stream_twist_toward(self, target_pos, duration=1.0, label="target", descend=False):
+    def _stream_twist_toward(
+        self,
+        target_pos,
+        duration=1.0,
+        label="target",
+        descend=False,
+        *,
+        xy_tol=None,
+        z_tol=None,
+    ):
         rate_hz = max(1.0, float(self.pose_cmd_rate_hz))
         dt = 1.0 / rate_hz
         max_linear = self.twist_descend_linear_mps if descend else self.twist_max_linear_mps
+        xy_tol = self.ee_xy_tolerance if xy_tol is None else float(xy_tol)
+        z_tol = self.ee_z_tolerance if z_tol is None else float(z_tol)
         time_limit = max(float(duration), float(self.ee_arrival_timeout_s))
         deadline = time.monotonic() + max(0.5, time_limit)
         last_log = 0.0
@@ -1204,7 +1507,7 @@ class BatchGenerator(Node):
             segment_max = update_max_tracking_error(ee, cmd_pos, segment_max)
             if ee is not None:
                 xy_err, z_err, _ = position_error(ee, target_pos)
-                if xy_err <= self.ee_xy_tolerance and z_err <= self.ee_z_tolerance:
+                if xy_err <= xy_tol and z_err <= z_tol:
                     self.get_logger().info(
                         f'Twist reached {label}: err_xy={xy_err:.3f} err_z={z_err:.3f} '
                         f'segment_track={segment_max:.4f}m'

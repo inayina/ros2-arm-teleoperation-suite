@@ -1,0 +1,6 @@
+/controller_manager:
+  ros__parameters:
+    # 500 Hz is the harmonic A/B candidate: it is an integer multiple of both
+    # MuJoCo's 100 Hz encoder publication and MoveIt Servo's 125 Hz target rate,
+    # while halving the simulated effort/DDS traffic of the 1 kHz baseline.
+    update_rate: 500

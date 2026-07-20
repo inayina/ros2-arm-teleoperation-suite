@@ -98,14 +98,43 @@ def preprocess_rgb(rgb: np.ndarray, torch):
 
 
 class SceneACTRuntime:
-    """Small stateful inference wrapper returning one denormalized action."""
+    """Stateful ACT wrapper that walks the predicted action chunk.
 
-    def __init__(self, checkpoint: Path, device: str) -> None:
+    Training predicts a horizon of ``chunk_size`` actions. Deployment must consume
+    that queue via ``select_action`` (or equivalent). Taking only
+    ``predict_action_chunk(...)[0, 0]`` on every timer tick re-queries step 0 and
+    discards later close/lift steps that already exist in the same chunk.
+
+    ``n_action_steps`` may be set below ``chunk_size`` so the queue empties sooner
+    and ``select_action`` replans from the latest observation (closed-loop approach).
+    """
+
+    def __init__(
+        self,
+        checkpoint: Path,
+        device: str,
+        *,
+        n_action_steps: int | None = None,
+    ) -> None:
         import torch
 
         self.torch = torch
         self.device = device
         self.policy, self.metadata = load_scene_act_checkpoint(checkpoint, device)
+        chunk_size = int(self.metadata['chunk_size'])
+        if n_action_steps is None:
+            steps = chunk_size
+        else:
+            steps = int(n_action_steps)
+            if steps < 1 or steps > chunk_size:
+                raise ValueError(
+                    f'n_action_steps must be in [1, {chunk_size}], got {steps}'
+                )
+        self.policy.config.n_action_steps = steps
+        self.metadata = {
+            **self.metadata,
+            'deploy_n_action_steps': steps,
+        }
         normalization = self.metadata['normalization']
         self.state_mean = torch.tensor(
             normalization['state_mean'], dtype=torch.float32, device=device
@@ -119,7 +148,11 @@ class SceneACTRuntime:
         self.action_std = torch.tensor(
             normalization['action_std'], dtype=torch.float32, device=device
         )
+        self.reset()
 
+    def reset(self) -> None:
+        """Clear the ACT action queue at episode / smoke-run boundaries."""
+        self.policy.reset()
     def infer(self, state: list[float], rgb: np.ndarray) -> list[float]:
         if len(state) != 8:
             raise ValueError(f'expected observation.state[8], got [{len(state)}]')
@@ -133,6 +166,9 @@ class SceneACTRuntime:
             SCENE_KEY: image_tensor.unsqueeze(0),
         }
         with self.torch.no_grad():
-            normalized = self.policy.predict_action_chunk(batch)[0, 0]
+            # Walk the queued chunk; only replan when the queue is empty.
+            normalized = self.policy.select_action(batch)
+            if normalized.ndim == 2:
+                normalized = normalized[0]
             action = normalized * self.action_std + self.action_mean
         return action.detach().cpu().to(self.torch.float64).tolist()

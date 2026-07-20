@@ -67,6 +67,18 @@ def test_target_pose_uses_delta_times_current_quaternion_and_workspace():
     ])
 
 
+def test_target_pose_allows_pregrasp_height_when_workspace_floor_is_low():
+    result = action_to_target_pose(
+        [0.35, -0.07, 0.12],
+        [0.0, 0.0, 0.0, 1.0],
+        [0.0, 0.0, -0.06, 0.0, 0.0, 0.0, 1.0],
+        workspace_min=[0.2, -0.4, 0.02],
+        workspace_max=[0.65, 0.4, 0.75],
+    )
+    assert result.position == pytest.approx([0.35, -0.07, 0.06])
+    assert result.workspace_clipped is False
+
+
 def test_local_tool_offset_rotates_with_hand_orientation():
     position, orientation = offset_pose_in_local_frame(
         [1.0, 2.0, 3.0],

@@ -68,6 +68,8 @@ class IsaacPolicyInferenceNode(Node):
         self.declare_parameter('device', 'cuda')
         self.declare_parameter('dry_run', True)
         self.declare_parameter('max_actions', 1)
+        # 0 = use checkpoint chunk_size; >0 = consume/replan every N chunk steps.
+        self.declare_parameter('n_action_steps', 0)
         self.declare_parameter('inference_rate_hz', 2.0)
         self.declare_parameter('command_rate_hz', 50.0)
         self.declare_parameter('observation_timeout_s', 0.5)
@@ -77,7 +79,7 @@ class IsaacPolicyInferenceNode(Node):
         self.declare_parameter('max_rotation_rad', math.radians(2.0))
         self.declare_parameter('max_joint_excursion_rad', 0.25)
         self.declare_parameter('max_ee_excursion_m', 0.03)
-        self.declare_parameter('workspace_min', [0.20, -0.40, 0.15])
+        self.declare_parameter('workspace_min', [0.20, -0.40, 0.02])
         self.declare_parameter('workspace_max', [0.65, 0.40, 0.75])
         self.declare_parameter('output_path', '/tmp/isaac_act_policy_report.json')
 
@@ -86,8 +88,14 @@ class IsaacPolicyInferenceNode(Node):
             raise ValueError(f'checkpoint does not exist: {checkpoint}')
         self._dry_run = bool(self.get_parameter('dry_run').value)
         self._max_actions = int(self.get_parameter('max_actions').value)
-        if self._max_actions <= 0 or self._max_actions > 20:
-            raise ValueError('max_actions must be in [1, 20]')
+        if self._max_actions <= 0 or self._max_actions > 200:
+            raise ValueError('max_actions must be in [1, 200]')
+        n_action_steps_param = int(self.get_parameter('n_action_steps').value)
+        if n_action_steps_param < 0:
+            raise ValueError('n_action_steps must be >= 0 (0 = checkpoint chunk_size)')
+        n_action_steps = (
+            None if n_action_steps_param == 0 else n_action_steps_param
+        )
         inference_rate = float(self.get_parameter('inference_rate_hz').value)
         command_rate = float(self.get_parameter('command_rate_hz').value)
         if inference_rate <= 0.0 or command_rate <= 0.0:
@@ -130,7 +138,16 @@ class IsaacPolicyInferenceNode(Node):
             if not torch.cuda.is_available():
                 raise RuntimeError('device=cuda requested but CUDA is unavailable')
         self.get_logger().info(f'Loading ACT checkpoint on {requested_device}')
-        self._runtime = SceneACTRuntime(checkpoint, requested_device)
+        self._runtime = SceneACTRuntime(
+            checkpoint, requested_device, n_action_steps=n_action_steps
+        )
+        self.get_logger().info(
+            'ACT deploy n_action_steps='
+            f'{self._runtime.metadata.get("deploy_n_action_steps")} '
+            f'(chunk_size={self._runtime.metadata.get("chunk_size")})'
+        )
+        # One smoke / episode boundary: clear any leftover chunk queue.
+        self._runtime.reset()
 
         self._lock = threading.Lock()
         self._observations: dict[str, tuple[float, object]] = {}
@@ -225,6 +242,9 @@ class IsaacPolicyInferenceNode(Node):
         self._error = f'execution guard: {reason}'
         self._finished_at = time.monotonic()
         self.get_logger().error(self._error)
+        # Persist immediately: wall-clock timeout can kill the process during
+        # post_action_hold before the lifecycle timer flushes.
+        self._flush_report(finalize=False)
         if self._estop_client.service_is_ready():
             request = TriggerEstop.Request()
             request.reason = f'isaac_act_policy:{reason}'
@@ -436,12 +456,19 @@ class IsaacPolicyInferenceNode(Node):
                 f'ACT action {len(self._actions)}/{self._max_actions}: '
                 f'{latency_ms:.1f} ms, clipped={bounded.clipped}'
             )
+            # Checkpoint partial reports so SIGTERM/timeout still leaves evidence.
+            if len(self._actions) % 10 == 0:
+                self._flush_report(finalize=False)
             if len(self._actions) >= self._max_actions:
                 self._finished_at = time.monotonic()
+                # Flush immediately so long smoke still has report.json if the
+                # ROS context dies during post-action hold / backend teardown.
+                self._flush_report(finalize=False)
         except Exception as error:
             self._error = f'{type(error).__name__}: {error}'
             self._finished_at = time.monotonic()
             self.get_logger().error(self._error)
+            self._flush_report(finalize=False)
         finally:
             self._inference_busy = False
 
@@ -469,18 +496,9 @@ class IsaacPolicyInferenceNode(Node):
          message.pose.orientation.z, message.pose.orientation.w) = orientation
         self._pose_pub.publish(message)
 
-    def _on_lifecycle_timer(self) -> None:
+    def _flush_report(self, *, finalize: bool) -> None:
+        """Persist the ACT smoke report; safe to call more than once."""
         now = time.monotonic()
-        if self._finished_at is None and now - self._started > self._startup_timeout:
-            self._error = 'startup timeout waiting for fresh observations and safety state'
-            self._finished_at = now
-        if self._finished_at is None:
-            return
-        if now - self._finished_at < self._post_action_hold:
-            return
-        if self._shutdown_requested:
-            return
-        self._shutdown_requested = True
         inference_pass = (
             len(self._actions) == self._max_actions
             and (self._error is None or self._execution_guard_reason is not None)
@@ -533,6 +551,7 @@ class IsaacPolicyInferenceNode(Node):
             'final_ee_pose': final_ee_pose,
             'actions': self._actions,
             'elapsed_s': now - self._started,
+            'report_finalized': finalize,
         }
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
         self._output_path.write_text(
@@ -540,6 +559,27 @@ class IsaacPolicyInferenceNode(Node):
         )
         self.get_logger().info(f'ACT_POLICY_REPORT={self._output_path}')
         self.get_logger().info(f"ACT_POLICY_STATUS={report['status']}")
+
+    def _on_lifecycle_timer(self) -> None:
+        now = time.monotonic()
+        # Startup timeout only applies before the first successful inference.
+        # Otherwise a long 20-action run can be marked FAIL after completing.
+        if (
+            self._finished_at is None
+            and len(self._actions) == 0
+            and now - self._started > self._startup_timeout
+        ):
+            self._error = 'startup timeout waiting for fresh observations and safety state'
+            self._finished_at = now
+            self._flush_report(finalize=False)
+        if self._finished_at is None:
+            return
+        if now - self._finished_at < self._post_action_hold:
+            return
+        if self._shutdown_requested:
+            return
+        self._shutdown_requested = True
+        self._flush_report(finalize=True)
         rclpy.shutdown()
 
     @property

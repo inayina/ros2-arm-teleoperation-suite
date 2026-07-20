@@ -14,6 +14,27 @@ import time
 
 from isaacsim import SimulationApp
 
+from isaac_sim_adapter.object_pose_seed import (
+    parse_object_xy,
+    resolve_red_box_pose,
+    yaw_to_quat_wxyz,
+)
+
+
+NOMINAL_ARM_HOME = (0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785)
+NOMINAL_RED_BOX_POSITION = (0.35, -0.07, 0.025)
+NOMINAL_RED_BOX_SCALE = (0.05, 0.05, 0.05)
+NOMINAL_RED_BOX_MASS_KG = 0.03
+# MuJoCo red_box_geom uses friction ~5.0; Isaac defaults are too slippery for lift.
+NOMINAL_RED_BOX_STATIC_FRICTION = 2.0
+NOMINAL_RED_BOX_DYNAMIC_FRICTION = 1.5
+NOMINAL_RED_BOX_RESTITUTION = 0.0
+NOMINAL_BIN_X = 0.4
+NOMINAL_BIN_Y = (-0.35, 0.35)
+NOMINAL_CAMERA_POSITION = (1.45, -0.55, 1.25)
+# Derived from the MuJoCo scene_camera xyaxes at a 1.5 m look distance.
+NOMINAL_CAMERA_LOOK_AT = (0.365, -0.031, 0.354)
+
 
 def parse_args():
     """Parse the deliberately small P3 scene surface."""
@@ -31,6 +52,18 @@ def parse_args():
     parser.add_argument(
         '--observe-effort-only', action='store_true',
         help='Validate effort traffic without switching or driving arm DOFs',
+    )
+    parser.add_argument(
+        '--object-seed',
+        type=int,
+        default=None,
+        help='Seeded red-box XY in training distribution; omit for nominal pose',
+    )
+    parser.add_argument(
+        '--object-xy',
+        type=str,
+        default='',
+        help='Optional explicit red-box x,y override (meters)',
     )
     return parser.parse_args()
 
@@ -157,7 +190,7 @@ def main() -> None:
         from isaac_sim_adapter.policy_control import offset_pose_in_local_frame
         from isaac_sim_adapter.policy_control import validate_panda_joint_positions
         from isaacsim.core.api import World
-        from isaacsim.core.api.objects import DynamicCuboid
+        from isaacsim.core.api.objects import DynamicCuboid, FixedCuboid
         from isaacsim.core.utils.extensions import enable_extension
         from isaacsim.core.utils.types import ArticulationAction
         from isaacsim.robot.manipulators.examples.franka import Franka
@@ -176,21 +209,83 @@ def main() -> None:
             name='franka',
             end_effector_prim_name='panda_hand',
         ))
+        object_xy_override = parse_object_xy(ARGS.object_xy)
+        red_box_x, red_box_y, red_box_z, red_box_yaw = resolve_red_box_pose(
+            object_seed=ARGS.object_seed,
+            object_xy=object_xy_override,
+            nominal_xyz=NOMINAL_RED_BOX_POSITION,
+        )
+        red_box_position = (red_box_x, red_box_y, red_box_z)
+        red_box_orientation = yaw_to_quat_wxyz(red_box_yaw)
         red_box = world.scene.add(DynamicCuboid(
             prim_path='/World/object_red_box',
             name='object_red_box',
-            position=np.array([0.45, 0.0, 0.04]),
-            scale=np.array([0.06, 0.06, 0.08]),
+            position=np.asarray(red_box_position),
+            scale=np.asarray(NOMINAL_RED_BOX_SCALE),
             color=np.array([0.8, 0.05, 0.05]),
-            mass=0.08,
+            mass=NOMINAL_RED_BOX_MASS_KG,
         ))
+
+        def place_red_box() -> None:
+            red_box.set_world_pose(
+                position=np.asarray(red_box_position, dtype=np.float64),
+                orientation=np.asarray(red_box_orientation, dtype=np.float64),
+            )
+
+        place_red_box()
+
+        # Raise contact friction toward MuJoCo red-box graspability. Without
+        # this, scripted close+lift reaches/grasps in GT but object Δz ≈ 0.
+        try:
+            from isaacsim.core.api.materials.physics_material import PhysicsMaterial
+            red_box_material = PhysicsMaterial(
+                prim_path='/World/PhysicsMaterials/RedBoxMaterial',
+                name='RedBoxMaterial',
+                static_friction=NOMINAL_RED_BOX_STATIC_FRICTION,
+                dynamic_friction=NOMINAL_RED_BOX_DYNAMIC_FRICTION,
+                restitution=NOMINAL_RED_BOX_RESTITUTION,
+            )
+            red_box.apply_physics_material(red_box_material)
+            print(
+                'ISAAC_RED_BOX_FRICTION='
+                f'static={NOMINAL_RED_BOX_STATIC_FRICTION},'
+                f'dynamic={NOMINAL_RED_BOX_DYNAMIC_FRICTION}',
+                flush=True,
+            )
+        except Exception as friction_error:  # noqa: BLE001
+            print(f'ISAAC_RED_BOX_FRICTION_ERROR={friction_error!r}', flush=True)
+
+        def add_bin(name: str, center_y: float) -> None:
+            color = np.array([0.5, 0.5, 0.5])
+            pieces = (
+                ('base', (NOMINAL_BIN_X, center_y, 0.02), (0.20, 0.20, 0.01)),
+                ('side_pos_y', (NOMINAL_BIN_X, center_y + 0.095, 0.035), (0.20, 0.01, 0.06)),
+                ('side_neg_y', (NOMINAL_BIN_X, center_y - 0.095, 0.035), (0.20, 0.01, 0.06)),
+                ('side_pos_x', (NOMINAL_BIN_X + 0.095, center_y, 0.035), (0.01, 0.20, 0.06)),
+                ('side_neg_x', (NOMINAL_BIN_X - 0.095, center_y, 0.035), (0.01, 0.20, 0.06)),
+            )
+            for suffix, position, scale in pieces:
+                world.scene.add(FixedCuboid(
+                    prim_path=f'/World/{name}_{suffix}',
+                    name=f'{name}_{suffix}',
+                    position=np.asarray(position),
+                    scale=np.asarray(scale),
+                    color=color,
+                ))
+
+        add_bin('bin_left', NOMINAL_BIN_Y[0])
+        add_bin('bin_right', NOMINAL_BIN_Y[1])
         rep.functional.create.camera(
-            position=(1.25, 1.0, 1.05),
-            look_at=(0.35, 0.0, 0.25),
+            position=NOMINAL_CAMERA_POSITION,
+            look_at=NOMINAL_CAMERA_LOOK_AT,
             parent='/World',
             name='SceneCamera',
         )
         world.reset()
+        nominal_joint_positions = np.asarray(
+            [*NOMINAL_ARM_HOME, 0.04, 0.04], dtype=np.float32
+        )
+        franka.set_joint_positions(nominal_joint_positions)
         # Match the upstream impedance controller contract: MuJoCo applies
         # robot gravity compensation, so Isaac must do the same while scene
         # objects remain fully dynamic under gravity.
@@ -363,6 +458,23 @@ def main() -> None:
             'robot_gravity_compensation': 'disable_gravity',
             'observe_effort_only': ARGS.observe_effort_only,
             'arm_command_mode': ARGS.arm_command_mode,
+            'object_seed': ARGS.object_seed,
+            'object_xy_override': list(object_xy_override) if object_xy_override else None,
+            'scene_contract': {
+                'arm_home': list(NOMINAL_ARM_HOME),
+                'red_box_position': list(red_box_position),
+                'red_box_yaw_rad': red_box_yaw,
+                'red_box_nominal_position': list(NOMINAL_RED_BOX_POSITION),
+                'red_box_scale': list(NOMINAL_RED_BOX_SCALE),
+                'red_box_mass_kg': NOMINAL_RED_BOX_MASS_KG,
+                'red_box_static_friction': NOMINAL_RED_BOX_STATIC_FRICTION,
+                'red_box_dynamic_friction': NOMINAL_RED_BOX_DYNAMIC_FRICTION,
+                'bin_centers': [
+                    [NOMINAL_BIN_X, value, 0.02] for value in NOMINAL_BIN_Y
+                ],
+                'camera_position': list(NOMINAL_CAMERA_POSITION),
+                'camera_look_at': list(NOMINAL_CAMERA_LOOK_AT),
+            },
         }, sort_keys=True), flush=True)
 
         while SIMULATION_APP.is_running():
@@ -379,11 +491,13 @@ def main() -> None:
                 try:
                     world.reset()
                     franka.disable_gravity()
+                    franka.set_joint_positions(nominal_joint_positions)
                     effort_control_enabled = False
                     position_target = None
                     position_target_pending = False
                     red_box.set_world_pose(
-                        position=np.array([0.45, 0.0, 0.04])
+                        position=np.asarray(red_box_position, dtype=np.float64),
+                        orientation=np.asarray(red_box_orientation, dtype=np.float64),
                     )
                     effort_buffer.complete_reset()
                     effort_buffer.update_state()
@@ -417,13 +531,15 @@ def main() -> None:
                     joint_indices=arm_joint_indices,
                 ))
                 position_target_pending = False
-            if gripper_command_pending:
-                # Use the initialized ParallelGripper interface. A partial
-                # articulation action with explicit finger indices stops the
-                # Isaac 6.0 timeline after arm DOFs switch to effort mode.
-                franka.gripper.set_joint_positions(np.asarray(
-                    [0.04 * gripper_target, 0.04 * gripper_target],
-                    dtype=np.float32,
+            # Hold closed fingers every step via PD apply_action (not hard
+            # set_joint_positions — hard sets teleport through the cube and
+            # eject it). Skip spam while fully open during approach.
+            if gripper_command_pending or gripper_target < 0.95:
+                franka.gripper.apply_action(ArticulationAction(
+                    joint_positions=np.asarray(
+                        [0.04 * gripper_target, 0.04 * gripper_target],
+                        dtype=np.float32,
+                    )
                 ))
                 gripper_command_pending = False
             if effort_decision.status != last_effort_status:

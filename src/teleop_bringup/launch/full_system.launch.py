@@ -43,6 +43,7 @@ def generate_launch_description():
     auto_record_delay_s = LaunchConfiguration("auto_record_delay_s")
     model_path = LaunchConfiguration("model_path")
     randomize = LaunchConfiguration("randomize")
+    randomization_path = LaunchConfiguration("randomization_path")
     headless = LaunchConfiguration("headless")
     scene_use_mujoco_renderer = LaunchConfiguration("scene_use_mujoco_renderer")
     camera_width = LaunchConfiguration("camera_width")
@@ -92,6 +93,7 @@ def generate_launch_description():
                               "isaac_command_forward_rate_hz": isaac_command_forward_rate_hz,
                               "model_path": model_path,
                               "randomize": randomize,
+                              "randomization_path": randomization_path,
                               "headless": headless,
                               "scene_use_mujoco_renderer": scene_use_mujoco_renderer,
                               "camera_width": camera_width,
@@ -182,6 +184,10 @@ def generate_launch_description():
         DeclareLaunchArgument("auto_record_delay_s", default_value="0.0"),
         DeclareLaunchArgument("model_path", default_value="config/models/franka_panda.xml"),
         DeclareLaunchArgument("randomize", default_value="false"),
+        DeclareLaunchArgument(
+            "randomization_path",
+            default_value="config/randomization.yaml",
+        ),
         DeclareLaunchArgument("headless", default_value="false",
                               description="MuJoCo renderer mode; Isaac is started externally"),
         DeclareLaunchArgument("scene_use_mujoco_renderer", default_value="true"),

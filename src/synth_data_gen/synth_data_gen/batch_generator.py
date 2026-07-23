@@ -32,6 +32,8 @@ class BatchGenerator(Node):
         self.declare_parameter('hover_duration', 3.0)
         self.declare_parameter('descend_duration', 2.5)
         self.declare_parameter('close_duration', 1.0)
+        # Open-hold at pick pose before the close edge (grip-timing demos).
+        self.declare_parameter('pre_close_hold', 0.5)
         # 0 = use hover_duration. Longer values emphasize constant-Z XY alignment
         # before hover/descend (XY-align-then-descend demos).
         self.declare_parameter('approach_xy_duration', 0.0)
@@ -87,6 +89,7 @@ class BatchGenerator(Node):
         self.hover_duration = float(self.get_parameter('hover_duration').value)
         self.descend_duration = float(self.get_parameter('descend_duration').value)
         self.close_duration = float(self.get_parameter('close_duration').value)
+        self.pre_close_hold = max(0.0, float(self.get_parameter('pre_close_hold').value))
         approach_xy_duration = float(self.get_parameter('approach_xy_duration').value)
         self.approach_xy_duration = (
             approach_xy_duration if approach_xy_duration > 0.0 else self.hover_duration
@@ -457,6 +460,13 @@ class BatchGenerator(Node):
                             'Pick pose not steady at target after descend/align'
                         )
                         motion_ok = False
+
+            if motion_ok and self.pre_close_hold > 0.0:
+                self.get_logger().info(
+                    f'FSM Phase 2d: Pre-close open hold ({self.pre_close_hold:.2f}s).'
+                )
+                self.pub_grip.publish(Float64(data=1.0))
+                self._publish_motion_hold(pick_p, down_q, duration=self.pre_close_hold)
 
             if motion_ok:
                 # 阶段3：合拢夹爪抓取

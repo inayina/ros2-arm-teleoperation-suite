@@ -59,6 +59,7 @@ def generate_launch_description():
         "model_path": LaunchConfiguration("model_path"),
         "headless": LaunchConfiguration("headless"),
         "randomize": LaunchConfiguration("randomize"),
+        "randomization_path": LaunchConfiguration("randomization_path"),
         "camera_name": LaunchConfiguration("camera_name"),
         "scene_use_mujoco_renderer": LaunchConfiguration("scene_use_mujoco_renderer"),
         "camera_width": LaunchConfiguration("camera_width"),
@@ -106,6 +107,10 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("headless", default_value="false"),
         DeclareLaunchArgument("randomize", default_value="false"),
+        DeclareLaunchArgument(
+            "randomization_path",
+            default_value="config/randomization.yaml",
+        ),
         DeclareLaunchArgument("camera_name", default_value="scene_camera"),
         DeclareLaunchArgument("scene_use_mujoco_renderer", default_value="true"),
         DeclareLaunchArgument("camera_width", default_value="320"),

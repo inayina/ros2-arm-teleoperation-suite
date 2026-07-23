@@ -37,6 +37,10 @@ def generate_launch_description():
         DeclareLaunchArgument("model_path", default_value="config/models/franka_panda.xml"),
         DeclareLaunchArgument("headless", default_value="false"),
         DeclareLaunchArgument("randomize", default_value="false"),
+        DeclareLaunchArgument(
+            "randomization_path",
+            default_value="config/randomization.yaml",
+        ),
         DeclareLaunchArgument("camera_name", default_value="scene_camera"),
         DeclareLaunchArgument("scene_use_mujoco_renderer", default_value="true"),
         DeclareLaunchArgument("camera_width", default_value="320"),
@@ -68,6 +72,7 @@ def generate_launch_description():
                 "model_path": model_path,
                 "headless": LaunchConfiguration("headless"),
                 "randomize": randomize,
+                "randomization_path": LaunchConfiguration("randomization_path"),
                 "contact_debug_enabled": contact_debug_enabled,
                 "contact_debug_period_s": contact_debug_period_s,
                 "grasp_assist_enabled": grasp_assist_enabled,

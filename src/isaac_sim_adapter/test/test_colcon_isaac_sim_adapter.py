@@ -22,3 +22,11 @@ _policy_namespace = runpy.run_path(
 for _name, _value in _policy_namespace.items():
     if _name.startswith('test_') or _name.startswith('Test'):
         globals()[_name] = _value
+
+_adapter_namespace = runpy.run_path(
+    str(Path(__file__).resolve().parents[3] / 'tests/test_policy_adapters.py')
+)
+
+for _name, _value in _adapter_namespace.items():
+    if _name.startswith('test_') or _name.startswith('Test'):
+        globals()[_name] = _value

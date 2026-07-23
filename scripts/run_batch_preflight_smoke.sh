@@ -21,6 +21,8 @@ ENABLE_GRASP_MONITOR="${BATCH_PREFLIGHT_ENABLE_GRASP_MONITOR:-true}"
 ENABLE_TACTILE="${BATCH_PREFLIGHT_ENABLE_TACTILE:-false}"
 SCENE_USE_MUJOCO_RENDERER="${BATCH_PREFLIGHT_SCENE_USE_MUJOCO_RENDERER:-true}"
 WRIST_USE_MUJOCO_RENDERER="${BATCH_PREFLIGHT_WRIST_USE_MUJOCO_RENDERER:-false}"
+ENABLE_WRIST_CAMERA="${BATCH_PREFLIGHT_ENABLE_WRIST_CAMERA:-false}"
+RANDOMIZATION_PATH="${BATCH_PREFLIGHT_RANDOMIZATION_PATH:-config/randomization.yaml}"
 #
 # IMPORTANT: downstream Panda schema expects scene RGB shape [240, 320, 3].
 # The recorder writes image shapes as-is, so we must make the scene camera
@@ -46,7 +48,9 @@ DESCEND_DURATION="${BATCH_PREFLIGHT_DESCEND_DURATION:-4.0}"
 APPROACH_XY_DURATION="${BATCH_PREFLIGHT_APPROACH_XY_DURATION:-0.0}"
 USE_READY_POSE="${BATCH_PREFLIGHT_USE_READY_POSE:-true}"
 CLOSE_DURATION="${BATCH_PREFLIGHT_CLOSE_DURATION:-3.0}"
+PRE_CLOSE_HOLD="${BATCH_PREFLIGHT_PRE_CLOSE_HOLD:-0.5}"
 GRASP_PAUSE="${BATCH_PREFLIGHT_GRASP_PAUSE:-3.0}"
+BATCH_SEED="${BATCH_PREFLIGHT_SEED:-}"
 # Use M7-proven absolute pick offset (docs/M7_GRASP_DEBUGGING.md), not shape sentinel.
 PICK_HEIGHT_OFFSET="${BATCH_PREFLIGHT_PICK_HEIGHT_OFFSET:-0.015}"
 GRIPPER_CLOSE_TARGET="${BATCH_PREFLIGHT_GRIPPER_CLOSE_TARGET:-0.0}"
@@ -243,11 +247,12 @@ setsid ros2 launch teleop_bringup full_system.launch.py \
   camera_height:="${CAMERA_HEIGHT}" \
   camera_rate:="${CAMERA_RATE}" \
   publish_depth:=false \
-  enable_wrist_camera:=false \
+  enable_wrist_camera:="${ENABLE_WRIST_CAMERA}" \
   scene_use_mujoco_renderer:="${SCENE_USE_MUJOCO_RENDERER}" \
   wrist_camera_width:="${WRIST_CAMERA_WIDTH}" \
   wrist_camera_height:="${WRIST_CAMERA_HEIGHT}" \
   wrist_use_mujoco_renderer:="${WRIST_USE_MUJOCO_RENDERER}" \
+  randomization_path:="${RANDOMIZATION_PATH}" \
   enable_tactile:="${ENABLE_TACTILE}" \
   grasp_assist_enabled:="${GRASP_ASSIST}" \
   enable_grasp_monitor:="${ENABLE_GRASP_MONITOR}" \
@@ -321,7 +326,9 @@ for object_name in ${OBJECTS}; do
     -p approach_xy_duration:="${APPROACH_XY_DURATION}" \
     -p use_ready_pose:="${USE_READY_POSE}" \
     -p close_duration:="${CLOSE_DURATION}" \
+    -p pre_close_hold:="${PRE_CLOSE_HOLD}" \
     -p grasp_pause:="${GRASP_PAUSE}" \
+    ${BATCH_SEED:+-p seed:="${BATCH_SEED}"} \
     -p pick_height_offset:="${PICK_HEIGHT_OFFSET}" \
     -p gripper_close_target:="${GRIPPER_CLOSE_TARGET}" \
     -p lift_duration:="${LIFT_DURATION}" \

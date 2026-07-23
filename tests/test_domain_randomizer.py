@@ -198,3 +198,43 @@ class TestDomainRandomizer(unittest.TestCase):
         assert -0.2 <= data.qpos[15] <= 0.2
         assert abs(data.qpos[16] - 0.03) < 1e-9
         assert all(v == 0.0 for v in data.qvel[12:18])
+
+    def test_initial_pos_by_object_overrides_range(self):
+        """Per-object XY must win over a shared degenerate range (Phase-1)."""
+        config = {
+            "domain_randomization": {
+                "enabled": True,
+                "seed": 59,
+                "object": {
+                    "mass_range": [0.04, 0.04],
+                    "friction_range": [2.2, 2.2],
+                    "initial_pos_range": {
+                        "x": [0.42, 0.42],
+                        "y": [0.10, 0.10],
+                    },
+                    "initial_pos_by_object": {
+                        "object_red_box": [0.42, 0.10],
+                        "object_blue_cylinder": [0.52, -0.14],
+                        "object_green_sphere": [0.52, 0.14],
+                    },
+                    "yaw_range_deg_by_object": {
+                        "object_red_box": [0.0, 0.0],
+                        "object_blue_cylinder": [0.0, 0.0],
+                        "object_green_sphere": [0.0, 0.0],
+                    },
+                },
+            }
+        }
+        randomizer = DomainRandomizer(config)
+        model = MockModel()
+        data = MockData()
+        mujoco = MockMujoco()
+        mujoco.mj_forward = MagicMock()
+        randomizer.apply(model, data, mujoco)
+
+        assert abs(data.qpos[0] - 0.42) < 1e-9
+        assert abs(data.qpos[1] - 0.10) < 1e-9
+        assert abs(data.qpos[7] - 0.52) < 1e-9
+        assert abs(data.qpos[8] - (-0.14)) < 1e-9
+        assert abs(data.qpos[14] - 0.52) < 1e-9
+        assert abs(data.qpos[15] - 0.14) < 1e-9

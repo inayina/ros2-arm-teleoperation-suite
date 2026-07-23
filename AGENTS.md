@@ -267,7 +267,23 @@ python3 -m project_knowledge.cli impact --base HEAD~1 --head HEAD
 - 已完成真实 Sim2Real；
 - 已实现稳定在线自主抓取；
 - 离线 loss 提升等同于任务成功率提升；
-- 文档中出现的规划功能已经全部实现。
+- 文档中出现的规划功能已经全部实现；
+- LingBot-VLA 为本仓第一后训练策略或已完成 Gate V1；
+- SmolVLA 已适配 Panda / 已完成 VLA 抓取 / 已验证任务成功；
+- SmolVLA S2 接口 Pass 等同于可进入 Isaac 或 S3 LoRA；
+- SmolVLA **S3 Ready** / **S3 Hold** 等同于已完成 LoRA / 任务成功 / 可进 Isaac。
+
+**VLA / 评测接力硬禁止（防 Codex 误推进）**：
+
+- 不得自动恢复 LingBot Gate V1；
+- 不得下载 LingBot 6B 权重；
+- 不得把 55-D 通道切片视为 Panda 执行映射；
+- 不得因 SmolVLA S2 接口 Pass、S3 Ready 或 S3 Hold 而进入 Isaac；
+- SmolVLA S3 任何继续修复 / 重训需要显式人工批准和外部 GPU；`max_data_fix_retries: 1` **已用尽**；未过 open-loop Pass 不得进 S4；
+- ACT 保持冻结诊断基线，不继续盲目训练；
+- 当前优先事项见中游 `docs/SMOLVLA_GATE_S3_READY.md`（**S3 Hold**；v1 α64 open-loop Hold；默认停止；未过 Pass 不得进 Isaac）。
+
+权威路线表：中游 `robot-arm-episode-data-lab/docs/portfolio/THREE_REPO_CANONICAL_FACTS.md`「VLA 候选路线状态」。
 
 Legacy PyBullet/KUKA 实现不得与 Panda 主线混用。
 

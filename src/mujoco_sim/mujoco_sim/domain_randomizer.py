@@ -89,7 +89,15 @@ class DomainRandomizer:
                 z_rest = float(obj_cfg.get("box_initial_z", 0.025))
 
             x, y = fallback_xy.get(obj_name, (0.43, 0.0))
-            if x_range and y_range:
+            pos_by_object = obj_cfg.get("initial_pos_by_object", {})
+            if isinstance(pos_by_object, dict) and obj_name in pos_by_object:
+                fixed = pos_by_object[obj_name]
+                if not isinstance(fixed, (list, tuple)) or len(fixed) != 2:
+                    raise ValueError(
+                        f"initial_pos_by_object[{obj_name}] must be [x, y]"
+                    )
+                x, y = float(fixed[0]), float(fixed[1])
+            elif x_range and y_range:
                 placed = False
                 for _ in range(100):
                     cand_x = random.uniform(x_range[0], x_range[1])
@@ -108,6 +116,7 @@ class DomainRandomizer:
                             x = min(x_range[1], max(x_range[0], x + 0.12))
                             y = min(y_range[1], max(y_range[0], y - 0.08))
                             break
+
 
             data.qpos[qpos_adr] = x
             data.qpos[qpos_adr + 1] = y

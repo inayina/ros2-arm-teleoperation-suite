@@ -1,9 +1,11 @@
 domain_randomization:
   enabled: true
-  # Seed 52/53: align→close→lift 阶段补采（validation_mode=lift，短 descend）。
+  # Seed 56/57: SmolVLA S3 Round-2 grip-timing 定向补采。
+  # Seed 54/55: SmolVLA S3 grip-timing补采（validation_mode=lift，pre_close open hold，sharp close）。
+  # Seed 52/53 closelift 已冻结进 smolvla_s3_abs_eef_rgb_v0；勿覆盖。
   # 禁止再扩普通下降包（46/47）或同类 XY-align 量（48–51）。
   # Seeds 42–47 remain the existing 30 accepted episodes (descend pack).
-  seed: 53
+  seed: 57
   camera:
     scene_camera:
       pos_noise: [-0.05, 0.05]   # xyz offset range (m)

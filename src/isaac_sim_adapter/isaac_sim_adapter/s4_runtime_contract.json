@@ -1,0 +1,27 @@
+{
+  "action_dim": 8,
+  "camera_key": "observation.images.scene",
+  "chunk_size": 10,
+  "claims_sim2real": false,
+  "claims_task_success": false,
+  "contract_version": "smolvla_s3_s4_runtime_v0",
+  "control_rate_hz": 10.0,
+  "gripper_max": 1.0,
+  "gripper_min": 0.0,
+  "image_height": 240,
+  "image_width": 320,
+  "n_action_steps": 5,
+  "policy_action_semantics": "absolute_eef_gripper_v0",
+  "replan_period_s": 0.5,
+  "state_dim": 15,
+  "workspace_max": [
+    0.65,
+    0.4,
+    0.75
+  ],
+  "workspace_min": [
+    0.2,
+    -0.4,
+    0.02
+  ]
+}

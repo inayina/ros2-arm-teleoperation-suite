@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 
 from isaacsim import SimulationApp
@@ -18,6 +19,11 @@ from isaac_sim_adapter.object_pose_seed import (
     parse_object_xy,
     resolve_red_box_pose,
     yaw_to_quat_wxyz,
+)
+from isaac_sim_adapter.offline_assets import (
+    franka_offline_download_hint,
+    resolve_franka_usd_path,
+    validate_franka_usd_path,
 )
 
 
@@ -34,6 +40,9 @@ NOMINAL_BIN_Y = (-0.35, 0.35)
 NOMINAL_CAMERA_POSITION = (1.45, -0.55, 1.25)
 # Derived from the MuJoCo scene_camera xyaxes at a 1.5 m look distance.
 NOMINAL_CAMERA_LOOK_AT = (0.365, -0.031, 0.354)
+# Local FixedCuboid ground (top face at z=0); avoids Nucleus default_environment.usd.
+NOMINAL_GROUND_POSITION = (0.0, 0.0, -0.05)
+NOMINAL_GROUND_SCALE = (5.0, 5.0, 0.1)
 
 
 def parse_args():
@@ -64,6 +73,15 @@ def parse_args():
         type=str,
         default='',
         help='Optional explicit red-box x,y override (meters)',
+    )
+    parser.add_argument(
+        '--franka-usd',
+        type=str,
+        default='',
+        help=(
+            'Local or remote Franka USD path (skips Nucleus for the robot). '
+            'Falls back to env ISAAC_FRANKA_USD when empty.'
+        ),
     )
     return parser.parse_args()
 
@@ -203,12 +221,42 @@ def main() -> None:
             SIMULATION_APP.update()
 
         world = World(stage_units_in_meters=1.0, backend='numpy', device='cpu')
-        world.scene.add_default_ground_plane()
-        franka = world.scene.add(Franka(
-            prim_path='/World/Franka',
-            name='franka',
-            end_effector_prim_name='panda_hand',
+        # Local cuboid ground — do not call add_default_ground_plane() (Nucleus).
+        world.scene.add(FixedCuboid(
+            prim_path='/World/Ground',
+            name='ground',
+            position=np.asarray(NOMINAL_GROUND_POSITION),
+            scale=np.asarray(NOMINAL_GROUND_SCALE),
+            color=np.array([0.35, 0.35, 0.35]),
         ))
+        print('ISAAC_GROUND=local_fixed_cuboid', flush=True)
+
+        franka_usd = resolve_franka_usd_path(ARGS.franka_usd)
+        franka_kwargs = {
+            'prim_path': '/World/Franka',
+            'name': 'franka',
+            'end_effector_prim_name': 'panda_hand',
+        }
+        if franka_usd:
+            franka_usd = validate_franka_usd_path(franka_usd)
+            franka_kwargs['usd_path'] = franka_usd
+            print(f'ISAAC_FRANKA_USD={franka_usd}', flush=True)
+        else:
+            print(
+                'ISAAC_FRANKA_USD_MISSING=1 '
+                '(Franka() will call get_assets_root_path / Nucleus; '
+                'set --franka-usd or ISAAC_FRANKA_USD for offline)',
+                flush=True,
+            )
+            print(franka_offline_download_hint(), flush=True)
+            if os.environ.get('ISAAC_REQUIRE_LOCAL_FRANKA', '').strip() in {
+                '1', 'true', 'TRUE', 'yes', 'YES',
+            }:
+                raise RuntimeError(
+                    'ISAAC_REQUIRE_LOCAL_FRANKA is set but no local Franka USD '
+                    'was provided via --franka-usd / ISAAC_FRANKA_USD'
+                )
+        franka = world.scene.add(Franka(**franka_kwargs))
         object_xy_override = parse_object_xy(ARGS.object_xy)
         red_box_x, red_box_y, red_box_z, red_box_yaw = resolve_red_box_pose(
             object_seed=ARGS.object_seed,
@@ -460,6 +508,8 @@ def main() -> None:
             'arm_command_mode': ARGS.arm_command_mode,
             'object_seed': ARGS.object_seed,
             'object_xy_override': list(object_xy_override) if object_xy_override else None,
+            'franka_usd': franka_usd,
+            'ground': 'local_fixed_cuboid',
             'scene_contract': {
                 'arm_home': list(NOMINAL_ARM_HOME),
                 'red_box_position': list(red_box_position),
@@ -474,6 +524,8 @@ def main() -> None:
                 ],
                 'camera_position': list(NOMINAL_CAMERA_POSITION),
                 'camera_look_at': list(NOMINAL_CAMERA_LOOK_AT),
+                'ground_position': list(NOMINAL_GROUND_POSITION),
+                'ground_scale': list(NOMINAL_GROUND_SCALE),
             },
         }, sort_keys=True), flush=True)
 

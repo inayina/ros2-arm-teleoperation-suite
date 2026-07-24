@@ -103,6 +103,9 @@ fi
 if [[ -n "${OBJECT_XY}" ]]; then
   backend_args+=(--object-xy "${OBJECT_XY}")
 fi
+if [[ -n "${ISAAC_FRANKA_USD:-}" ]]; then
+  backend_args+=(--franka-usd "${ISAAC_FRANKA_USD}")
+fi
 
 timeout "$((BACKEND_DURATION_SEC + 30))s" "${ISAAC_PYTHON}" \
   "${REPO_ROOT}/src/isaac_sim_adapter/scripts/isaac_panda_backend.py" \

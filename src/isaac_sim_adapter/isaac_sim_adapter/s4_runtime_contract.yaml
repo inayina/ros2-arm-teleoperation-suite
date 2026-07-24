@@ -1,0 +1,21 @@
+# SmolVLA S4 runtime contract (single-source).
+# Authoritative values live in training/smolvla_s3/runtime_s4.py::S4RuntimeContract.
+# Upstream Isaac path loads a byte-identical copy and asserts at startup.
+# Does NOT claim task success / Sim2Real / authorize seed expansion.
+contract_version: smolvla_s3_s4_runtime_v0
+policy_action_semantics: absolute_eef_gripper_v0
+chunk_size: 10
+n_action_steps: 5
+control_rate_hz: 10.0
+replan_period_s: 0.5
+state_dim: 15
+action_dim: 8
+gripper_min: 0.0
+gripper_max: 1.0
+workspace_min: [0.20, -0.40, 0.02]
+workspace_max: [0.65, 0.40, 0.75]
+image_height: 240
+image_width: 320
+camera_key: observation.images.scene
+claims_task_success: false
+claims_sim2real: false

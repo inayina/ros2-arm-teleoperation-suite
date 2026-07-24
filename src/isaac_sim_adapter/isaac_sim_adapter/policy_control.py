@@ -152,6 +152,58 @@ def quaternion_multiply(
     ))
 
 
+def bound_absolute_eef_gripper(
+    values: Sequence[float],
+    *,
+    workspace_min: Sequence[float],
+    workspace_max: Sequence[float],
+) -> BoundedAction:
+    """Validate SmolVLA absolute ``ee_pose_gripper[8]`` and clamp to workspace.
+
+    Layout: ``xyz[3] + quat_xyzw[4] + gripper_cmd[1]``. Gripper is always
+    clipped to ``[0, 1]`` to match eval-gate-v3 execution semantics. Quaternion
+    is renormalized; hemisphere is not flipped here (policy owns sign).
+    """
+    if len(values) != 8:
+        raise ValueError(f'expected absolute ee_pose_gripper[8], got [{len(values)}]')
+    if len(workspace_min) != 3 or len(workspace_max) != 3:
+        raise ValueError('workspace bounds must have three components')
+    action = tuple(float(value) for value in values)
+    if not all(math.isfinite(value) for value in action):
+        raise ValueError('absolute policy action contains NaN or infinity')
+    minimum = tuple(float(value) for value in workspace_min)
+    maximum = tuple(float(value) for value in workspace_max)
+    if any(low >= high for low, high in zip(minimum, maximum)):
+        raise ValueError('workspace min must be below workspace max')
+
+    clipped_xyz = tuple(
+        max(minimum[index], min(maximum[index], action[index]))
+        for index in range(3)
+    )
+    quat = normalize_quaternion(action[3:7])
+    grip, grip_clipped = bound_gripper_command(action[7])
+    result = (*clipped_xyz, *quat, grip)
+    workspace_or_grip_clipped = clipped_xyz != action[:3] or grip_clipped
+    return BoundedAction(values=result, clipped=workspace_or_grip_clipped)
+
+
+def absolute_action_to_target_pose(
+    bounded_action: Sequence[float],
+) -> TargetPose:
+    """Convert a bounded absolute ``ee_pose_gripper[8]`` into a TargetPose."""
+    if len(bounded_action) != 8:
+        raise ValueError('bounded absolute action must have eight components')
+    position = tuple(float(value) for value in bounded_action[:3])
+    orientation = normalize_quaternion(bounded_action[3:7])
+    if not all(math.isfinite(value) for value in position):
+        raise ValueError('absolute target position contains NaN or infinity')
+    return TargetPose(
+        position=position,
+        orientation_xyzw=orientation,
+        workspace_clipped=False,
+    )
+
+
 def action_to_target_pose(
     current_position: Sequence[float],
     current_orientation_xyzw: Sequence[float],

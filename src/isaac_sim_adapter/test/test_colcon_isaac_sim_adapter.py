@@ -30,3 +30,22 @@ _adapter_namespace = runpy.run_path(
 for _name, _value in _adapter_namespace.items():
     if _name.startswith('test_') or _name.startswith('Test'):
         globals()[_name] = _value
+
+_runtime_namespace = runpy.run_path(
+    str(Path(__file__).resolve().parents[3] / 'tests/test_policy_runtime_m1.py')
+)
+
+for _name, _value in _runtime_namespace.items():
+    if _name.startswith('test_') or _name.startswith('Test'):
+        globals()[_name] = _value
+
+_execution_namespace = runpy.run_path(
+    str(
+        Path(__file__).resolve().parents[3]
+        / 'tests/test_policy_execution_adapter_m2.py'
+    )
+)
+
+for _name, _value in _execution_namespace.items():
+    if _name.startswith('test_') or _name.startswith('Test'):
+        globals()[_name] = _value

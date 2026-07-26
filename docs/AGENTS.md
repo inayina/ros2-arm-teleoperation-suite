@@ -62,7 +62,23 @@ Canonical 总览：中游仓 `robot-arm-episode-data-lab/AGENTS.md` V2.1。
 
 ---
 
-## 5. 默认 Launch 约束（训练级批采）
+## 5. Policy Runtime M1–M6（默认 legacy）
+
+- **合同来源**：中游 `panda_policy_runtime_v1` SHA lock。
+- **消息**：`teleop_interfaces/{PolicyCommand,PolicyExecutionReport,TaskEvaluationStatus}`。
+- **实现**：`isaac_sim_adapter/policy_runtime.py`（Backend、Lifecycle、native chunk10 / K5 Scheduler）、`policy_execution_adapter.py`（absolute EEF8 / delta EEF7 shadow 裁决）与 `policy_runtime_ros.py`（QoS、command/health/report ROS 映射）。
+- **接入**：`smolvla_policy_inference_node.py` 参数 `execution_adapter_mode=legacy|shadow|authoritative`，默认 `legacy`；旧 `policy_runtime_shadow_enabled` 仅保留兼容。
+- **已实现输出**：开启且 `dry_run=true` 后发布 shadow `/policy/command`、`/policy/runtime_health` 与 `/policy/execution_report`；M2 节点拒绝 shadow + 非 dry-run 组合。
+- **Task GT live mirror**：canonical Isaac/MuJoCo continuous GT recorder 发布 `/task/evaluation_status`；等待 privileged object pose 时为 `UNAVAILABLE`，运行中为 `RUNNING`，结束发布 `PASS/FAIL`，且 `risk_may_override=false`。
+- **已验证**：canonical S4 已有 telemetry 750 actions 的 bounded/clip parity；CPU、schema 与 mock ROS report tests 通过。
+- **M4 已实现**：订阅 `/policy/runtime_hold`；R2 清 queue 并在 authoritative 模式保持当前位置，R3 清 queue 并服从 safety latch；authoritative 模式在首个目标前检查 pose/gripper publisher count。
+- **M6 已验证**：mock PolicyBackend 的真实 ROS/DDS wiring 已完成 RUN→R2 Hold→R3 E-stop 与 HOC trace；health 现显式携带 `last_command_sequence`、`trace_run_id`、`episode_id`，避免跨 topic 到达顺序造成误关联。
+- **当前限制**：authoritative 只完成代码与 mock contract，未执行在线切流；在线 async double buffer 仍未实现。
+- **执行权威**：默认 `legacy`，旧 `/teleop/cmd_pose` 与 `/teleop/gripper_cmd` 路径保持不变；不得把 authoritative 可选代码路径写成已经在线接管或任务成功。
+
+---
+
+## 6. 默认 Launch 约束（训练级批采）
 
 `teleop_bringup/full_system.launch.py` 默认：
 
@@ -81,7 +97,7 @@ Validation：`scripts/validate_dataset.py data/episodes --min-frames 5`
 
 ---
 
-## 6. 本仓不负责
+## 7. 本仓不负责
 
 - Schema 适配、release、策略训练（中游）
 - PyBullet policy replay（下游）
@@ -90,7 +106,7 @@ Validation：`scripts/validate_dataset.py data/episodes --min-frames 5`
 
 ---
 
-## 7. Project Evidence Agent 集成
+## 8. Project Evidence Agent 集成
 
 Project Evidence Agent 的 registry、检索、audit 和 impact 核心由中游
 `robot-arm-episode-data-lab/project_knowledge/` 维护；本仓只提供薄入口，不重复实现知识检索逻辑。

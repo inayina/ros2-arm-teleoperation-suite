@@ -11,14 +11,13 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from pathlib import Path
+import tempfile
 from typing import Any, Sequence
-
-import numpy as np
 
 from isaac_sim_adapter.s4_runtime_contract import assert_runtime_matches_contract
 from isaac_sim_adapter.s4_runtime_contract import load_s4_runtime_contract
+import numpy as np
 
 DEFAULT_TASK = 'pick up the red box and place it in the left bin\n'
 _S4_CONTRACT = load_s4_runtime_contract()
@@ -246,3 +245,59 @@ class SceneSmolVLARuntime:
                 f'expected action[{want_action}], got {values.shape[0]}'
             )
         return [float(v) for v in values[:want_action]]
+
+    def predict_chunk(
+        self,
+        state15: Sequence[float],
+        rgb_uint8: np.ndarray,
+        *,
+        task: str | None = None,
+    ) -> list[list[float]]:
+        """Return the native postprocessed SmolVLA action chunk."""
+        state = np.asarray(state15, dtype=np.float32).reshape(-1)
+        want_state = int(self.metadata['state_dim'])
+        want_action = int(self.metadata['action_dim'])
+        if state.shape[0] != want_state:
+            raise ValueError(f'expected state[{want_state}], got {state.shape}')
+        img = rgb_uint8_to_chw01(rgb_uint8, IMAGE_HW[0], IMAGE_HW[1])
+        instruction = self.task if task is None else (
+            task if task.endswith('\n') else f'{task}\n'
+        )
+        batch = self.preprocess({
+            'observation.state': self.torch.from_numpy(state).unsqueeze(0),
+            SCENE_IMAGE_KEY: self.torch.from_numpy(img).unsqueeze(0),
+            'task': [instruction],
+        })
+        with self.torch.inference_mode():
+            if hasattr(self.policy, 'predict_action_chunk'):
+                chunk = self.policy.predict_action_chunk(batch)
+            elif hasattr(self.policy, 'base_model') and hasattr(
+                self.policy.base_model, 'predict_action_chunk'
+            ):
+                chunk = self.policy.base_model.predict_action_chunk(batch)
+            else:
+                raise RuntimeError('SmolVLA policy lacks predict_action_chunk')
+            if self.postprocess is not None:
+                try:
+                    chunk = self.postprocess(chunk)
+                except Exception:
+                    steps = [
+                        self.postprocess(chunk[:, index, :])
+                        for index in range(chunk.shape[1])
+                    ]
+                    chunk = self.torch.stack(steps, dim=1)
+        values = chunk.detach().float().cpu().numpy()
+        if values.ndim == 3:
+            values = values[0]
+        expected_chunk = int(self.metadata['chunk_size'])
+        if values.ndim != 2 or values.shape[0] < expected_chunk:
+            raise ValueError(
+                f'expected chunk[{expected_chunk}, {want_action}], got '
+                f'{values.shape}'
+            )
+        if values.shape[1] < want_action:
+            raise ValueError(f'expected action[{want_action}], got {values.shape}')
+        return [
+            [float(value) for value in values[index, :want_action]]
+            for index in range(expected_chunk)
+        ]

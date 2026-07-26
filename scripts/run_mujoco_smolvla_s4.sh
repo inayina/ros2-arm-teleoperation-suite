@@ -1,36 +1,30 @@
 #!/usr/bin/env bash
-# Bounded SmolVLA Recovery-v3 → Isaac S4 (≤5 seeds).
-# Closed-loop abs-EEF via smolvla_policy_inference_node + ActionChunk K=5.
-# Lift success is ContinuousTaskEvaluator GT only; never claim Sim2Real.
-#
-# Required local Franka USD (offline / weak Nucleus):
-#   export ISAAC_FRANKA_USD=$HOME/isaac_assets/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd
-#   export ISAAC_REQUIRE_LOCAL_FRANKA=1
+# Bounded SmolVLA Recovery-v3 → MuJoCo closed-loop H2 control (≤5 seeds).
+# Same ckpt / ContinuousTaskEvaluator / seeds 1–5 as Isaac S4; train-domain backend.
+# Lift success is ContinuousTaskEvaluator GT only; never claim Sim2Real / task success.
 set -euo pipefail
 
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly MIDSTREAM="${MIDSTREAM:-/home/ina/robot-sim-lab/robot-arm-episode-data-lab}"
 readonly DATE_TAG="${DATE_TAG:-$(date +%Y%m%dT%H%M%SZ)}"
-readonly SUITE_OUT="${1:-${MIDSTREAM}/evidence/smolvla_s4_bounded5_${DATE_TAG}}"
-readonly ISAAC_PYTHON="${ISAAC_PYTHON:-/home/ina/isaacsim/.venv/bin/python}"
+readonly SUITE_OUT="${1:-${MIDSTREAM}/evidence/smolvla_s4_mujoco_bounded5_${DATE_TAG}}"
 readonly POLICY_PYTHON="${POLICY_PYTHON:-/home/ina/miniforge3/envs/lerobot/bin/python}"
 readonly SEEDS="${SEEDS:-1 2 3 4 5}"
 readonly ARM_COMMAND_MODE="${ARM_COMMAND_MODE:-position}"
-readonly BACKEND_DURATION_SEC="${BACKEND_DURATION_SEC:-180}"
-readonly POLICY_RUNTIME_TIMEOUT_S="${POLICY_RUNTIME_TIMEOUT_S:-140}"
-readonly POLICY_STARTUP_TIMEOUT_S="${POLICY_STARTUP_TIMEOUT_S:-90}"
+# MuJoCo EGL + SmolVLA share the laptop GPU; chunk replans often take 7–13s.
+# Keep K=5 for Isaac parity; give wall-clock headroom for 30 replans.
+readonly POLICY_RUNTIME_TIMEOUT_S="${POLICY_RUNTIME_TIMEOUT_S:-900}"
+readonly POLICY_STARTUP_TIMEOUT_S="${POLICY_STARTUP_TIMEOUT_S:-120}"
 readonly MAX_ACTIONS="${MAX_ACTIONS:-150}"
 readonly N_ACTION_STEPS="${N_ACTION_STEPS:-5}"
 readonly INFERENCE_RATE_HZ="${INFERENCE_RATE_HZ:-10.0}"
-readonly BASE_ROS_DOMAIN_ID="${BASE_ROS_DOMAIN_ID:-130}"
+readonly BASE_ROS_DOMAIN_ID="${BASE_ROS_DOMAIN_ID:-140}"
 readonly RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
-# Default off on ~6GB laptop VRAM.
 readonly RECORD_SCENE_VIDEO="${RECORD_SCENE_VIDEO:-false}"
-# Attribution telemetry: dump policy-input camera frames + observations.jsonl.
-# Defaults on when RECORD_SCENE_VIDEO=true (H1/H3 re-run path).
-readonly DUMP_TELEMETRY="${DUMP_TELEMETRY:-${RECORD_SCENE_VIDEO}}"
+# H2 attribution: dump policy-input camera + observations by default.
+readonly DUMP_TELEMETRY="${DUMP_TELEMETRY:-true}"
 readonly CAMERA_DUMP_STRIDE="${CAMERA_DUMP_STRIDE:-1}"
-readonly EVALUATION_RUN_ID="${EVALUATION_RUN_ID:-smolvla_s4_bounded5_${DATE_TAG}}"
+readonly EVALUATION_RUN_ID="${EVALUATION_RUN_ID:-smolvla_s4_mujoco_bounded5_${DATE_TAG}}"
 readonly EVALUATION_MODEL_ID="${EVALUATION_MODEL_ID:-smolvla_recovery_v3}"
 readonly LIFT_SUCCESS_DELTA="${LIFT_SUCCESS_DELTA:-0.03}"
 readonly GRIPPER_CLOSE_MAX="${GRIPPER_CLOSE_MAX:-0.70}"
@@ -43,27 +37,33 @@ readonly WORKSPACE_MAX="${WORKSPACE_MAX:-0.65,0.40,0.75}"
 readonly MAX_JOINT_EXCURSION_RAD="${MAX_JOINT_EXCURSION_RAD:-3.0}"
 readonly MAX_EE_EXCURSION_M="${MAX_EE_EXCURSION_M:-0.55}"
 readonly TASK="${TASK:-pick up the red box and place it in the left bin}"
+readonly PARK_BLUE_X="${PARK_BLUE_X:-0.52}"
+readonly PARK_BLUE_Y="${PARK_BLUE_Y:--0.14}"
+readonly PARK_GREEN_X="${PARK_GREEN_X:-0.52}"
+readonly PARK_GREEN_Y="${PARK_GREEN_Y:-0.14}"
+readonly MUJOCO_GL="${MUJOCO_GL:-egl}"
 
 readonly LORA_DIR="${LORA_DIR:-${MIDSTREAM}/runs/smolvla_s3/recovery_v3_lora_20260723T125632Z/lerobot_run/checkpoints/005705/pretrained_model}"
 readonly BASE_DIR="${BASE_DIR:-${MIDSTREAM}/checkpoints/smolvla_base_gate_s1}"
 readonly VLM_DIR="${VLM_DIR:-${MIDSTREAM}/checkpoints/SmolVLM2-500M-Video-Instruct}"
 
 export RMW_IMPLEMENTATION
-export ISAAC_REQUIRE_LOCAL_FRANKA="${ISAAC_REQUIRE_LOCAL_FRANKA:-1}"
-if [[ -z "${ISAAC_FRANKA_USD:-}" ]]; then
-  export ISAAC_FRANKA_USD="${HOME}/isaac_assets/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd"
-fi
+export MUJOCO_GL
 
-if [[ ! -x "${ISAAC_PYTHON}" || ! -x "${POLICY_PYTHON}" ]]; then
-  echo "Isaac or policy Python is not executable" >&2
+if [[ ! -x "${POLICY_PYTHON}" ]]; then
+  echo "Policy Python is not executable: ${POLICY_PYTHON}" >&2
   exit 2
 fi
 if [[ ! -d "${LORA_DIR}" ]]; then
   echo "LoRA checkpoint missing: ${LORA_DIR}" >&2
   exit 2
 fi
-if [[ ! -f "${ISAAC_FRANKA_USD}" ]]; then
-  echo "Local Franka USD missing: ${ISAAC_FRANKA_USD}" >&2
+if [[ ! -d "${BASE_DIR}" ]]; then
+  echo "Base checkpoint missing: ${BASE_DIR}" >&2
+  exit 2
+fi
+if [[ ! -d "${VLM_DIR}" ]]; then
+  echo "VLM checkpoint missing: ${VLM_DIR}" >&2
   exit 2
 fi
 if [[ "${ARM_COMMAND_MODE}" == "position" ]]; then
@@ -81,22 +81,76 @@ if [[ "${#SEED_LIST[@]}" -gt 5 ]]; then
   echo "Bounded S4 allows at most 5 seeds; got: ${SEEDS}" >&2
   exit 2
 fi
+if [[ "${#SEED_LIST[@]}" -lt 1 ]]; then
+  echo "SEEDS must contain at least one seed" >&2
+  exit 2
+fi
 
-mkdir -p "${SUITE_OUT}/trials" "${SUITE_OUT}/videos"
+mkdir -p "${SUITE_OUT}/trials" "${SUITE_OUT}/videos" "${SUITE_OUT}/randomization"
 EPISODE_RESULTS_PATH="${SUITE_OUT}/episode_results.jsonl"
 export EPISODE_RESULTS_PATH
 : > "${EPISODE_RESULTS_PATH}"
 
 nuke() {
   "${REPO_ROOT}/scripts/stop_stack.sh" >/dev/null 2>&1 || true
-  pkill -9 -f '[i]saac_panda_backend.py' 2>/dev/null || true
   pkill -9 -f '[s]molvla_policy_inference_node' 2>/dev/null || true
-  pkill -9 -f '[i]saac_scene_video_recorder' 2>/dev/null || true
   pkill -9 -f '[i]saac_continuous_gt_recorder' 2>/dev/null || true
+  pkill -9 -f '[i]saac_scene_video_recorder' 2>/dev/null || true
   pkill -9 -f '[t]eleop_bringup' 2>/dev/null || true
+  pkill -9 -f '[m]ujoco_sim' 2>/dev/null || true
   pkill -9 -f '[s]ervo_node' 2>/dev/null || true
   pkill -9 -f '[r]os2_control' 2>/dev/null || true
   sleep 2
+}
+
+write_seed_yaml() {
+  local out_yaml="$1"
+  local seed="$2"
+  PYTHONPATH="${REPO_ROOT}/src/isaac_sim_adapter:${PYTHONPATH:-}" \
+    "${POLICY_PYTHON}" - "${out_yaml}" "${seed}" \
+    "${PARK_BLUE_X}" "${PARK_BLUE_Y}" "${PARK_GREEN_X}" "${PARK_GREEN_Y}" <<'PY'
+import math
+import sys
+from pathlib import Path
+
+from isaac_sim_adapter.object_pose_seed import sample_red_box_pose
+
+out, seed_s, bx, by, gx, gy = sys.argv[1:7]
+seed = int(seed_s)
+x, y, _z, yaw = sample_red_box_pose(seed)
+yaw_deg = math.degrees(yaw)
+text = f"""domain_randomization:
+  enabled: true
+  # MuJoCo H2 control: pin red-box XY/yaw to Isaac sample_red_box_pose(seed).
+  # Camera/lighting DR off (zero noise). Distractors parked clear of workspace.
+  seed: {seed}
+  camera:
+    scene_camera:
+      pos_noise: [0.0, 0.0]
+      rot_noise: [0.0, 0.0]
+  object:
+    sphere_initial_z: 0.03
+    mass_range: [0.04, 0.04]
+    friction_range: [2.2, 2.2]
+    box_initial_z: 0.025
+    cylinder_initial_z: 0.03
+    sphere_friction_min: 4.0
+    sphere_friction_max: 6.0
+    initial_pos_by_object:
+      object_red_box: [{x:.8f}, {y:.8f}]
+      object_blue_cylinder: [{float(bx):.8f}, {float(by):.8f}]
+      object_green_sphere: [{float(gx):.8f}, {float(gy):.8f}]
+    yaw_range_deg_by_object:
+      object_red_box: [{yaw_deg:.8f}, {yaw_deg:.8f}]
+      object_blue_cylinder: [0.0, 0.0]
+      object_green_sphere: [0.0, 0.0]
+  lighting:
+    key:
+      diffuse_noise: [0.0, 0.0]
+"""
+Path(out).write_text(text, encoding="utf-8")
+print(f"seed={seed} red_xy=({x:.6f},{y:.6f}) yaw_deg={yaw_deg:.4f} → {out}")
+PY
 }
 
 python3 - "${SUITE_OUT}" "${EVALUATION_RUN_ID}" "${SEEDS}" \
@@ -110,17 +164,18 @@ out, run_id, seeds_text, lora, base, vlm, fixture = sys.argv[1:8]
 out = Path(out)
 seeds = [int(x) for x in seeds_text.split()]
 suite = {
-    "suite_id": "smolvla_s4_bounded5",
+    "suite_id": "smolvla_s4_mujoco_bounded5",
     "suite_version": "0.1.0",
     "description": (
-        "Bounded SmolVLA Recovery-v3 Isaac S4 closed-loop abs-EEF "
-        "(≤5 seeds; lift GT via ContinuousTaskEvaluator)."
+        "Bounded SmolVLA Recovery-v3 MuJoCo H2 closed-loop abs-EEF "
+        "(≤5 seeds; same GT as Isaac S4; train-domain control)."
     ),
     "scene_id": "panda_pick_place_v1",
     "seeds": seeds,
     "protocol_id": "smolvla_s4_abs_eef_closed_loop",
     "status": "runtime_diagnostic",
     "validation_mode": "lift",
+    "backend": "mujoco",
     "checkpoint": {
         "lora_dir": lora,
         "base_dir": base,
@@ -134,6 +189,7 @@ suite = {
         "gripper_command": "clip(raw, 0, 1)",
         "cameras": "scene-only",
         "state": "observation.state[15]",
+        "object_placement": "sample_red_box_pose(seed) via randomization.yaml",
     },
     "claims_task_success": False,
     "claims_sim2real": False,
@@ -178,7 +234,7 @@ manifest["scenario"]["suite"]["config_path"] = "s4_suite.json"
 manifest["scenario"]["suite"]["config_sha256"] = hashlib.sha256(
     (out / "s4_suite.json").read_bytes()
 ).hexdigest()
-manifest["simulator"]["backend"] = "isaac"
+manifest["simulator"]["backend"] = "mujoco"
 manifest["action_contract"]["policy_rate_hz"] = 10.0
 manifest["action_contract"]["future_runtime_adapter"]["implementation_status"] = (
     "smolvla_abs_eef_online_v0"
@@ -192,9 +248,10 @@ manifest["evidence_paths"] = {
     "nfr_snapshot": "nfr/",
 }
 manifest["limitations"] = [
-    "Bounded ≤5-seed Isaac S4 diagnostic; open-loop Pass ≠ task success.",
+    "Bounded ≤5-seed MuJoCo H2 diagnostic vs Isaac relight Hold.",
+    "Train-domain closed-loop; physics/visual not identical to Isaac.",
     "validation_mode=lift (not place).",
-    "Does not claim Sim2Real or real-robot deployment.",
+    "Does not claim Sim2Real, task success, or Isaac Pass.",
 ]
 (out / "run_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 print(f"Wrote run_manifest → {out}")
@@ -206,23 +263,25 @@ run_one_seed() {
   local trial_dir="${SUITE_OUT}/trials/seed_${seed}"
   mkdir -p "${trial_dir}"
 
-  local backend_pid="" stack_pid="" video_pid="" gt_pid="" hb_pid=""
+  local stack_pid="" video_pid="" gt_pid="" hb_pid=""
+  local rand_yaml="${SUITE_OUT}/randomization/seed_${seed}.yaml"
+  write_seed_yaml "${rand_yaml}" "${seed}"
+  cp -f "${rand_yaml}" "${trial_dir}/randomization.yaml"
+
   cleanup_trial() {
     [[ -z "${video_pid}" ]] || kill "${video_pid}" 2>/dev/null || true
     [[ -z "${gt_pid}" ]] || kill "${gt_pid}" 2>/dev/null || true
     [[ -z "${hb_pid}" ]] || kill "${hb_pid}" 2>/dev/null || true
     [[ -z "${stack_pid}" ]] || kill "${stack_pid}" 2>/dev/null || true
-    [[ -z "${backend_pid}" ]] || kill "${backend_pid}" 2>/dev/null || true
     [[ -z "${video_pid}" ]] || wait "${video_pid}" 2>/dev/null || true
     [[ -z "${gt_pid}" ]] || wait "${gt_pid}" 2>/dev/null || true
     [[ -z "${hb_pid}" ]] || wait "${hb_pid}" 2>/dev/null || true
     [[ -z "${stack_pid}" ]] || wait "${stack_pid}" 2>/dev/null || true
-    [[ -z "${backend_pid}" ]] || wait "${backend_pid}" 2>/dev/null || true
     "${REPO_ROOT}/scripts/stop_stack.sh" > "${trial_dir}/cleanup.log" 2>&1 || true
-    pkill -9 -f '[i]saac_panda_backend.py' 2>/dev/null || true
     pkill -9 -f '[s]molvla_policy_inference_node' 2>/dev/null || true
-    pkill -9 -f '[i]saac_scene_video_recorder' 2>/dev/null || true
     pkill -9 -f '[i]saac_continuous_gt_recorder' 2>/dev/null || true
+    pkill -9 -f '[i]saac_scene_video_recorder' 2>/dev/null || true
+    pkill -9 -f '[m]ujoco_sim' 2>/dev/null || true
   }
   trap cleanup_trial RETURN
 
@@ -233,53 +292,26 @@ run_one_seed() {
   source "${REPO_ROOT}/install/setup.bash"
   set -u
 
-  local backend_args=(
-    --duration-sec "${BACKEND_DURATION_SEC}"
-    --camera-rate 10
-    --command-timeout-s 0.1
-    --arm-command-mode "${ARM_COMMAND_MODE}"
-    --object-seed "${seed}"
-  )
-  if [[ -n "${ISAAC_FRANKA_USD:-}" ]]; then
-    backend_args+=(--franka-usd "${ISAAC_FRANKA_USD}")
-  fi
-
-  timeout "$((BACKEND_DURATION_SEC + 30))s" "${ISAAC_PYTHON}" \
-    "${REPO_ROOT}/src/isaac_sim_adapter/scripts/isaac_panda_backend.py" \
-    "${backend_args[@]}" \
-    > "${trial_dir}/backend.log" 2>&1 &
-  backend_pid=$!
-
-  local ready=false
-  for _ in $(seq 1 160); do
-    if grep -q "ISAAC_E1_READY=" "${trial_dir}/backend.log" 2>/dev/null; then
-      ready=true
-      break
-    fi
-    if ! kill -0 "${backend_pid}" 2>/dev/null; then
-      tail -n 80 "${trial_dir}/backend.log" >&2
-      echo 3 > "${trial_dir}/policy_exit_code.txt"
-      return 3
-    fi
-    sleep 0.5
-  done
-  if [[ "${ready}" != "true" ]]; then
-    echo "Isaac backend READY timeout (seed ${seed})" >&2
-    echo 3 > "${trial_dir}/policy_exit_code.txt"
-    return 3
-  fi
-
-  timeout 85s ros2 launch teleop_bringup full_system.launch.py \
-    sim_backend:=isaac record:=false start_teleop:=false \
+  timeout 120s ros2 launch teleop_bringup full_system.launch.py \
+    sim_backend:=mujoco record:=false start_teleop:=false \
     controller:="${controller_profile}" \
-    enable_grasp_monitor:=false camera_rate:=10.0 watchdog_timeout:=30.0 \
+    enable_grasp_monitor:=false \
+    grasp_assist_enabled:=false \
+    randomize:=true \
+    randomization_path:="${rand_yaml}" \
+    camera_rate:=10.0 camera_width:=320 camera_height:=240 \
+    scene_use_mujoco_renderer:=true \
+    enable_wrist_camera:=false \
+    watchdog_timeout:=30.0 \
+    headless:=true \
     > "${trial_dir}/full_system.log" 2>&1 &
   stack_pid=$!
 
   local graph_ready=false
-  for _ in $(seq 1 180); do
+  for _ in $(seq 1 240); do
     if ros2 topic list 2>/dev/null | grep -qx "/sim/encoder_state" \
       && ros2 topic list 2>/dev/null | grep -qx "/ee_pose" \
+      && ros2 topic list 2>/dev/null | grep -qx "/camera/color/image_raw" \
       && ros2 topic list 2>/dev/null | grep -qx "/safety/status"; then
       graph_ready=true
       break
@@ -292,12 +324,16 @@ run_one_seed() {
     sleep 0.25
   done
   if [[ "${graph_ready}" != "true" ]]; then
-    echo "Isaac control graph discovery timeout (seed ${seed})" >&2
+    echo "MuJoCo control graph discovery timeout (seed ${seed})" >&2
     echo 4 > "${trial_dir}/policy_exit_code.txt"
     return 4
   fi
 
-  sleep 6
+  sleep 4
+  timeout 8s ros2 service call /sim/reset_scene std_srvs/srv/Trigger '{}' \
+    > "${trial_dir}/reset_scene.txt" 2>&1 || true
+  sleep 2
+
   timeout 8s ros2 topic echo /safety/status --once \
     > "${trial_dir}/safety_pre.txt" || true
   if ! grep -q "ok: true" "${trial_dir}/safety_pre.txt" 2>/dev/null; then
@@ -306,16 +342,27 @@ run_one_seed() {
     return 5
   fi
 
+  # Wait for controller graph (MuJoCo can lag Servo joint-state readiness).
+  for _ in $(seq 1 60); do
+    if timeout 3s ros2 control list_controllers 2>/dev/null \
+      | grep -E 'forward_effort_controller|cartesian_impedance_controller' \
+      | grep -q active; then
+      break
+    fi
+    sleep 0.5
+  done
+
   export SERVO_POST_INIT_MODE=pose
   bash "${REPO_ROOT}/scripts/servo_post_init.sh" 4 20 \
     > "${trial_dir}/servo_post_init.txt" 2>&1 || true
-  timeout 8s ros2 service call /servo_node/pause_servo std_srvs/srv/SetBool \
-    "{data: false}" >/dev/null 2>&1 || true
-  sleep 2
-  timeout 8s ros2 service call /servo_node/pause_servo std_srvs/srv/SetBool \
-    "{data: false}" >/dev/null 2>&1 || true
+  # Extra unpause after pose switch; MoveIt sometimes leaves pause latched.
+  for _ in 1 2 3 4; do
+    timeout 8s ros2 service call /servo_node/pause_servo std_srvs/srv/SetBool \
+      "{data: false}" >> "${trial_dir}/servo_unpause.txt" 2>&1 || true
+    sleep 1
+  done
   nice -n 19 ros2 topic pub -r 30 /teleop/heartbeat std_msgs/msg/Header \
-    "{frame_id: 'isaac_smolvla_s4_hb'}" >/dev/null 2>&1 &
+    "{frame_id: 'mujoco_smolvla_s4_hb'}" >/dev/null 2>&1 &
   hb_pid=$!
   sleep 1
 
@@ -335,7 +382,8 @@ run_one_seed() {
     --seed "${seed}" \
     --episode-index "${episode_index}" \
     --model-id "${EVALUATION_MODEL_ID}" \
-    --suite-id smolvla_s4_bounded5 \
+    --suite-id smolvla_s4_mujoco_bounded5 \
+    --backend mujoco \
     --validation-mode lift \
     --lift-success-delta "${LIFT_SUCCESS_DELTA}" \
     --gripper-close-max "${GRIPPER_CLOSE_MAX}" \
@@ -350,7 +398,7 @@ run_one_seed() {
   gt_pid=$!
 
   set +e
-  echo "[smolvla-s4] seed=${seed} domain=${ROS_DOMAIN_ID} timeout=${POLICY_RUNTIME_TIMEOUT_S}s device=${DEVICE} video=${RECORD_SCENE_VIDEO} telemetry=${DUMP_TELEMETRY}"
+  echo "[smolvla-s4-mujoco] seed=${seed} domain=${ROS_DOMAIN_ID} timeout=${POLICY_RUNTIME_TIMEOUT_S}s device=${DEVICE} telemetry=${DUMP_TELEMETRY}"
   TELEMETRY_ARGS=()
   if [[ "${DUMP_TELEMETRY}" == "true" ]]; then
     mkdir -p "${trial_dir}/telemetry/camera"
@@ -421,16 +469,25 @@ run_one_seed() {
 
   if [[ "${REQUIRE_REPORT_PASS}" == "true" ]]; then
     if [[ ! -f "${trial_dir}/report.json" ]]; then
-      return "${policy_status}"
+      echo "${policy_status}" > "${trial_dir}/policy_exit_code.txt"
+      set +e
+      return 0
     fi
+    set +e
     "${POLICY_PYTHON}" - "${trial_dir}/report.json" <<'PY'
 import json, pathlib, sys
 report = json.loads(pathlib.Path(sys.argv[1]).read_text())
 if report.get("status") != "PASS":
     raise SystemExit(1)
 PY
+    local require_status=$?
+    if [[ "${require_status}" -ne 0 ]]; then
+      echo "${require_status}" > "${trial_dir}/policy_exit_code.txt"
+    fi
   fi
-  return "${policy_status}"
+  # Always return 0 so suite aggregation still writes s4_gate.json under set -e.
+  set +e
+  return 0
 }
 
 nuke
@@ -438,17 +495,17 @@ episode_index=0
 for seed in "${SEED_LIST[@]}"; do
   if [[ -f "${SUITE_OUT}/trials/seed_${seed}/report.json" ]] \
     && [[ -f "${SUITE_OUT}/trials/seed_${seed}/gt_runtime.log" ]]; then
-    echo "[smolvla-s4] resume skip seed=${seed}"
+    echo "[smolvla-s4-mujoco] resume skip seed=${seed}"
     episode_index=$((episode_index + 1))
     continue
   fi
-  echo "========== [smolvla-s4] seed=${seed} (${episode_index}/$(( ${#SEED_LIST[@]} - 1 ))) =========="
+  echo "========== [smolvla-s4-mujoco] seed=${seed} (${episode_index}/$(( ${#SEED_LIST[@]} - 1 ))) =========="
   nuke
   set +e
   run_one_seed "${seed}" "${episode_index}"
   status=$?
   set -e
-  echo "[smolvla-s4] seed=${seed} exit=${status}"
+  echo "[smolvla-s4-mujoco] seed=${seed} exit=${status}"
   nuke
   episode_index=$((episode_index + 1))
 done
@@ -461,7 +518,8 @@ m = json.loads(p.read_text())
 m["execution_status"] = "completed"
 m["evidence_level"] = "runtime_observed"
 m["simulator"].update({
-    "version": m["simulator"].get("version") or "isaac-sim-local",
+    "backend": "mujoco",
+    "version": m["simulator"].get("version") or "mujoco-local",
     "build_id": m["simulator"].get("build_id") or "local",
     "driver_version": m["simulator"].get("driver_version") or "unknown",
     "hardware_id": m["simulator"].get("hardware_id") or "local-gpu",
@@ -521,7 +579,7 @@ for report_path in policy_reports:
         policy_pass += 1
 
 gate = {
-    "gate_id": "smolvla_s4_bounded5_lift",
+    "gate_id": "smolvla_s4_mujoco_bounded5_lift",
     "seeds_planned": planned,
     "episodes_recorded": len(rows),
     "policy_reports": len(policy_reports),
@@ -532,13 +590,14 @@ gate = {
     "outcome_success": success_n,
     "pass_threshold": need,
     "gate_pass": lift_n >= need,
-    "ran_isaac": True,
+    "ran_mujoco": True,
+    "ran_isaac": False,
     "claims_task_success": False,
     "claims_sim2real": False,
     "interpretation": (
-        "bounded_s4_lift_evidence"
+        "bounded_s4_mujoco_lift_evidence"
         if lift_n >= need
-        else "bounded_s4_hold_or_incomplete"
+        else "bounded_s4_mujoco_hold_or_incomplete"
     ),
 }
 (out / "s4_gate.json").write_text(json.dumps(gate, indent=2) + "\n")

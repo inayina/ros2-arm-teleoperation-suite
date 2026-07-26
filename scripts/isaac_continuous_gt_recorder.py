@@ -12,24 +12,29 @@ from __future__ import annotations
 
 import argparse
 import math
+from pathlib import Path
 import signal
 import sys
 import time
-from pathlib import Path
 
-import rclpy
 from geometry_msgs.msg import PoseStamped, WrenchStamped
+import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from std_msgs.msg import Float64
-
 from synth_data_gen.continuous_evaluator import (
+    append_episode_result,
     ContinuousTaskEvaluator,
     EvaluatorSample,
-    append_episode_result,
 )
+from synth_data_gen.task_gt_live import (
+    build_task_gt_snapshot,
+    populate_task_evaluation_status,
+    TaskGtSnapshot,
+)
+from teleop_interfaces.msg import TaskEvaluationStatus
 
 
 class IsaacContinuousGtNode(Node):
@@ -38,10 +43,17 @@ class IsaacContinuousGtNode(Node):
         *,
         evaluator: ContinuousTaskEvaluator,
         bin_xy: tuple[float, float],
+        trace_run_id: str,
+        episode_id: str,
+        parent_event_id: str = '',
     ) -> None:
         super().__init__('isaac_continuous_gt')
         self._ev = evaluator
         self._bin_xy = bin_xy
+        self._trace_run_id = trace_run_id
+        self._episode_id = episode_id
+        self._parent_event_id = parent_event_id
+        self._task_event_sequence = 0
         self._object: tuple[float, float, float] | None = None
         self._ee: tuple[float, float, float] | None = None
         self._gripper_command: float | None = None
@@ -54,6 +66,11 @@ class IsaacContinuousGtNode(Node):
         self._ft_count = 0
         self._initialized = False
         self._group = ReentrantCallbackGroup()
+        self._task_gt_pub = self.create_publisher(
+            TaskEvaluationStatus,
+            '/task/evaluation_status',
+            10,
+        )
         self.create_subscription(
             PoseStamped,
             '/sim/object_pose',
@@ -144,6 +161,13 @@ class IsaacContinuousGtNode(Node):
 
     def _tick(self) -> None:
         if self._object is None:
+            self._publish_task_gt(
+                build_task_gt_snapshot(
+                    self._ev,
+                    initialized=False,
+                    current_object_xyz=None,
+                )
+            )
             return
         if not self._initialized:
             self._ev.reset(
@@ -159,6 +183,37 @@ class IsaacContinuousGtNode(Node):
                 ee_xyz=self._ee,
                 gripper=self._gripper_for_evaluator(),
                 contact_force_n=self._contact_force_n,
+            )
+        )
+        self._publish_task_gt(
+            build_task_gt_snapshot(
+                self._ev,
+                initialized=True,
+                current_object_xyz=self._object,
+            )
+        )
+
+    def _publish_task_gt(self, snapshot: TaskGtSnapshot) -> None:
+        now = self.get_clock().now().to_msg()
+        msg = populate_task_evaluation_status(
+            TaskEvaluationStatus(),
+            snapshot,
+            stamp=now,
+            trace_run_id=self._trace_run_id,
+            episode_id=self._episode_id,
+            event_sequence=self._task_event_sequence,
+            parent_event_id=self._parent_event_id,
+        )
+        self._task_gt_pub.publish(msg)
+        self._task_event_sequence += 1
+
+    def publish_final(self, success: bool) -> None:
+        self._publish_task_gt(
+            build_task_gt_snapshot(
+                self._ev,
+                initialized=self._initialized,
+                current_object_xyz=self._object,
+                final_success=bool(success) if self._initialized else None,
             )
         )
 
@@ -206,6 +261,7 @@ def main() -> int:
     )
     parser.add_argument('--max-duration-s', type=float, default=320.0)
     parser.add_argument('--evaluator-version-tag', default='panda_continuous_gt_v1')
+    parser.add_argument('--parent-event-id', default='')
     args = parser.parse_args()
 
     bin_parts = [float(p) for p in args.bin_xy.split(',')]
@@ -230,7 +286,14 @@ def main() -> int:
     Path(args.nfr_sample_path).write_text('{}\n', encoding='utf-8')
 
     rclpy.init()
-    node = IsaacContinuousGtNode(evaluator=evaluator, bin_xy=bin_xy)
+    episode_id = f'episode_{args.episode_index:04d}_seed_{args.seed}'
+    node = IsaacContinuousGtNode(
+        evaluator=evaluator,
+        bin_xy=bin_xy,
+        trace_run_id=args.evaluation_run_id,
+        episode_id=episode_id,
+        parent_event_id=args.parent_event_id,
+    )
     executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
     deadline = time.monotonic() + max(1.0, float(args.max_duration_s))
@@ -303,6 +366,9 @@ def main() -> int:
             },
             execution_status=execution_status,
         )
+        if node._initialized:
+            node.publish_final(bool(row['outcome'].get('success')))
+            _drain_executor(executor, rounds=64)
         # Diagnostic sidecar fields (non-schema; stored in runtime log + print).
         print(
             'ISAAC_GT_DIAG '
@@ -318,7 +384,7 @@ def main() -> int:
         print(
             f'ISAAC_EPISODE_RESULT seed={args.seed} '
             f"success={row['outcome'].get('success')} "
-            f"status={execution_status} "
+            f'status={execution_status} '
             f"reason={row['outcome'].get('failure_reason')}",
             flush=True,
         )

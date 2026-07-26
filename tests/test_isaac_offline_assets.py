@@ -63,3 +63,21 @@ def test_download_hint_mentions_nucleus_relative_path():
     assert FRANKA_USD_RELATIVE in hint
     assert FRANKA_USD_REMOTE in hint
     assert 'ISAAC_FRANKA_USD=' in hint
+
+
+def test_offline_scene_light_spec_frozen():
+    from isaac_sim_adapter.offline_assets import (
+        OFFLINE_DISTANT_INTENSITY,
+        OFFLINE_DOME_INTENSITY,
+        offline_scene_light_spec,
+    )
+
+    spec = offline_scene_light_spec()
+    assert spec['dome_path'] == '/World/OfflineDomeLight'
+    assert spec['distant_path'] == '/World/OfflineDistantLight'
+    assert spec['dome_intensity'] == OFFLINE_DOME_INTENSITY
+    assert spec['distant_intensity'] == OFFLINE_DISTANT_INTENSITY
+    assert len(spec['distant_rotate_xyz_deg']) == 3
+    assert 'FixedCuboid' in str(spec['reason'])
+    assert OFFLINE_DOME_INTENSITY > 0
+    assert OFFLINE_DISTANT_INTENSITY > 0

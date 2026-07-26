@@ -271,17 +271,22 @@ python3 -m project_knowledge.cli impact --base HEAD~1 --head HEAD
 - LingBot-VLA 为本仓第一后训练策略或已完成 Gate V1；
 - SmolVLA 已适配 Panda / 已完成 VLA 抓取 / 已验证任务成功；
 - SmolVLA S2 接口 Pass 等同于可进入 Isaac 或 S3 LoRA；
-- SmolVLA **S3 Ready** / **S3 Hold** 等同于已完成 LoRA / 任务成功 / 可进 Isaac。
+- SmolVLA **S3 Ready** / **S3 Hold** 等同于任务成功 / 可自行进 Isaac（Recovery v3 的 LoRA 已完成，但 Ready/Hold 标签本身不代表成功）；
+- SmolVLA Recovery v3 的 **open-loop Pass**、有界 Isaac S4 的 **interface 5/5** 或 `ran_isaac=true` 等同于任务成功 / 在线自主抓取 / Sim2Real / 真机；
+- 有界 S4 首轮近黑场景的 reach 3/5 · grasp 1/5 为权威或「部分成功」（修光复测已证伪，标注 Superseded）。
 
 **VLA / 评测接力硬禁止（防 Codex 误推进）**：
 
 - 不得自动恢复 LingBot Gate V1；
 - 不得下载 LingBot 6B 权重；
 - 不得把 55-D 通道切片视为 Panda 执行映射；
-- 不得因 SmolVLA S2 接口 Pass、S3 Ready 或 S3 Hold 而进入 Isaac；
+- 不得因 SmolVLA S2 接口 Pass、S3 Ready、S3 Hold 或 Recovery v3 open-loop Pass 而进入 Isaac；已执行的有界 S4（≤5 seeds）为**一次性人工批准**，不得据此自动再跑 Isaac、扩种子或重训；
 - SmolVLA S3 任何继续修复 / 重训需要显式人工批准和外部 GPU；`max_data_fix_retries: 1` **已用尽**；未过 open-loop Pass 不得进 S4；
 - ACT 保持冻结诊断基线，不继续盲目训练；
-- 当前优先事项见中游 `docs/SMOLVLA_GATE_S3_READY.md`（**S3 Hold**；v1 α64 open-loop Hold；默认停止；未过 Pass 不得进 Isaac）。
+- 当前状态（2026-07-25 P0 收口）：SmolVLA Recovery v3 离线 open-loop **Pass**（`eval_gate_v3`）；人工批准的有界 Isaac S4 seeds 1–5 **已跑**（`ran_isaac=true`），interface 5/5、GT lift **0/5** → **Hold**。
+  权威 S4 证据：中游 `evidence/smolvla_s4_bounded5_relight_20260724T151711Z/s4_gate.json`（修光后复测）；首轮 `evidence/smolvla_s4_bounded5_20260724T203700Z/` 为 **Superseded / historical**。
+  收口入口：中游 `docs/portfolio/FINAL_PROJECT_SUMMARY.md`、`docs/portfolio/BADCASE_ATTRIBUTION_SUMMARY.md`、`docs/FUTURE_WORK_ROADMAP.md`（**P1 / P2 仅登记，不得自动执行**）。
+  中游 `docs/SMOLVLA_GATE_S3_READY.md` 已标注 **Historical / Superseded**，其「S3 Hold / 不得进 Isaac」为 v1 阶段口径。**默认停止**：不扩种子、不重训、不新增采集。
 
 权威路线表：中游 `robot-arm-episode-data-lab/docs/portfolio/THREE_REPO_CANONICAL_FACTS.md`「VLA 候选路线状态」。
 

@@ -7,15 +7,19 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/SafetyStatus.msg"
   "msg/DriveStatus.msg"
   "msg/DriveStatusArray.msg"
+  "msg/PolicyCommand.msg"
+  "msg/PolicyExecutionReport.msg"
+  "msg/TaskEvaluationStatus.msg"
   "srv/TriggerEstop.srv"
   "srv/EndEpisode.srv"
-  DEPENDENCIES std_msgs
+  DEPENDENCIES builtin_interfaces std_msgs
 )
 
 if(BUILD_TESTING)

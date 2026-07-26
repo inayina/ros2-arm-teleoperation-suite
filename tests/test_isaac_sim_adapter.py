@@ -134,7 +134,8 @@ def test_backend_source_applies_bounded_effort_and_local_watchdog():
     assert "'/isaac/joint_position_cmd'" in backend
     assert "f'{self._source}/joint_position_cmd'" in adapter
     assert "'/joint_target'" in adapter
-    assert 'franka.gripper.set_joint_positions' in backend
+    assert 'franka.gripper.apply_action' in backend
+    assert 'franka.gripper.set_joint_positions' not in backend
     assert 'franka.disable_gravity()' in backend
     assert 'NOMINAL_ARM_HOME = (0.0, -0.785' in backend
     assert 'NOMINAL_RED_BOX_POSITION = (0.35, -0.07, 0.025)' in backend

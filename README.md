@@ -1,8 +1,13 @@
 # ros2-arm-teleoperation-suite
 
-`ros2-arm-teleoperation-suite` 是三仓 Panda 闭环的上游：基于 ROS 2 Jazzy 与 MuJoCo，负责 Panda 软件仿真、遥操作/批采、安全与运动控制、episode 录制，以及上游物理门禁。
+`ros2-arm-teleoperation-suite` 是三仓 Panda 闭环的**上游（小脑）**：基于 ROS 2 Jazzy 与
+MuJoCo，负责实时控制与采集——遥操作/批采、安全层、MoveIt Servo、阻抗控制、episode 录制、
+上游物理门禁；并提供 Isaac 执行面与 continuous task GT。
 
-本仓输入是任务目标、遥操作输入或 batch generation 配置；输出是 raw episode 与 `meta.json`。本仓不负责中游 schema/release/training，也不负责下游 PyBullet replay、risk benchmark 或 real-robot deployment。
+本仓输入是任务目标、遥操作输入或 batch generation 配置；输出是 raw episode 与 `meta.json`。
+不负责中游 schema/release/training，不负责下游 PyBullet replay / risk readiness，也不声称真机部署。
+
+> **在系统中的位置**：策略「大脑」之下的**控制与感知执行面**——没有本仓，中游数据和下游验证无处落地。
 
 ## Position In The Three-Repo Loop
 
@@ -10,11 +15,12 @@
 
 | 仓库 | 职责 |
 | --- | --- |
-| 上游：本仓 | ROS 2/MuJoCo 仿真交互、teleop/batch generation、recorder、upstream physical gate |
-| 中游：`robot-arm-episode-data-lab` | raw episode adapter、schema validation、release、MLP BC、handoff |
-| 下游：`ros2-moveit-pybullet-bridge` | handoff loader、Panda PyBullet replay、monitor/risk benchmark |
+| 上游：本仓 | ROS 2 控制栈、MuJoCo/Isaac 交互、teleop/batch、recorder、physical gate、task GT |
+| 中游：`robot-arm-episode-data-lab` | adapter、schema、immutable release、训练交付、门禁、handoff |
+| 下游：`ros2-moveit-pybullet-bridge` | handoff 重放、dist_monitor、offline risk readiness（不作任务 go/no-go） |
 
-统一事实源见中游 `docs/portfolio/THREE_REPO_CANONICAL_FACTS.md`。本仓证据资产索引见 [docs/portfolio/EVIDENCE_INDEX.md](docs/portfolio/EVIDENCE_INDEX.md)。
+统一事实源见中游 `docs/portfolio/THREE_REPO_CANONICAL_FACTS.md`。
+本仓证据索引见 [docs/portfolio/EVIDENCE_INDEX.md](docs/portfolio/EVIDENCE_INDEX.md)。
 
 ## Verified Capabilities
 
@@ -24,8 +30,11 @@
 | Task / Motion / Evaluation agent mapping | `implemented_and_verified` | `docs/AGENTS.md` |
 | `batch_generator` physical gate | `implemented_and_verified` | `src/synth_data_gen/synth_data_gen/batch_generator.py` |
 | LeRobot-style episode recording | `implemented_and_verified` | `docs/INTER_REPO_CONTRACTS.md`, recorder docs |
-| M6/M7 multimodal MuJoCo media | `implemented_not_fully_verified` for full 30 Hz acceptance unless validation logs are attached | `docs/MEDIA_CAPTURE_PLAN.md`, `media/m6/`, `media/m7/` |
+| Upstream Media V2-M6/V2-M7 multimodal MuJoCo assets | `implemented_not_fully_verified` for full 30 Hz acceptance unless validation logs are attached | `docs/MEDIA_CAPTURE_PLAN.md`, `media/m6/`, `media/m7/` |
 | Real Panda hardware deployment | `not_supported` | Project scope excludes this as a current claim |
+
+这里的 **Upstream Media V2-M6/V2-M7** 是本仓早期媒体采集阶段名；跨仓运行时里程碑始终写作
+**Policy Runtime M6**，两者不是同一 Gate，也不能互相充当验收证据。
 
 ## Canonical Experiment Contribution
 
@@ -59,7 +68,7 @@ The 30/30 valid result is upstream evidence. It should not be described as real-
 | Evidence | What it shows | What it does not show |
 | --- | --- | --- |
 | `media/m1/panda_gravity_comp.png`, `media/m1/joint_states_hz.png` | ROS/MuJoCo control-loop evidence | certified or real hardware control |
-| `media/m6/lerobot_dataset_features.png`, `media/m6/multimodal_sync.png` | recorder and multimodal synchronization evidence | canonical MLP uses image/tactile features |
+| `media/m6/lerobot_dataset_features.png`, `media/m6/multimodal_sync.png` | upstream Media V2-M6 recorder and multimodal synchronization evidence | canonical MLP uses image/tactile features |
 | `media/m7/grasp_demo.gif` | MuJoCo grasp-motion demo | real grasp success |
 | `media/panda_teleop_trajectories_3d.png` | trajectory distribution visualization | task success rate or Sim2Real generalization |
 
@@ -136,4 +145,7 @@ Older architecture notes, CANopen/vcan0 support material, and broad learning not
 
 ## English Brief
 
-This repository is the upstream ROS 2 Jazzy + MuJoCo Panda simulation and episode-recording stack. It produces raw episodes and upstream validation evidence for the midstream data/training lab. It does not claim real-robot deployment, completed Sim2Real, policy training ownership, or downstream replay/risk ownership.
+Upstream (“cerebellum”) of the three-repo Panda loop: ROS 2 Jazzy real-time control,
+MuJoCo/Isaac execution, teleop/batch collection, and physical gating. It produces raw
+episodes for the midstream data spine and does not own training, downstream replay/risk
+readiness, real-robot deployment, or completed Sim2Real.

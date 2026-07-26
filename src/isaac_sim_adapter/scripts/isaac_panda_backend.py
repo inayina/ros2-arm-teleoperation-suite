@@ -21,6 +21,7 @@ from isaac_sim_adapter.object_pose_seed import (
     yaw_to_quat_wxyz,
 )
 from isaac_sim_adapter.offline_assets import (
+    add_offline_scene_lights,
     franka_offline_download_hint,
     resolve_franka_usd_path,
     validate_franka_usd_path,
@@ -227,9 +228,22 @@ def main() -> None:
             name='ground',
             position=np.asarray(NOMINAL_GROUND_POSITION),
             scale=np.asarray(NOMINAL_GROUND_SCALE),
-            color=np.array([0.35, 0.35, 0.35]),
+            color=np.array([0.22, 0.22, 0.22]),
         ))
         print('ISAAC_GROUND=local_fixed_cuboid', flush=True)
+        # Nucleus default_environment.usd normally provides dome lighting.
+        # FixedCuboid offline path must add lights or the scene camera is black.
+        try:
+            light_spec = add_offline_scene_lights(world.stage)
+            print(
+                'ISAAC_LIGHTS='
+                f"dome={light_spec['dome_intensity']},"
+                f"distant={light_spec['distant_intensity']}",
+                flush=True,
+            )
+        except Exception as light_error:  # noqa: BLE001
+            light_spec = {'error': repr(light_error)}
+            print(f'ISAAC_LIGHTS_ERROR={light_error!r}', flush=True)
 
         franka_usd = resolve_franka_usd_path(ARGS.franka_usd)
         franka_kwargs = {
@@ -510,6 +524,7 @@ def main() -> None:
             'object_xy_override': list(object_xy_override) if object_xy_override else None,
             'franka_usd': franka_usd,
             'ground': 'local_fixed_cuboid',
+            'lights': light_spec,
             'scene_contract': {
                 'arm_home': list(NOMINAL_ARM_HOME),
                 'red_box_position': list(red_box_position),

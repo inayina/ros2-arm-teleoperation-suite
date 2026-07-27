@@ -1,151 +1,137 @@
 # ros2-arm-teleoperation-suite
 
-`ros2-arm-teleoperation-suite` 是三仓 Panda 闭环的**上游（小脑）**：基于 ROS 2 Jazzy 与
-MuJoCo，负责实时控制与采集——遥操作/批采、安全层、MoveIt Servo、阻抗控制、episode 录制、
-上游物理门禁；并提供 Isaac 执行面与 continuous task GT。
+这个仓库负责让 Franka Panda 在仿真里真正“动起来”，并把发生过的事情可靠地记录下来。
 
-本仓输入是任务目标、遥操作输入或 batch generation 配置；输出是 raw episode 与 `meta.json`。
-不负责中游 schema/release/training，不负责下游 PyBullet replay / risk readiness，也不声称真机部署。
+它把遥操作输入、批量任务或策略动作送进 ROS 2 控制栈，通过 MoveIt Servo、阻抗控制和 MuJoCo/Isaac 执行机械臂，同时记录 episode、检查安全状态，并用连续任务真值判断是否真的 reach、grasp、lift。训练和数据发布不在这里做；这个仓库专注的是采集与在线执行。
 
-> **在系统中的位置**：策略「大脑」之下的**控制与感知执行面**——没有本仓，中游数据和下游验证无处落地。
+> 可以把它理解为三仓系统的“现场”：动作在这里执行，传感器数据在这里产生，物理任务结果也在这里确认。
 
-## Position In The Three-Repo Loop
+## 它解决什么问题
 
-![Canonical three-repo dataflow](media/three_repo_canonical_dataflow.svg)
+机器人学习需要的不只是关节轨迹，还需要知道轨迹来自什么任务、是否安全、物体有没有真的被抓起，以及采集过程是否使用了会污染训练数据的辅助逻辑。
 
-| 仓库 | 职责 |
-| --- | --- |
-| 上游：本仓 | ROS 2 控制栈、MuJoCo/Isaac 交互、teleop/batch、recorder、physical gate、task GT |
-| 中游：`robot-arm-episode-data-lab` | adapter、schema、immutable release、训练交付、门禁、handoff |
-| 下游：`ros2-moveit-pybullet-bridge` | handoff 重放、dist_monitor、offline risk readiness（不作任务 go/no-go） |
+本仓把这些责任放在同一条实时链路中：
 
-统一事实源见中游 `docs/portfolio/THREE_REPO_CANONICAL_FACTS.md`。
-本仓证据索引见 [docs/portfolio/EVIDENCE_INDEX.md](docs/portfolio/EVIDENCE_INDEX.md)。
-
-## Verified Capabilities
-
-| 能力 | 当前状态 | 证据 |
-| --- | --- | --- |
-| ROS 2 layered teleop/simulation stack | `implemented_and_verified` | `docs/AGENTS.md`, `docs/ARCHITECTURE_V2.md` |
-| Task / Motion / Evaluation agent mapping | `implemented_and_verified` | `docs/AGENTS.md` |
-| `batch_generator` physical gate | `implemented_and_verified` | `src/synth_data_gen/synth_data_gen/batch_generator.py` |
-| LeRobot-style episode recording | `implemented_and_verified` | `docs/INTER_REPO_CONTRACTS.md`, recorder docs |
-| Upstream Media V2-M6/V2-M7 multimodal MuJoCo assets | `implemented_not_fully_verified` for full 30 Hz acceptance unless validation logs are attached | `docs/MEDIA_CAPTURE_PLAN.md`, `media/m6/`, `media/m7/` |
-| Real Panda hardware deployment | `not_supported` | Project scope excludes this as a current claim |
-
-这里的 **Upstream Media V2-M6/V2-M7** 是本仓早期媒体采集阶段名；跨仓运行时里程碑始终写作
-**Policy Runtime M6**，两者不是同一 Gate，也不能互相充当验收证据。
-
-## Canonical Experiment Contribution
-
-The current shared Panda experiment is `panda_30_mlp_20260711`.
-
-| Fact | Value |
-| --- | --- |
-| Upstream source | `data/episodes_mlp` |
-| Dataset size | 30 Panda simulation episodes, 71,737 frames |
-| Gate | `upstream_gate=batch_generator` |
-| Training constraint | `grasp_assist_enabled:=false` for training data |
-| Output handed to midstream | raw episodes with train data and `meta.json` |
-
-The 30/30 valid result is upstream evidence. It should not be described as real-robot success or downstream physical grasp validation.
-
-## Core Evidence
-
-### 实验证据图解读
-
-下表说明本仓在三仓证据中的上游贡献。30-episode 训练/handoff run 与最新
-1-episode 下游 smoke 是两个独立 run，当前证据不足以确认后者消费了前者的 handoff。
-
-| 图中区域 | 与本仓关系 | 原始来源 | 边界 |
-| --- | --- | --- | --- |
-| G0 Upstream Dataset | 本仓通过 `batch_generator` 生成 30 个 Panda 仿真 episode，并写入 `upstream_gate=batch_generator` | 中游归档的 `evidence/upstream/validate_dataset.json`，上游 `data/episodes_mlp` | 证明 MuJoCo/Panda 仿真采集和上游 gate，不证明 real-robot deployment |
-| G1 Midstream Release | 30-episode run 形成 release、MLP metrics 和 handoff | 中游 `manifest.json`, `mlp_metrics.json`, `handoff_manifest.json` | 不是本仓训练能力；README 不应把 MLP/ACT 训练归到上游 |
-| Independent downstream smoke | 独立的 1-episode PyBullet replay smoke | 中游归档的 `evidence/downstream/benchmark_summary.json` | 未证明与上述 30-episode handoff 属于同一 run；不证明真实 Sim2Real |
-
-30 episodes / 71,737 frames 是上游输出规模；`9.79 / 34.218 ms` 是独立下游 smoke 的延迟数字，属于下游运行结果，不是上游控制层延迟指标。
-
-| Evidence | What it shows | What it does not show |
-| --- | --- | --- |
-| `media/m1/panda_gravity_comp.png`, `media/m1/joint_states_hz.png` | ROS/MuJoCo control-loop evidence | certified or real hardware control |
-| `media/m6/lerobot_dataset_features.png`, `media/m6/multimodal_sync.png` | upstream Media V2-M6 recorder and multimodal synchronization evidence | canonical MLP uses image/tactile features |
-| `media/m7/grasp_demo.gif` | MuJoCo grasp-motion demo | real grasp success |
-| `media/panda_teleop_trajectories_3d.png` | trajectory distribution visualization | task success rate or Sim2Real generalization |
-
-### 可用实验图片
-
-这些历史实验图可以继续使用，但它们是上游软件仿真、录制和可视化证据，不应被描述成中游训练或下游 replay 的实现证明。
-
-| 图片 | 解释 | 边界 |
-| --- | --- | --- |
-| ![Panda gravity compensation](media/m1/panda_gravity_comp.png) | MuJoCo/Panda gravity compensation 姿态证据 | 不证明 certified hardware control |
-| ![Joint states rate](media/m1/joint_states_hz.png) | `/joint_states` 频率/控制闭环观测 | 不等于下游 benchmark latency |
-| ![LeRobot dataset features](media/m6/lerobot_dataset_features.png) | recorder 输出字段和多模态数据结构 | 不代表 canonical MLP 使用图像/触觉特征 |
-| ![Multimodal sync](media/m6/multimodal_sync.png) | 多模态行级同步可视化 | 不证明完整 30 Hz acceptance，除非附验证日志 |
-| ![Domain randomization grid](media/m7/domain_randomization_grid.png) | object pose、lighting、camera jitter、mass/friction 的 per-episode 随机化示意 | 只能证明仿真扰动配置可视化，不证明泛化或 Sim2Real |
-| ![MuJoCo grasp demo](media/m7/grasp_demo.gif) | MuJoCo 抓取动作演示 | 不证明 real-grasp success 或泛化 |
-| ![Panda trajectories](media/panda_teleop_trajectories_3d.png) | 30-episode 轨迹分布可视化 | 不证明任务成功率或 Sim2Real |
-
-## Quick Verification
-
-```bash
-# Software simulation path; requires the ROS 2/MuJoCo environment documented in this repo.
-ros2 launch ros2_arm_teleop full_system.launch.py use_sim:=true
-
-# Batch generation path; see docs for exact parameters and environment setup.
-ros2 run synth_data_gen batch_generator
+```text
+任务目标 / 遥操作 / 策略动作
+              │
+              ▼
+Task planning → MoveIt Servo → impedance control → MuJoCo / Isaac
+              │                    │
+              │                    ├─ safety / execution status
+              │                    └─ continuous task GT
+              ▼
+episode recorder → episode_*/train/ + meta.json
 ```
 
-For reproducible cross-repo validation, use the midstream runbook rather than treating this README as the source of experiment numbers.
+最终得到的不是一个“看起来动过”的 demo，而是一批带来源、状态和物理 Gate 的 episode，以及可以被中游继续处理的明确输入。
 
-Project evidence query and upstream change impact are available from this checkout:
+## 在三仓系统中的位置
+
+```text
+本仓（上游）
+  控制 · 仿真 · 采集 · 在线执行 · task GT
+             │ raw episode
+             ▼
+robot-arm-episode-data-lab（中游）
+  合同 · 数据 · 训练 · 离线评测 · handoff
+             │ actions / reports
+             ▼
+ros2-moveit-pybullet-bridge（下游）
+  replay · monitor · risk · HOC
+```
+
+三仓边界的统一说明见中游 [BOUNDARY_FREEZE.md](https://github.com/inayina/robot-arm-episode-data-lab/blob/main/docs/portfolio/BOUNDARY_FREEZE.md)。
+
+## 你会在这里找到什么
+
+- **遥操作与批量采集**：既可以人工控制 Panda，也可以按任务 FSM 批量生成 episode。
+- **分层控制**：上层笛卡尔目标通过 MoveIt Servo 和阻抗控制落到仿真机器人。
+- **两套仿真环境**：MuJoCo 用于主要采集链，Isaac 用于有界策略执行与任务真值评测。
+- **episode 录制**：同步保存关节、末端位姿、夹爪、图像和任务元数据。
+- **物理 Gate**：由上游判断 episode 是否成功、安全停止或驱动故障；中游不会从 object pose 再猜一次。
+- **Policy Runtime**：在线 inference、chunk scheduler 和 execution adapter 位于本仓；当前默认仍保持受控、非 authoritative 的接入方式。
+
+训练数据必须关闭 grasp assist：`grasp_assist_enabled:=false`。
+
+## 当前状态
+
+- ROS 2 / MuJoCo 的 Panda 控制、采集和 episode Gate 已实现。
+- Task、Motion 和 Evaluation Agent 已映射到具体节点和配置。
+- Policy Runtime 已具备 chunk10/K5、同步 replan、执行限幅、Hold/E-stop 与 trace 合同。
+- Async double-buffer 目前只有中游离线 bench，尚未接入本仓在线节点。
+- Scripted oracle 在修正物理链后可完成 lift 5/5；这只证明执行环境具备完成任务的能力。
+- Learned policy 的 bounded Isaac 结果仍是 lift 0/5 → Hold。
+- 当前没有真实 Panda 部署，也没有完成 Sim2Real。
+
+## 快速开始
+
+环境要求与完整参数见 [PROJECT_SCOPE_AND_ACCEPTANCE.md](docs/PROJECT_SCOPE_AND_ACCEPTANCE.md)。常用的仿真采集入口是：
 
 ```bash
-bin/ask-project "上游当前负责什么？"
+colcon build --symlink-install \
+  --packages-select lerobot_recorder teleop_bringup mujoco_sim
+
+source install/setup.bash
+
+ros2 launch teleop_bringup full_system.launch.py \
+  record:=true \
+  capture_mode:=portfolio \
+  camera_rate:=10.0 \
+  camera_width:=320 \
+  camera_height:=240 \
+  auto_record_seconds:=15.0 \
+  auto_record_delay_s:=22.0
+```
+
+这条命令会自动结束录制；不要把 README 中的示例当成长期常驻服务配置。
+
+只想检查纯 CPU 逻辑或了解项目事实时，可以先从测试和检索入口开始：
+
+```bash
+bin/ask-project "上游如何产生一个可用于训练的 Panda episode？"
 bin/project-evidence impact --base HEAD~1 --head HEAD
 ```
 
-The registry and retrieval implementation remain owned by the midstream repository. Set
-`EPISODE_DATA_LAB_ROOT` when that checkout is not in a configured fallback location.
+如果中游仓不在默认位置，设置：
 
-## Code Map
+```bash
+export EPISODE_DATA_LAB_ROOT=/path/to/robot-arm-episode-data-lab
+```
 
-| Path | Purpose |
+## 目录怎么读
+
+| 路径 | 用途 |
 | --- | --- |
-| `src/synth_data_gen/` | batch generation and upstream episode gate |
-| `src/lerobot_recorder/` | episode recording |
-| `docs/AGENTS.md` | upstream agent mapping |
-| `docs/INTER_REPO_CONTRACTS.md` | raw episode contract with midstream |
-| `docs/MEDIA_CAPTURE_PLAN.md` | media capture and evidence plan |
-| `media/` | captured evidence assets |
+| `src/teleop_bringup/` | 系统启动与节点编排 |
+| `src/mujoco_sim/` | MuJoCo Panda 仿真 |
+| `src/synth_data_gen/` | batch generation 与上游物理 Gate |
+| `src/lerobot_recorder/` | episode 录制和多模态同步 |
+| `src/teleop_moveit_config/` | MoveIt / Servo 配置与启动 |
+| `src/teleop_controllers/` | 控制器插件，包括笛卡尔阻抗控制 |
+| `src/isaac_sim_adapter/` | Isaac 有界执行与 runtime 合同镜像 |
+| `docs/` | 架构、接口、验收与运行手册 |
+| `media/` | 仿真和采集过程的辅助可视化 |
 
-## Boundaries
+## 边界
 
-Do not claim from this repo alone:
+本仓不负责：
 
-- formal production safety certification;
-- completed real-machine deployment;
-- completed Sim2Real;
-- midstream MLP/ACT training ownership;
-- downstream PyBullet benchmark ownership;
-- autonomous online policy rollout.
+- 数据 schema 适配、release、训练和离线模型评测；这些属于中游。
+- 下游 PyBullet replay、distribution monitor、risk 和 HOC。
+- 真实机械臂驱动、生产安全认证或已经完成的 Sim2Real。
+- 用“命令执行完”替代物体真的被 lift 的任务真值。
 
-## Legacy And Extended Material
+## 进一步阅读
 
-Older architecture notes, CANopen/vcan0 support material, and broad learning notes are useful background, but README claims should stay tied to current ROS 2/MuJoCo Panda upstream responsibilities.
+- [上游 Agent 与模块映射](docs/AGENTS.md)
+- [三仓数据接口](docs/INTER_REPO_CONTRACTS.md)
+- [项目范围与验收](docs/PROJECT_SCOPE_AND_ACCEPTANCE.md)
+- [架构说明](docs/ARCHITECTURE_V2.md)
+- [闭环运行手册](https://github.com/inayina/robot-arm-episode-data-lab/blob/main/docs/CLOSED_LOOP_RUNBOOK.md)
 
-## Key Documents
+## English brief
 
-- [docs/AGENTS.md](docs/AGENTS.md)
-- [docs/PROJECT_SCOPE_AND_ACCEPTANCE.md](docs/PROJECT_SCOPE_AND_ACCEPTANCE.md)
-- [docs/INTER_REPO_CONTRACTS.md](docs/INTER_REPO_CONTRACTS.md)
-- [docs/MEDIA_CAPTURE_PLAN.md](docs/MEDIA_CAPTURE_PLAN.md)
-- [docs/portfolio/EVIDENCE_INDEX.md](docs/portfolio/EVIDENCE_INDEX.md)
-- [docs/AGENTS.md#7-project-evidence-agent-集成](docs/AGENTS.md#7-project-evidence-agent-集成)
+This is the upstream execution and collection surface of a three-repo Franka Panda system. It runs ROS 2 control and MuJoCo/Isaac simulation, records expert episodes, applies the upstream physical gate, and owns online inference, scheduling, execution adaptation, and task ground truth.
 
-## English Brief
-
-Upstream (“cerebellum”) of the three-repo Panda loop: ROS 2 Jazzy real-time control,
-MuJoCo/Isaac execution, teleop/batch collection, and physical gating. It produces raw
-episodes for the midstream data spine and does not own training, downstream replay/risk
-readiness, real-robot deployment, or completed Sim2Real.
+It does not own data releases, policy training, downstream replay/risk validation, real-robot deployment, or completed Sim2Real. A completed command sequence is not considered task success unless the runtime ground truth confirms the physical outcome.

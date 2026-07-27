@@ -20,7 +20,10 @@
 
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "rclcpp/rclcpp.hpp"
@@ -126,14 +129,15 @@ private:
     pending_faults_.push_back(fault);
   }
 
-  void trip_estop_locked(const std::string & reason)
+  bool trip_estop_locked(const std::string & reason)
   {
     if (!estop_.active()) {
       estop_.trip(reason);
       RCLCPP_ERROR(get_logger(), "E-STOP TRIPPED! Reason: %s", reason.c_str());
-      publish_estop_locked();
       RCLCPP_ERROR(get_logger(), "E-STOP: %s", reason.c_str());
+      return true;
     }
+    return false;
   }
 
   bool velocity_estop_allowed_locked() const
@@ -144,30 +148,36 @@ private:
 
   void on_joint_states(const sensor_msgs::msg::JointState::SharedPtr msg)
   {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!have_js_) {
-      first_js_time_s_ = now_s();
-    }
-    last_js_ = *msg;
-    have_js_ = true;
-    watchdog_.on_joint_states(now_s());
-
-    std::string fault;
-    bool estop_flag = false;
-    if (!joint_limit_.check(*msg, fault)) {
-      add_fault_locked(fault);
-    }
-    if (!velocity_.check(*msg, fault, estop_flag)) {
-      add_fault_locked(fault);
-      if (estop_flag && auto_estop_enabled_ && velocity_auto_estop_enabled_ &&
-        velocity_estop_allowed_locked())
-      {
-        trip_estop_locked(fault);
+    bool estop_changed = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!have_js_) {
+        first_js_time_s_ = now_s();
       }
+      last_js_ = *msg;
+      have_js_ = true;
+      watchdog_.on_joint_states(now_s());
+
+      std::string fault;
+      bool estop_flag = false;
+      if (!joint_limit_.check(*msg, fault)) {
+        add_fault_locked(fault);
+      }
+      if (!velocity_.check(*msg, fault, estop_flag)) {
+        add_fault_locked(fault);
+        if (estop_flag && auto_estop_enabled_ && velocity_auto_estop_enabled_ &&
+          velocity_estop_allowed_locked())
+        {
+          estop_changed = trip_estop_locked(fault);
+        }
+      }
+    }
+    if (estop_changed) {
+      publish_estop(true);
     }
   }
 
-  bool monitors_pass_locked(std::string & fault_out)
+  bool monitors_pass_locked(std::string & fault_out, bool & estop_changed)
   {
     if (estop_.active()) {
       fault_out = "estop:" + estop_.reason();
@@ -181,7 +191,7 @@ private:
       if (auto_estop_enabled_) {
         const bool js_watchdog = fault.rfind("watchdog:joint_states", 0) == 0;
         if (!js_watchdog || velocity_estop_allowed_locked()) {
-          trip_estop_locked(fault);
+          estop_changed = trip_estop_locked(fault) || estop_changed;
         }
       }
       return false;
@@ -199,7 +209,7 @@ private:
         if (estop_flag && auto_estop_enabled_ && velocity_auto_estop_enabled_ &&
           velocity_estop_allowed_locked())
         {
-          trip_estop_locked(fault);
+          estop_changed = trip_estop_locked(fault) || estop_changed;
         }
         return false;
       }
@@ -210,48 +220,67 @@ private:
 
   void on_cmd_pose(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::optional<geometry_msgs::msg::PoseStamped> output;
+    bool estop_changed = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string fault;
-    bool pass = monitors_pass_locked(fault);
+      std::string fault;
+      bool pass = monitors_pass_locked(fault, estop_changed);
 
-    if (pass && !workspace_.check(*msg, fault)) {
-      add_fault_locked(fault);
-      pass = false;
+      if (pass && !workspace_.check(*msg, fault)) {
+        add_fault_locked(fault);
+        pass = false;
+      }
+
+      if (pass && !estop_.active()) {
+        last_safe_pose_ = *msg;
+        have_safe_pose_ = true;
+        output = *msg;
+      } else if (have_safe_pose_) {
+        output = last_safe_pose_;
+      }
     }
-
-    if (pass && !estop_.active()) {
-      last_safe_pose_ = *msg;
-      have_safe_pose_ = true;
-      pub_safe_pose_->publish(*msg);
-    } else if (have_safe_pose_) {
-      pub_safe_pose_->publish(last_safe_pose_);
+    // DDS work is deliberately outside mutex_: middleware backpressure must not
+    // lengthen the safety-state critical section.
+    if (estop_changed) {
+      publish_estop(true);
+    }
+    if (output.has_value()) {
+      pub_safe_pose_->publish(*output);
     }
   }
 
   void on_cmd_twist(const geometry_msgs::msg::TwistStamped::SharedPtr msg)
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::optional<geometry_msgs::msg::TwistStamped> output;
+    bool estop_changed = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string fault;
-    const bool pass = monitors_pass_locked(fault);
+      std::string fault;
+      const bool pass = monitors_pass_locked(fault, estop_changed);
 
-    if (pass && !estop_.active()) {
-      last_safe_twist_ = *msg;
-      have_safe_twist_ = true;
-      pub_safe_twist_->publish(*msg);
-      return;
+      if (pass && !estop_.active()) {
+        last_safe_twist_ = *msg;
+        have_safe_twist_ = true;
+        output = *msg;
+      } else if (have_safe_twist_) {
+        geometry_msgs::msg::TwistStamped hold = last_safe_twist_;
+        hold.twist.linear.x = 0.0;
+        hold.twist.linear.y = 0.0;
+        hold.twist.linear.z = 0.0;
+        hold.twist.angular.x = 0.0;
+        hold.twist.angular.y = 0.0;
+        hold.twist.angular.z = 0.0;
+        output = std::move(hold);
+      }
     }
-
-    if (have_safe_twist_) {
-      geometry_msgs::msg::TwistStamped hold = last_safe_twist_;
-      hold.twist.linear.x = 0.0;
-      hold.twist.linear.y = 0.0;
-      hold.twist.linear.z = 0.0;
-      hold.twist.angular.x = 0.0;
-      hold.twist.angular.y = 0.0;
-      hold.twist.angular.z = 0.0;
-      pub_safe_twist_->publish(hold);
+    if (estop_changed) {
+      publish_estop(true);
+    }
+    if (output.has_value()) {
+      pub_safe_twist_->publish(*output);
     }
   }
 
@@ -259,28 +288,40 @@ private:
     const std::shared_ptr<teleop_interfaces::srv::TriggerEstop::Request> req,
     std::shared_ptr<teleop_interfaces::srv::TriggerEstop::Response> res)
   {
-    std::lock_guard<std::mutex> lock(mutex_);
-    trip_estop_locked("manual:" + req->reason);
-    RCLCPP_WARN(get_logger(), "E-Stop tripped manually: %s", req->reason.c_str());
-    res->success = true;
-    res->message = "E-Stop active";
+    bool estop_changed = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      estop_changed = trip_estop_locked("manual:" + req->reason);
+      RCLCPP_WARN(get_logger(), "E-Stop tripped manually: %s", req->reason.c_str());
+      res->success = true;
+      res->message = "E-Stop active";
+    }
+    if (estop_changed) {
+      publish_estop(true);
+    }
   }
 
   void on_reset(
     const std::shared_ptr<std_srvs::srv::Trigger::Request>,
     std::shared_ptr<std_srvs::srv::Trigger::Response> res)
   {
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::string reset_blocker;
-    const bool safe = reset_allowed_locked(reset_blocker);
-    const bool was_active = estop_.active();
-    res->success = was_active ? estop_.reset(safe) : safe;
-    if (res->success && was_active) {
-      publish_estop_locked();
+    bool estop_changed = false;
+    bool estop_active = true;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      std::string reset_blocker;
+      const bool safe = reset_allowed_locked(reset_blocker);
+      const bool was_active = estop_.active();
+      res->success = was_active ? estop_.reset(safe) : safe;
+      estop_active = estop_.active();
+      estop_changed = was_active && res->success;
+      res->message = res->success ? (was_active ? "E-Stop reset" : "E-Stop already clear") :
+        ("Cannot reset: " + (reset_blocker.empty() ? "faults present" : reset_blocker));
+      RCLCPP_INFO(get_logger(), "%s", res->message.c_str());
     }
-    res->message = res->success ? (was_active ? "E-Stop reset" : "E-Stop already clear") :
-      ("Cannot reset: " + (reset_blocker.empty() ? "faults present" : reset_blocker));
-    RCLCPP_INFO(get_logger(), "%s", res->message.c_str());
+    if (estop_changed) {
+      publish_estop(estop_active);
+    }
   }
 
   bool reset_allowed_locked(std::string & reset_blocker)
@@ -312,30 +353,37 @@ private:
 
   void on_timer()
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    teleop_interfaces::msg::SafetyStatus status;
+    diagnostic_msgs::msg::DiagnosticArray diagnostics;
+    bool estop_active = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string fault;
-    if (!watchdog_.ok(now_s(), fault)) {
-      add_fault_locked(fault);
-      if (auto_estop_enabled_) {
-        const bool js_watchdog = fault.rfind("watchdog:joint_states", 0) == 0;
-        if (!js_watchdog || velocity_estop_allowed_locked()) {
-          trip_estop_locked(fault);
+      std::string fault;
+      if (!watchdog_.ok(now_s(), fault)) {
+        add_fault_locked(fault);
+        if (auto_estop_enabled_) {
+          const bool js_watchdog = fault.rfind("watchdog:joint_states", 0) == 0;
+          if (!js_watchdog || velocity_estop_allowed_locked()) {
+            trip_estop_locked(fault);
+          }
         }
       }
+
+      live_faults_ = pending_faults_;
+      pending_faults_.clear();
+      std::tie(status, diagnostics) = make_status_messages_locked();
+      estop_active = estop_.active();
     }
-
-    live_faults_ = pending_faults_;
-    pending_faults_.clear();
-
-    publish_status_locked();
-    publish_estop_locked();
+    pub_status_->publish(status);
+    pub_diag_->publish(diagnostics);
+    publish_estop(estop_active);
   }
 
-  void publish_estop_locked()
+  void publish_estop(bool active)
   {
     std_msgs::msg::Bool m;
-    m.data = estop_.active();
+    m.data = active;
     pub_estop_->publish(m);
   }
 
@@ -350,7 +398,8 @@ private:
     return ds;
   }
 
-  void publish_status_locked()
+  std::pair<teleop_interfaces::msg::SafetyStatus, diagnostic_msgs::msg::DiagnosticArray>
+  make_status_messages_locked()
   {
     const bool comm_ok = [&]() {
         std::string fault;
@@ -379,8 +428,6 @@ private:
     s.ok = jl && ws && vel && comm_ok && !estop_.active();
     s.level = s.estop_active ? s.LEVEL_ESTOP :
       (s.ok ? s.LEVEL_OK : s.LEVEL_ERROR);
-    pub_status_->publish(s);
-
     diagnostic_msgs::msg::DiagnosticArray da;
     da.header.stamp = s.header.stamp;
 
@@ -404,7 +451,7 @@ private:
       "safety_monitor/estop", s.estop_active ? err_level : ok_level,
       s.estop_active ? ("latched: " + estop_.reason()) : "inactive"));
 
-    pub_diag_->publish(da);
+    return {std::move(s), std::move(da)};
   }
 
   JointLimitMonitor joint_limit_;

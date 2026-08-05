@@ -46,6 +46,7 @@ def _episode_features(first_frame: dict) -> "Features":
         "done": Value("bool"),
         "task": Value("string"),
         "language_instruction": Value("string"),
+        "task_phase": Value("string"),
         "success": Value("bool"),
         "safety_estop": Value("bool"),
         "drive_fault": Value("bool"),
@@ -79,6 +80,7 @@ def _normalize_frame(frame: dict) -> dict:
     normalized["done"] = bool(frame["done"])
     normalized["task"] = str(frame["task"])
     normalized["language_instruction"] = str(frame["language_instruction"])
+    normalized["task_phase"] = str(frame.get("task_phase", "UNAVAILABLE"))
     normalized["success"] = bool(frame.get("success", True))
     normalized["safety_estop"] = bool(frame["safety_estop"])
     normalized["drive_fault"] = bool(frame["drive_fault"])

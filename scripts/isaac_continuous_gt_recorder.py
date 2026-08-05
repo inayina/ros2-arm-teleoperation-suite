@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import argparse
 import math
+import json
 from pathlib import Path
 import signal
 import sys
+import threading
 import time
 
 from geometry_msgs.msg import PoseStamped, WrenchStamped
@@ -34,6 +36,7 @@ from synth_data_gen.task_gt_live import (
     populate_task_evaluation_status,
     TaskGtSnapshot,
 )
+from synth_data_gen.task_telemetry import TaskTimelineTracker
 from teleop_interfaces.msg import TaskEvaluationStatus
 
 
@@ -45,6 +48,7 @@ class IsaacContinuousGtNode(Node):
         bin_xy: tuple[float, float],
         trace_run_id: str,
         episode_id: str,
+        event_log_path: Path | None = None,
         parent_event_id: str = '',
     ) -> None:
         super().__init__('isaac_continuous_gt')
@@ -53,7 +57,10 @@ class IsaacContinuousGtNode(Node):
         self._trace_run_id = trace_run_id
         self._episode_id = episode_id
         self._parent_event_id = parent_event_id
+        self._event_log_path = event_log_path
         self._task_event_sequence = 0
+        self._task_gt_lock = threading.Lock()
+        self._timeline = TaskTimelineTracker(trace_run_id, episode_id)
         self._object: tuple[float, float, float] | None = None
         self._ee: tuple[float, float, float] | None = None
         self._gripper_command: float | None = None
@@ -193,28 +200,58 @@ class IsaacContinuousGtNode(Node):
             )
         )
 
-    def _publish_task_gt(self, snapshot: TaskGtSnapshot) -> None:
-        now = self.get_clock().now().to_msg()
-        msg = populate_task_evaluation_status(
-            TaskEvaluationStatus(),
-            snapshot,
-            stamp=now,
-            trace_run_id=self._trace_run_id,
-            episode_id=self._episode_id,
-            event_sequence=self._task_event_sequence,
-            parent_event_id=self._parent_event_id,
-        )
-        self._task_gt_pub.publish(msg)
-        self._task_event_sequence += 1
+    def _publish_task_gt(
+        self,
+        snapshot: TaskGtSnapshot,
+        *,
+        final_failure_stage: str | None = None,
+        final_failure_reason: str | None = None,
+    ) -> None:
+        with self._task_gt_lock:
+            monotonic_ns = time.monotonic_ns()
+            ros_now = self.get_clock().now()
+            now = ros_now.to_msg()
+            sequence = self._task_event_sequence
+            msg = populate_task_evaluation_status(
+                TaskEvaluationStatus(),
+                snapshot,
+                stamp=now,
+                trace_run_id=self._trace_run_id,
+                episode_id=self._episode_id,
+                event_sequence=sequence,
+                parent_event_id=self._parent_event_id,
+            )
+            row = self._timeline.encode(
+                snapshot,
+                self._ev,
+                event_sequence=sequence,
+                monotonic_ns=monotonic_ns,
+                ros_time_ns=int(ros_now.nanoseconds),
+                final_failure_stage=final_failure_stage,
+                final_failure_reason=final_failure_reason,
+            )
+            if self._event_log_path is not None:
+                with self._event_log_path.open('a', encoding='utf-8') as handle:
+                    handle.write(json.dumps(row, sort_keys=True) + '\n')
+            self._task_gt_pub.publish(msg)
+            self._task_event_sequence += 1
 
-    def publish_final(self, success: bool) -> None:
+    def publish_final(
+        self,
+        success: bool,
+        *,
+        failure_stage: str | None = None,
+        failure_reason: str | None = None,
+    ) -> None:
         self._publish_task_gt(
             build_task_gt_snapshot(
                 self._ev,
                 initialized=self._initialized,
                 current_object_xyz=self._object,
                 final_success=bool(success) if self._initialized else None,
-            )
+            ),
+            final_failure_stage=failure_stage,
+            final_failure_reason=failure_reason,
         )
 
 
@@ -292,6 +329,7 @@ def main() -> int:
         bin_xy=bin_xy,
         trace_run_id=args.evaluation_run_id,
         episode_id=episode_id,
+        event_log_path=Path(args.event_log_path),
         parent_event_id=args.parent_event_id,
     )
     executor = MultiThreadedExecutor(num_threads=4)
@@ -367,7 +405,11 @@ def main() -> int:
             execution_status=execution_status,
         )
         if node._initialized:
-            node.publish_final(bool(row['outcome'].get('success')))
+            node.publish_final(
+                bool(row['outcome'].get('success')),
+                failure_stage=row['outcome'].get('failure_stage'),
+                failure_reason=row['outcome'].get('failure_reason'),
+            )
             _drain_executor(executor, rounds=64)
         # Diagnostic sidecar fields (non-schema; stored in runtime log + print).
         print(

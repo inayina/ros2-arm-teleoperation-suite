@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="660" viewBox="0 0 1440 660" role="img" aria-labelledby="title desc">
+  <title id="title">Franka Panda 三仓执行、交付与验证系统</title>
+  <desc id="desc">上游负责 ROS 2 在线执行、控制、采集与任务真值；中游负责合同、版本化 Release、离线评测与 Handoff；下游负责重放、监控、风险和故障观测。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="10" refY="4" orient="auto">
+      <path d="M0,0 L0,8 L10,4 z" fill="#64748b"/>
+    </marker>
+    <style>
+      .title{font:700 31px Inter,"Noto Sans SC",Arial,sans-serif;fill:#0f172a}
+      .subtitle{font:15px Inter,"Noto Sans SC",Arial,sans-serif;fill:#475569}
+      .repo{font:700 19px Inter,"Noto Sans SC",Arial,sans-serif;fill:#fff}
+      .role{font:700 22px Inter,"Noto Sans SC",Arial,sans-serif;fill:#0f172a}
+      .body{font:15px Inter,"Noto Sans SC",Arial,sans-serif;fill:#334155}
+      .small{font:13px Inter,"Noto Sans SC",Arial,sans-serif;fill:#64748b}
+      .gate{font:700 14px Inter,"Noto Sans SC",Arial,sans-serif;fill:#0f172a}
+      .flow{stroke:#64748b;stroke-width:2.6;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+
+  <rect width="1440" height="660" fill="#f8fafc"/>
+  <text x="720" y="48" text-anchor="middle" class="title">Franka Panda 三仓系统：执行 → 交付 → 验证</text>
+  <text x="720" y="77" text-anchor="middle" class="subtitle">三个仓库各自拥有事实源，通过版本化合同、Handoff 与 trace 连接</text>
+
+  <g>
+    <rect x="50" y="120" width="390" height="350" rx="18" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="2"/>
+    <rect x="50" y="120" width="390" height="64" rx="18" fill="#059669"/>
+    <rect x="50" y="166" width="390" height="18" fill="#059669"/>
+    <text x="245" y="160" text-anchor="middle" class="repo">ros2-arm-teleoperation-suite</text>
+    <text x="78" y="226" class="role">上游 · 在线执行层</text>
+    <text x="78" y="266" class="body">ROS 2 编排 · MoveIt Servo · 阻抗控制</text>
+    <text x="78" y="298" class="body">MuJoCo / bounded Isaac · safety monitor</text>
+    <text x="78" y="330" class="body">Episode 采集 · physical Gate · Task GT</text>
+    <rect x="78" y="370" width="334" height="65" rx="11" fill="#fff" stroke="#a7f3d0"/>
+    <text x="96" y="396" class="small">事实输出</text>
+    <text x="96" y="421" class="body">raw episode + meta · runtime outcome</text>
+  </g>
+
+  <g>
+    <rect x="525" y="104" width="390" height="382" rx="18" fill="#eff6ff" stroke="#60a5fa" stroke-width="3"/>
+    <rect x="525" y="104" width="390" height="80" rx="18" fill="#2563eb"/>
+    <rect x="525" y="166" width="390" height="18" fill="#2563eb"/>
+    <text x="720" y="137" text-anchor="middle" class="repo">robot-arm-episode-data-lab</text>
+    <text x="720" y="162" text-anchor="middle" style="font:600 13px Inter,'Noto Sans SC',Arial,sans-serif;fill:#dbeafe">跨仓合同与交付控制平面</text>
+    <text x="553" y="226" class="role">中游 · 版本化交付层</text>
+    <text x="553" y="266" class="body">schema / action 合同 · inspect · split</text>
+    <text x="553" y="298" class="body">non-overwrite / immutable Release</text>
+    <text x="553" y="330" class="body">训练与离线 Gate · checkpoint audit</text>
+    <text x="553" y="362" class="body">framework-neutral Handoff</text>
+    <rect x="553" y="392" width="334" height="65" rx="11" fill="#fff" stroke="#93c5fd"/>
+    <text x="571" y="418" class="small">事实输出</text>
+    <text x="571" y="443" class="body">manifest · report · predicted actions</text>
+  </g>
+
+  <g>
+    <rect x="1000" y="120" width="390" height="350" rx="18" fill="#fff7ed" stroke="#fdba74" stroke-width="2"/>
+    <rect x="1000" y="120" width="390" height="64" rx="18" fill="#ea580c"/>
+    <rect x="1000" y="166" width="390" height="18" fill="#ea580c"/>
+    <text x="1195" y="160" text-anchor="middle" class="repo">ros2-moveit-pybullet-bridge</text>
+    <text x="1028" y="226" class="role">下游 · 运行验证层</text>
+    <text x="1028" y="266" class="body">Handoff Loader · PolicyRunner replay</text>
+    <text x="1028" y="298" class="body">Panda Action Adapter · PyBullet</text>
+    <text x="1028" y="330" class="body">distribution · risk · Hold / E-stop · HOC</text>
+    <rect x="1028" y="370" width="334" height="65" rx="11" fill="#fff" stroke="#fed7aa"/>
+    <text x="1046" y="396" class="small">事实输出</text>
+    <text x="1046" y="421" class="body">replay / risk / HOC trace</text>
+  </g>
+
+  <path d="M440 300 H515" class="flow"/>
+  <text x="478" y="282" text-anchor="middle" class="small">raw episode</text>
+  <path d="M915 300 H990" class="flow"/>
+  <text x="952" y="282" text-anchor="middle" class="small">handoff</text>
+
+  <text x="720" y="532" text-anchor="middle" class="role">分层证据不能越级升级</text>
+  <g>
+    <rect x="50" y="560" width="196" height="52" rx="10" fill="#ecfeff" stroke="#67e8f9"/>
+    <text x="148" y="591" text-anchor="middle" class="gate">Data</text>
+    <rect x="268" y="560" width="196" height="52" rx="10" fill="#eff6ff" stroke="#93c5fd"/>
+    <text x="366" y="591" text-anchor="middle" class="gate">Offline</text>
+    <rect x="486" y="560" width="196" height="52" rx="10" fill="#f5f3ff" stroke="#c4b5fd"/>
+    <text x="584" y="591" text-anchor="middle" class="gate">Interface</text>
+    <rect x="704" y="560" width="196" height="52" rx="10" fill="#fff7ed" stroke="#fdba74"/>
+    <text x="802" y="591" text-anchor="middle" class="gate">Behavior</text>
+    <rect x="922" y="560" width="196" height="52" rx="10" fill="#fefce8" stroke="#fde047"/>
+    <text x="1020" y="591" text-anchor="middle" class="gate">Task GT</text>
+    <rect x="1140" y="560" width="250" height="52" rx="10" fill="#ecfdf5" stroke="#6ee7b7"/>
+    <text x="1265" y="591" text-anchor="middle" class="gate">System / Safety</text>
+  </g>
+  <text x="720" y="638" text-anchor="middle" class="small">Offline Pass ≠ Task Success · Replay Complete ≠ Sim2Real · 软件 Hold / E-stop ≠ 功能安全认证</text>
+</svg>

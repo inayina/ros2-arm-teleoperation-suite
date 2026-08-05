@@ -8,6 +8,7 @@ from std_msgs.msg import String, Float64
 from std_srvs.srv import Trigger, SetBool
 from moveit_msgs.srv import ServoCommandType
 from teleop_interfaces.srv import EndEpisode
+from teleop_interfaces.msg import TaskEvaluationStatus
 import tf2_ros
 from rcl_interfaces.srv import SetParameters
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
@@ -22,6 +23,10 @@ from synth_data_gen.continuous_evaluator import (
     ContinuousTaskEvaluator,
     EvaluatorSample,
     append_episode_result,
+)
+from synth_data_gen.task_gt_live import (
+    build_task_gt_snapshot,
+    populate_task_evaluation_status,
 )
 
 class BatchGenerator(Node):
@@ -168,6 +173,7 @@ class BatchGenerator(Node):
         self._continuous_evaluator = None
         self._eval_episode_index = 0
         self._eval_bin_xy = None
+        self._task_event_sequence = 0
         if self.episode_results_path and not self.evaluation_run_id:
             self.evaluation_run_id = f"batch_generator_{int(time.time())}"
         
@@ -202,6 +208,9 @@ class BatchGenerator(Node):
         self.pub_pose = self.create_publisher(PoseStamped, '/teleop/cmd_pose', 10)
         self.pub_twist = self.create_publisher(TwistStamped, '/teleop/cmd_twist', 10)
         self.pub_grip = self.create_publisher(Float64, '/teleop/gripper_cmd', 10)
+        self.pub_task_gt = self.create_publisher(
+            TaskEvaluationStatus, '/task/evaluation_status', 10
+        )
         self.sub_object = self.create_subscription(
             PoseStamped, '/sim/object_pose', self._on_object_pose, 10)
         self.sub_ee = self.create_subscription(
@@ -465,12 +474,18 @@ class BatchGenerator(Node):
                 self.get_logger().info(
                     f'FSM Phase 2d: Pre-close open hold ({self.pre_close_hold:.2f}s).'
                 )
+                if self._continuous_evaluator is not None:
+                    self._continuous_evaluator.set_phase('pre_close')
+                    self._observe_continuous_sample(phase_hint='pre_close')
                 self.pub_grip.publish(Float64(data=1.0))
                 self._publish_motion_hold(pick_p, down_q, duration=self.pre_close_hold)
 
             if motion_ok:
                 # 阶段3：合拢夹爪抓取
                 self.get_logger().info("FSM Phase 3: Close Gripper.")
+                if self._continuous_evaluator is not None:
+                    self._continuous_evaluator.set_phase('close')
+                    self._observe_continuous_sample(phase_hint='close')
                 self._move_gripper_smooth(1.0, self.gripper_close_target, duration=self.close_duration)
                 self._lock_gripper(self.gripper_close_target)
                 self._publish_motion_hold(pick_p, down_q, duration=self.grasp_pause)
@@ -515,6 +530,9 @@ class BatchGenerator(Node):
 
                 # 阶段7：松开夹爪释放物体
                 self.get_logger().info("FSM Phase 7: Release Gripper.")
+                if self._continuous_evaluator is not None:
+                    self._continuous_evaluator.set_phase('release')
+                    self._observe_continuous_sample(phase_hint='release')
                 self._release_gripper_lock()
                 self._move_gripper_smooth(0.0, 1.0, duration=self.close_duration)
                 time.sleep(0.5)
@@ -1000,6 +1018,22 @@ class BatchGenerator(Node):
                 phase_hint=phase_hint,
             )
         )
+        snapshot = build_task_gt_snapshot(
+            ev,
+            initialized=ev._initial_object_xyz is not None,
+            current_object_xyz=obj,
+        )
+        stamp = self.get_clock().now().to_msg()
+        message = populate_task_evaluation_status(
+            TaskEvaluationStatus(),
+            snapshot,
+            stamp=stamp,
+            trace_run_id=self.evaluation_run_id or 'batch_collection',
+            episode_id=f'episode_{self._eval_episode_index:04d}',
+            event_sequence=self._task_event_sequence,
+        )
+        self.pub_task_gt.publish(message)
+        self._task_event_sequence += 1
 
     def _write_episode_result_row(
         self,
@@ -1366,6 +1400,9 @@ class BatchGenerator(Node):
         xy_tol=None,
         z_tol=None,
     ):
+        if self._continuous_evaluator is not None:
+            self._continuous_evaluator.set_phase(label)
+            self._observe_continuous_sample(phase_hint=label)
         actual_start, hold_ori = self._motion_start_from_ee()
         if self.motion_mode == 'twist':
             return self._stream_twist_toward(

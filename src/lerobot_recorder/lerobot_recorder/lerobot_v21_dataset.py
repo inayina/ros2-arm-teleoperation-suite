@@ -37,6 +37,7 @@ TABULAR_KEYS = (
     "done",
     "task",
     "language_instruction",
+    "task_phase",
     "success",
     "safety_estop",
     "drive_fault",
@@ -201,6 +202,7 @@ def build_info_features(normalized: list[dict], fps: float) -> dict[str, dict[st
             "names": [f"action_{index}" for index in range(action_dim)],
         },
         "language_instruction": {"dtype": "string", "shape": [1], "names": None},
+        "task_phase": {"dtype": "string", "shape": [1], "names": None},
         "success": {"dtype": "bool", "shape": [1], "names": None},
         "safety_estop": {"dtype": "bool", "shape": [1], "names": None},
         "drive_fault": {"dtype": "bool", "shape": [1], "names": None},
@@ -235,6 +237,7 @@ def episode_to_parquet_table(
         "next.reward": [0.0] * num_frames,
         "task": [str(frame["task"]) for frame in normalized],
         "language_instruction": [str(frame["language_instruction"]) for frame in normalized],
+        "task_phase": [str(frame.get("task_phase", "UNAVAILABLE")) for frame in normalized],
         "success": [bool(frame["success"]) for frame in normalized],
         "safety_estop": [bool(frame["safety_estop"]) for frame in normalized],
         "drive_fault": [bool(frame["drive_fault"]) for frame in normalized],
@@ -521,6 +524,10 @@ def validate_episode(root: Path, episode_index: int, min_frames: int) -> list[st
             errors.append(f"{parquet_file}: depth frames != parquet rows")
     if rows and not all(str(row.get("language_instruction", "")).strip() for row in rows):
         errors.append(f"{parquet_file}: language_instruction contains empty values")
+    if rows and "task_phase" in rows[0] and any(
+        str(row.get("task_phase", "")).strip() == "" for row in rows
+    ):
+        errors.append(f"{parquet_file}: task_phase contains empty values")
     if rows and not all(bool(row.get("success")) for row in rows):
         errors.append(f"{parquet_file}: success is not true for every frame")
     if rows and any(bool(row.get("safety_estop")) for row in rows):

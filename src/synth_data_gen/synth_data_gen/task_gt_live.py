@@ -31,8 +31,13 @@ def _running_phase(evaluator: ContinuousTaskEvaluator) -> str:
     raw_hint = str(evaluator._phase or '').strip().upper()
     aliases = {
         'VALIDATE': 'DONE',
+        'READY': 'HOVER',
         'APPROACH': 'HOVER',
         'APPROACH_XY': 'HOVER',
+        'PICK': 'DESCEND',
+        'PICK_XY': 'DESCEND',
+        'PICK_Z': 'DESCEND',
+        'PRE_CLOSE': 'CLOSE',
         'GRASP': 'CLOSE',
     }
     hint = aliases.get(raw_hint, raw_hint)

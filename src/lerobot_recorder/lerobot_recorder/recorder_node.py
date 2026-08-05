@@ -13,7 +13,12 @@ from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseStamped, WrenchStamped
 from std_msgs.msg import Float64, String
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-from teleop_interfaces.msg import DriveStatus, DriveStatusArray, SafetyStatus
+from teleop_interfaces.msg import (
+    DriveStatus,
+    DriveStatusArray,
+    SafetyStatus,
+    TaskEvaluationStatus,
+)
 from teleop_interfaces.srv import EndEpisode
 
 from .lerobot_writer import write_episode
@@ -63,6 +68,7 @@ class RecorderNode(Node):
         self.declare_parameter("expected_frame_rate_hz", 10.0)
         self.declare_parameter("close_command_threshold", 0.12)
         self.declare_parameter("require_close_command_for_batch", True)
+        self.declare_parameter("require_task_phase_for_batch", False)
         self.declare_parameter("simulator_backend", "")
         self.declare_parameter("simulator_version", "")
         self.declare_parameter("scene_id", "")
@@ -78,6 +84,9 @@ class RecorderNode(Node):
         self.recording = False
         self.frames = []
         self._current_episode_metadata = {}
+        self._frame_task_phases = []
+        self._task_phase = "UNAVAILABLE"
+        self._task_phase_valid = False
 
         self._grip = 0.0
         self._grip_cmd = None
@@ -97,6 +106,12 @@ class RecorderNode(Node):
         self.create_subscription(SafetyStatus, "/safety/status", self._on_safety, 10)
         self.create_subscription(DriveStatusArray, "/servo_drive/status", self._on_drive_status, 10)
         self.create_subscription(String, "/teleop/record_trigger", self._on_trigger, 10)
+        self.create_subscription(
+            TaskEvaluationStatus,
+            "/task/evaluation_status",
+            self._on_task_gt,
+            10,
+        )
         self.srv_end_episode = self.create_service(
             EndEpisode, "/lerobot_recorder/end_episode", self._on_end_episode
         )
@@ -141,6 +156,15 @@ class RecorderNode(Node):
     def _on_action(self, m): self._action = m
     def _on_safety(self, m): self._safety_estop = bool(m.estop_active)
 
+    def _on_task_gt(self, msg: TaskEvaluationStatus):
+        valid_source = (
+            msg.validity == "VALID"
+            and msg.gt_source == "upstream_continuous_task_evaluator"
+            and bool(msg.phase)
+        )
+        self._task_phase_valid = valid_source
+        self._task_phase = str(msg.phase) if valid_source else "UNAVAILABLE"
+
     def _on_drive_status(self, msg: DriveStatusArray):
         self._drive_fault = any(
             d.ds402_state == DriveStatus.STATE_FAULT or d.fault_code != 0
@@ -160,6 +184,7 @@ class RecorderNode(Node):
 
     def _start_recording(self):
         self.frames = []
+        self._frame_task_phases = []
         self._current_episode_metadata = {}
         self._close_command_seen = False
         self._command_missing_rejects = 0
@@ -186,6 +211,22 @@ class RecorderNode(Node):
             self.frames = []
             self._current_episode_metadata = {}
             return None
+        if (
+            str(self.get_parameter("upstream_gate").value) == "batch_generator"
+            and bool(self.get_parameter("require_task_phase_for_batch").value)
+            and (
+                len(self._frame_task_phases) != len(self.frames)
+                or any(phase == "UNAVAILABLE" for phase in self._frame_task_phases)
+            )
+        ):
+            self._last_commit_error = "missing valid upstream Task GT phase"
+            self.get_logger().error(
+                "rejecting batch episode: frame-level Task GT phase incomplete"
+            )
+            self.frames = []
+            self._frame_task_phases = []
+            self._current_episode_metadata = {}
+            return None
         metadata = dict(self._current_episode_metadata)
         metadata["stop_trigger_success"] = bool(success)
         metadata["upstream_gate"] = str(self.get_parameter("upstream_gate").value)
@@ -205,6 +246,10 @@ class RecorderNode(Node):
                 "gripper_command": "/teleop/gripper_cmd",
                 "gripper_observation": "/gripper/state",
             },
+            "task_phase_contract_version": "panda_train_frame_phase_v1",
+            "task_phase_source": "upstream_continuous_task_evaluator",
+            "task_phase_semantics": "continuous_gt_achieved_subgoal_frontier",
+            "task_phases": list(self._frame_task_phases),
         })
         for provenance_key in (
             "simulator_backend",
@@ -246,6 +291,7 @@ class RecorderNode(Node):
         self.get_logger().info(f"saved {len(self.frames)} frames -> {path}")
         self.episode_index += 1
         self.frames = []
+        self._frame_task_phases = []
         self._current_episode_metadata = {}
         self._last_commit_error = ""
         return path
@@ -283,6 +329,7 @@ class RecorderNode(Node):
     def _discard_recording(self, reason: str = "discard"):
         frame_count = len(self.frames)
         self.frames = []
+        self._frame_task_phases = []
         self.recording = False
         self._current_episode_metadata = {}
         self.get_logger().warn(
@@ -354,12 +401,14 @@ class RecorderNode(Node):
             "success": True,
             "safety_estop": self._safety_estop,
             "drive_fault": self._drive_fault,
+            "task_phase": self._task_phase if self._task_phase_valid else "UNAVAILABLE",
         }
         if self.capture_mode == "portfolio":
             frame["observation.images.scene"] = _img_to_np(color)
             if bool(self.get_parameter("enable_wrist_camera").value) and wrist_color is not None:
                 frame["observation.images.wrist"] = _img_to_np(wrist_color)
         self.frames.append(frame)
+        self._frame_task_phases.append(frame["task_phase"])
 
     def _publish_diagnostics(self):
         elapsed = max(time.perf_counter() - self._record_started, 1e-9)

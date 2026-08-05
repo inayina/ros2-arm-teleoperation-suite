@@ -399,6 +399,8 @@ run_one_seed() {
 
   set +e
   echo "[smolvla-s4-mujoco] seed=${seed} domain=${ROS_DOMAIN_ID} timeout=${POLICY_RUNTIME_TIMEOUT_S}s device=${DEVICE} telemetry=${DUMP_TELEMETRY}"
+  local telemetry_episode_id
+  telemetry_episode_id="$(printf 'episode_%04d_seed_%s' "${episode_index}" "${seed}")"
   TELEMETRY_ARGS=()
   if [[ "${DUMP_TELEMETRY}" == "true" ]]; then
     mkdir -p "${trial_dir}/telemetry/camera"
@@ -425,6 +427,8 @@ run_one_seed() {
     -p workspace_max:="[${WORKSPACE_MAX}]" \
     -p task:="${TASK}" \
     -p output_path:="${trial_dir}/report.json" \
+    -p policy_runtime_trace_run_id:="${EVALUATION_RUN_ID}" \
+    -p policy_runtime_episode_id:="${telemetry_episode_id}" \
     "${TELEMETRY_ARGS[@]}" \
     > "${trial_dir}/policy.log" 2>&1
   local policy_status=$?

@@ -626,6 +626,8 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
             camera_rel = self._maybe_dump_camera_frame(action_index, image)
             entry = {
                 'index': action_index,
+                'observation_monotonic_ns': int(captured_monotonic_ns),
+                'inference_completed_monotonic_ns': time.monotonic_ns(),
                 'raw_action': raw_action,
                 'bounded_action': list(bounded.values),
                 'action_clipped': bounded.clipped,
@@ -867,7 +869,13 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
         if self._observations_jsonl is None:
             return
         row = {
+            'contract_version': 'smolvla_observation_telemetry_v2',
             'index': entry['index'],
+            'episode_id': self._shadow_context.episode_id,
+            'observation_monotonic_ns': entry['observation_monotonic_ns'],
+            'inference_completed_monotonic_ns': entry[
+                'inference_completed_monotonic_ns'
+            ],
             'state15': entry['state15'],
             'source_ee_pose': entry['source_ee_pose'],
             'gripper_cmd': entry['gripper_cmd'],

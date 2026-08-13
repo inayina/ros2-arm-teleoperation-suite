@@ -25,6 +25,10 @@ bin/project-evidence impact --base HEAD~1 --head HEAD
 | [ARCHITECTURE_V2.md](./ARCHITECTURE_V2.md) | V2 工业级七层架构：系统图 / 节点图 / Topic 图 / Package 结构 / Launch 架构 |
 | [ARCHITECTURAL_DECISION_RECORDS.md](./ARCHITECTURAL_DECISION_RECORDS.md) | 关键架构决策：为什么选 MuJoCo 而非 Gazebo、为什么选 CANopen 而非 EtherCAT |
 | [PROJECT_SCOPE_AND_ACCEPTANCE.md](./PROJECT_SCOPE_AND_ACCEPTANCE.md) | 项目边界、非目标、`use_sim`/CAN 模式说明与 M1-M7 验收入口 |
+| [GEOMETRY_TIMING_DIAGNOSTICS_AUDIT.md](./GEOMETRY_TIMING_DIAGNOSTICS_AUDIT.md) | 2026-08-13 TF/FK、相机外参与 timestamp skew 只读审计基线 |
+| [SIMULATION_GEOMETRY_STAGE1_REPORT.md](./SIMULATION_GEOMETRY_STAGE1_REPORT.md) | Stage 1：独立 FK、cross-model REPORT_ONLY、controller=`panda_link7` 合同冻结 |
+| [SIMULATION_GEOMETRY_STAGE2_REPORT.md](./SIMULATION_GEOMETRY_STAGE2_REPORT.md) | Stage 1 live TF closeout + Stage 2 joint-zero/TCP fault injection（诊断副本） |
+| [CONTROL_FRAME_ALIGNMENT_PROPOSAL.md](./CONTROL_FRAME_ALIGNMENT_PROPOSAL.md) | 可选：阻抗 tip 对齐 `panda_ee` 的提案（未实施） |
 | [ROADMAP.md](./ROADMAP.md) | 开发路线图、分支策略、逐里程碑检查清单（M1–M7） |
 | [MEDIA_CAPTURE_PLAN.md](./MEDIA_CAPTURE_PLAN.md) | 各里程碑媒体采集计划（截图/GIF/录屏），规定内容、命令、存放路径与嵌入位置 |
 | [M7_GRASP_DEBUGGING.md](./M7_GRASP_DEBUGGING.md) | M7 物理抓取调试记录、无 GIF 调参流程、自适应夹持力验收门槛 |

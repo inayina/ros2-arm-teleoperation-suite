@@ -1,0 +1,19 @@
+# Stage-2 diagnostic fault injection config (radians / meters).
+# These offsets apply ONLY to diagnostic model copies — never to /joint_states.
+joint_zero_offsets: {}
+
+tcp_offsets:
+  dx_m: 0.0
+  dy_m: 0.0
+  dz_m: 0.0
+  droll_rad: 0.0
+  dpitch_rad: 0.0
+  dyaw_rad: 0.0
+
+# Optional minimal kinematic origin bias (diagnostic copy only).
+joint_origin_offsets: []
+
+labels:
+  joint_zero: "injected joint-zero offset"
+  tcp: "injected TCP offset"
+  joint_origin: "injected joint origin translation bias"

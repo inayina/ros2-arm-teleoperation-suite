@@ -56,3 +56,4 @@ MUJOCO_LOG.TXT
 .m7_run_logs/
 .media_evidence/
 evidence/
+.ros_diag_log/

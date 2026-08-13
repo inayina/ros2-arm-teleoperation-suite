@@ -1,0 +1,33 @@
+# Frozen Stage-1 contract for cartesian_impedance_controller analytic FK/Jacobian.
+# Control law was NOT modified. Naming/docs corrected to match measured geometry.
+#
+# Evidence (zero pose, 2026-08-13 Stage 1):
+#   controller analytic FK translation ≈ [0.088, 0.000, 1.033]
+#   URDF/MuJoCo panda_link7           ≈ [0.088, 0.000, 1.033]  (‖Δp‖ ≈ 0)
+#   URDF/MuJoCo panda_hand            ≈ [0.088, 0.000, 0.926]  (‖Δp‖ ≈ 0.107)
+#   URDF/MuJoCo panda_ee              ≈ [0.088, 0.000, 0.826]  (‖Δp‖ ≈ 0.207)
+#   Rotation: controller ≡ panda_link7 (geodesic ≈ 0);
+#             vs hand/ee ≈ π/4 from fixed hand yaw.
+#
+# 0.207 m zero-pose z gap vs panda_ee is exactly the fixed chain
+#   panda_link7 → panda_hand (0.107 m) → panda_ee (0.10 m)
+# applied along link7 local +z (base −z at q=0). Not a free DH typo.
+# Do NOT add a blind +0.207 m TCP offset without redesigning the control target.
+
+status: FROZEN_STAGE1
+control_law_modified: false
+reference_point: panda_link7
+reference_point_aliases:
+  - frank_emika_modified_dh_frame_after_joint7
+  - not_panda_hand
+  - not_panda_ee
+  - not_flange_tcp
+jacobian_reference_point: panda_link7
+jacobian_consistent_with_fk: true
+desired_and_current_use_same_fk: true
+moveit_servo_tip_frame: panda_ee
+servo_vs_impedance_frame_mismatch: true
+recommended_followup: rename docs/symbols to panda_link7; optional Stage-2 redesign to track panda_ee only with explicit human approval
+forbidden_without_approval:
+  - add_0_207_tcp_compensation
+  - change_impedance_control_law

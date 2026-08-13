@@ -1,0 +1,16 @@
+# Stage 1 geometry diagnostics (REPORT_ONLY). No PASS thresholds.
+frame_from: panda_link0
+fk_target: panda_ee
+controller_reference_point: panda_link7
+joint_names:
+  - panda_joint1
+  - panda_joint2
+  - panda_joint3
+  - panda_joint4
+  - panda_joint5
+  - panda_joint6
+  - panda_joint7
+mujoco_model: config/models/franka_panda.xml
+mujoco_ee_site: panda_ee
+result_semantics: REPORT_ONLY
+physical: NOT_RUN/UNAVAILABLE

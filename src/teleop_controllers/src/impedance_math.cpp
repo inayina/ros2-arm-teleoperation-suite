@@ -13,6 +13,10 @@
 //   Row i = [a_{i-1}, d_i, alpha_{i-1}, theta_offset_i]
 //   T_{i-1,i} = Rot_x(alpha) * Trans_x(a) * Rot_z(theta+offset) * Trans_z(d)
 //
+// Reference frame contract (Stage 1, control law unchanged):
+//   FK/Jacobian tip = panda_link7 (DH frame after joint 7).
+//   Does NOT apply panda_hand (0.107 m) or panda_ee (0.10 m) fixed transforms.
+//
 // Reference: Franka Emika Panda Technical Specification, Table 4.
 //            https://frankaemika.github.io/docs/control_parameters.html
 
@@ -107,7 +111,7 @@ Eigen::Matrix<double, 6, 7> jacobian(const Eigen::Matrix<double, 7, 1> & q)
     p[i + 1] = T.translation();    // origin of frame i in base
   }
 
-  // p_ee = p[kNumJoints] (end-effector origin in base frame)
+  // p_ee here is the analytic tip origin (= panda_link7), not URDF panda_ee.
   const Eigen::Vector3d p_ee = p[kNumJoints];
 
   Eigen::Matrix<double, 6, 7> J;

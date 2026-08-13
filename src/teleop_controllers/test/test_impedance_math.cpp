@@ -41,14 +41,13 @@ static Eigen::Matrix<double, 7, 1> zero_q()
 
 TEST(FKTest, ZeroConfigTranslationZ)
 {
-  // At q = 0 the arm hangs down; the EE translation should be along +z
-  // The total reach along z equals d1 + d3 + d5 = 0.333 + 0.316 + 0.384 = 1.033 m.
+  // Analytic tip is panda_link7 (not panda_ee). At q=0, z = d1+d3+d5 = 1.033 m.
   const auto T = forward_kinematics(zero_q());
   EXPECT_NEAR(T.translation().z(), 1.033, 1e-3)
-    << "EE z-translation at zero config should ≈ 1.033 m";
+    << "panda_link7 z-translation at zero config should ≈ 1.033 m";
   // At zero config x should be a7 + a4 - a5 = 0.088 + 0.0825 - 0.0825 = 0.088 m
   EXPECT_NEAR(T.translation().x(), 0.088, 1e-3)
-    << "EE x-translation at zero config should ≈ 0.088 m";
+    << "panda_link7 x-translation at zero config should ≈ 0.088 m";
 }
 
 TEST(FKTest, RotationIsOrthonormal)

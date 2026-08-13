@@ -51,6 +51,10 @@ class TestLeRobotRecorder(unittest.TestCase):
         node._grip_cmd = 0.10
         node._safety_estop = False
         node._drive_fault = False
+        # Fixture-only: __new__ skips Node.__init__; runtime sets these in __init__.
+        node._task_phase = "UNAVAILABLE"
+        node._task_phase_valid = False
+        node._frame_task_phases = []
         node.frames = []
         node.episode_index = 3
         node.task = "test"

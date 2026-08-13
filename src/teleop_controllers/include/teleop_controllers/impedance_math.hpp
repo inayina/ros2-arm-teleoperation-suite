@@ -41,10 +41,16 @@ extern const double kDH[kNumJoints][4];
 // Forward Kinematics
 // ---------------------------------------------------------------------------
 
-/// Compute the end-effector pose in the base frame.
+/// Compute the analytic FK pose in the base frame (panda_link0).
+///
+/// Stage-1 geometry contract (diagnostics evidence, control law unchanged):
+/// this transform is the Franka modified-DH frame after joint 7, which matches
+/// URDF/MuJoCo ``panda_link7``. It does **not** include the fixed chain
+/// ``panda_link7 → panda_hand → panda_ee`` (0.107 m + 0.10 m).
+/// Jacobian() uses the same reference point.
 ///
 /// \param q  Joint angles [rad], length kNumJoints.
-/// \returns  Homogeneous transform T_{base→ee} as Eigen::Isometry3d.
+/// \returns  Homogeneous transform T_{panda_link0→panda_link7} as Eigen::Isometry3d.
 Eigen::Isometry3d forward_kinematics(const Eigen::Matrix<double, 7, 1> & q);
 
 // ---------------------------------------------------------------------------
@@ -54,7 +60,8 @@ Eigen::Isometry3d forward_kinematics(const Eigen::Matrix<double, 7, 1> & q);
 /// Compute the 6×7 geometric Jacobian in the base frame.
 ///
 /// Columns are [Jv; Jw] for each joint (linear velocity on top,
-/// angular velocity on bottom).
+/// angular velocity on bottom). The linear reference point is the same
+/// analytic FK origin (``panda_link7`` / DH frame after joint 7), not panda_ee.
 ///
 /// \param q  Joint angles [rad], length kNumJoints.
 /// \returns  J ∈ ℝ^{6×7}.

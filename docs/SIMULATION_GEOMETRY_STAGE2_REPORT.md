@@ -4,11 +4,19 @@
 |---|---|
 | Status | Stage 1 closeout **PASS** + Stage 2 fault injection implemented |
 | Date | 2026-08-13 |
-| Commit (evidence) | `f3a760774d02aabf6a6bdd2993a53e1738b867b5` |
+| Audit baseline commit | `f3a760774d02aabf6a6bdd2993a53e1738b867b5` |
+| Implementation commit | `a131e180a77709f60d8b3a2bfb1a8cb0762b64e0` |
+| Evidence generation commit | regenerate via `python3 -m teleop_diagnostics.stage2_cli` (stamped in `run_manifest.json`) |
 | Package | `teleop_diagnostics` |
 | Physical | `NOT_RUN/UNAVAILABLE` |
 | Control law modified | **false** |
 | Runtime topics mutated | **false** |
+
+> **Provenance note:** An earlier draft used a single `Commit (evidence)` field equal to the
+> audit baseline SHA (`f3a7607…`). That was ambiguous because Stage 2 *implementation* landed
+> later as `a131e18…`, while some evidence CSVs were generated from an uncommitted working
+> tree that still reported `HEAD=f3a7607`. Prefer the three fields above; do not treat
+> `audit_baseline_commit` as the implementation SHA.
 
 > Note: requested filename `docs/SIMULATION_GEOMETRY_TIMING_DIAGNOSTICS.md` does **not**
 > exist in this repo. The audit baseline remains

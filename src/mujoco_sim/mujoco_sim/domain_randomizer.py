@@ -1,8 +1,10 @@
 import math
 import random
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import numpy as np
+
+from mujoco_sim.camera_extrinsics import CameraExtrinsicAuthority, CameraExtrinsicState
 
 
 class DomainRandomizer:
@@ -12,12 +14,16 @@ class DomainRandomizer:
         self.config = config.get("domain_randomization", {})
         self.enabled = self.config.get("enabled", False)
         seed = self.config.get("seed", None)
+        self.seed = int(seed) if seed is not None else None
         if seed is not None:
             random.seed(seed)
             np.random.seed(seed)
         self.orig_cam_pos = {}
         self.orig_cam_quat = {}
         self.orig_light_diffuse = {}
+        self.camera_draw_index = 0
+        self.last_camera_states: Dict[str, CameraExtrinsicState] = {}
+        self._camera_authority: Optional[CameraExtrinsicAuthority] = None
 
     def apply(self, model, data, mujoco):
         """Apply randomizations to the scene.
@@ -28,6 +34,7 @@ class DomainRandomizer:
         """
         self.restore_object_poses(model, data, mujoco, randomize=self.enabled)
         if not self.enabled:
+            self._publishable_nominal_cameras(model, mujoco)
             return
         self._randomize_cameras(model, mujoco)
         self._randomize_lighting(model, mujoco)
@@ -152,68 +159,67 @@ class DomainRandomizer:
         # Kept for tests / callers; pose restore + optional DR live in restore_object_poses.
         self.restore_object_poses(model, data, mujoco, randomize=True)
 
-    def _randomize_cameras(self, model, mujoco):
-        cam_cfg = self.config.get("camera", {})
-        for cam_name, params in cam_cfg.items():
+    def _ensure_camera_authority(self, model, mujoco) -> CameraExtrinsicAuthority:
+        if self._camera_authority is None or self._camera_authority.model is not model:
+            self._camera_authority = CameraExtrinsicAuthority(model, mujoco)
+        return self._camera_authority
+
+    def _cache_nominal_camera(self, model, mujoco, cam_name: str, cam_id: int) -> None:
+        # Keep legacy cache fields for existing unit tests.
+        if cam_id not in self.orig_cam_pos:
+            auth = self._ensure_camera_authority(model, mujoco)
+            nom = auth.nominal(cam_name)
+            self.orig_cam_pos[cam_id] = np.array(nom.nominal_translation, dtype=float)
+            self.orig_cam_quat[cam_id] = np.array(nom.nominal_quat_wxyz, dtype=float)
+
+    def _publishable_nominal_cameras(self, model, mujoco) -> None:
+        """When DR is off, still expose XML nominal as the effective extrinsic."""
+        cam_cfg = self.config.get("camera", {}) or {"scene_camera": {}}
+        auth = self._ensure_camera_authority(model, mujoco)
+        states: Dict[str, CameraExtrinsicState] = {}
+        for cam_name in cam_cfg:
             cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, cam_name)
             if cam_id < 0:
                 continue
+            self._cache_nominal_camera(model, mujoco, cam_name, cam_id)
+            states[cam_name] = auth.reset_nominal(cam_name, write_model=True)
+        # Always include scene_camera even if config omitted it.
+        if "scene_camera" not in states:
+            cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "scene_camera")
+            if cam_id >= 0:
+                self._cache_nominal_camera(model, mujoco, "scene_camera", cam_id)
+                states["scene_camera"] = auth.reset_nominal("scene_camera", write_model=True)
+        self.last_camera_states = states
 
-            # Cache original pose to prevent drift over multiple resets
-            if cam_id not in self.orig_cam_pos:
-                self.orig_cam_pos[cam_id] = np.array(model.cam_pos[cam_id])
-            if cam_id not in self.orig_cam_quat:
-                self.orig_cam_quat[cam_id] = np.array(model.cam_quat[cam_id])
+    def _randomize_cameras(self, model, mujoco):
+        """Apply camera-local ΔT via CameraExtrinsicAuthority (shared seed stream).
 
-            pos_noise = params.get("pos_noise")
-            if pos_noise:
-                dx = random.uniform(pos_noise[0], pos_noise[1])
-                dy = random.uniform(pos_noise[0], pos_noise[1])
-                dz = random.uniform(pos_noise[0], pos_noise[1])
-                model.cam_pos[cam_id][0] = self.orig_cam_pos[cam_id][0] + dx
-                model.cam_pos[cam_id][1] = self.orig_cam_pos[cam_id][1] + dy
-                model.cam_pos[cam_id][2] = self.orig_cam_pos[cam_id][2] + dz
+        Perturbation composition is camera-local::
+            T_effective = T_nominal @ ΔT_local
+        so the actual RGB renderer (camera_bridge) can recompute the same
+        effective pose from (XML nominal, seed, draw_index, config) without a
+        second independent ``random`` draw.
+        """
+        cam_cfg = self.config.get("camera", {})
+        if not cam_cfg:
+            self._publishable_nominal_cameras(model, mujoco)
+            return
+        auth = self._ensure_camera_authority(model, mujoco)
+        for cam_name in cam_cfg:
+            cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, cam_name)
+            if cam_id < 0:
+                continue
+            self._cache_nominal_camera(model, mujoco, cam_name, cam_id)
 
-            rot_noise = params.get("rot_noise")
-            if rot_noise:
-                # rot_noise in degrees, convert to radians
-                r = math.radians(random.uniform(rot_noise[0], rot_noise[1]))
-                p = math.radians(random.uniform(rot_noise[0], rot_noise[1]))
-                y = math.radians(random.uniform(rot_noise[0], rot_noise[1]))
-
-                # Convert RPY angles to noise quaternion (WXYZ)
-                cy = math.cos(y * 0.5)
-                sy = math.sin(y * 0.5)
-                cp = math.cos(p * 0.5)
-                sp = math.sin(p * 0.5)
-                cr = math.cos(r * 0.5)
-                sr = math.sin(r * 0.5)
-
-                qw = cr * cp * cy + sr * sp * sy
-                qx = sr * cp * cy - cr * sp * sy
-                qy = cr * sp * cy + sr * cp * sy
-                qz = cr * cp * sy - sr * sp * cy
-                noise_q = np.array([qw, qx, qy, qz])
-
-                # Multiply original quaternion with noise quaternion
-                orig_q = self.orig_cam_quat[cam_id]
-                w1, x1, y1, z1 = orig_q
-                w2, x2, y2, z2 = noise_q
-
-                new_w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-                new_x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
-                new_y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
-                new_z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-
-                # Normalize quaternion to prevent numerical issues
-                mag = math.sqrt(new_w**2 + new_x**2 + new_y**2 + new_z**2)
-                if mag > 1e-6:
-                    new_w /= mag
-                    new_x /= mag
-                    new_y /= mag
-                    new_z /= mag
-
-                model.cam_quat[cam_id] = [new_w, new_x, new_y, new_z]
+        seed = 0 if self.seed is None else int(self.seed)
+        states = auth.apply_randomization_config(
+            cam_cfg,
+            seed=seed,
+            draw_index=self.camera_draw_index,
+            write_model=True,
+        )
+        self.last_camera_states = states
+        self.camera_draw_index += 1
 
     def _randomize_lighting(self, model, mujoco):
         light_cfg = self.config.get("lighting", {})

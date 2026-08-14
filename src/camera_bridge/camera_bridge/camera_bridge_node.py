@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """L6 camera bridge: MuJoCo virtual camera to ROS Image topics."""
+import json
 import math
 import os
 import time
@@ -7,17 +8,33 @@ import time
 import numpy as np
 
 import rclpy
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, TransformStamped
 from rcl_interfaces.msg import ParameterType
 from rcl_interfaces.srv import GetParameters
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import (
+    DurabilityPolicy,
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from sensor_msgs.msg import CameraInfo, Image, JointState
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, String
+from tf2_ros import StaticTransformBroadcaster
 
 try:
     import mujoco
     from mujoco_sim.virtual_camera import CameraModel, VirtualCamera
+    from mujoco_sim.camera_extrinsics import (
+        CameraExtrinsicAuthority,
+        CameraExtrinsicError,
+        CameraExtrinsicState,
+        apply_state_to_model,
+        mujoco_to_optical_transform,
+        optical_frame_name,
+        transform_to_xyz_quat,
+    )
 
     _HAS_MUJOCO = True
 except Exception:  # pragma: no cover - exercised on systems without MuJoCo
@@ -51,18 +68,27 @@ class CameraBridgeNode(Node):
         self.declare_parameter("gel_scale", 300.0)
         self.declare_parameter("target_object_name", "object_red_box")
         self.declare_parameter("mujoco_sim_param_node", MUJOCO_SIM_PARAM_NODE)
+        self.declare_parameter("publish_camera_tf", True)
+        self.declare_parameter("camera_pose_class", "DESIGN_NOMINAL")
+        # Diagnostic-only local injection (meters / radians). Empty = none.
+        self.declare_parameter("inject_translation_m", [0.0, 0.0, 0.0])
+        self.declare_parameter("inject_rpy_rad", [0.0, 0.0, 0.0])
+        self.declare_parameter("inject_enabled", False)
 
         self.w = int(self.get_parameter("width").value)
         self.h = int(self.get_parameter("height").value)
         self.rate = float(self.get_parameter("rate").value)
         self._min_publish_period_s = 1.0 / self.rate
         self._last_publish_wall_s: float | None = None
+        self.camera_name = str(self.get_parameter("camera_name").value)
         self.frame_id = str(self.get_parameter("frame_id").value)
         self.synthetic_fallback = bool(self.get_parameter("synthetic_fallback").value)
         self.tactile_mode = bool(self.get_parameter("tactile_mode").value)
         self.publish_depth = bool(self.get_parameter("publish_depth").value)
         self.gel_depth_baseline = float(self.get_parameter("gel_depth_baseline").value)
         self.gel_scale = float(self.get_parameter("gel_scale").value)
+        self.publish_camera_tf = bool(self.get_parameter("publish_camera_tf").value)
+        self.camera_pose_class = str(self.get_parameter("camera_pose_class").value)
 
         self._k = 0
         self._q = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785], dtype=float)
@@ -77,10 +103,14 @@ class CameraBridgeNode(Node):
         self._object_pose = None
         self._ee_pose = None
         self._camera = None
+        self._authority = None
+        self._extrinsic_state: CameraExtrinsicState | None = None
+        self._xml_fovy_deg: float | None = None
         self._params_poll_counter = 0
         self._get_params_future = None
         self._get_params_client = self.create_client(
             GetParameters, f"{self._mujoco_sim_param_node}/get_parameters")
+        self._tf_static = StaticTransformBroadcaster(self) if self.publish_camera_tf else None
 
         color_topic = str(self.get_parameter("color_topic").value)
         depth_topic = str(self.get_parameter("depth_topic").value)
@@ -101,6 +131,14 @@ class CameraBridgeNode(Node):
             PoseStamped, "/sim/object_pose", self._on_object_pose, qos_profile_sensor_data)
         self.create_subscription(
             PoseStamped, "/ee_pose", self._on_ee_pose, qos_profile_sensor_data)
+        extrinsic_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+        )
+        self.create_subscription(
+            String, "/sim/camera_extrinsic", self._on_camera_extrinsic, extrinsic_qos)
 
         if bool(self.get_parameter("use_mujoco_renderer").value):
             self._try_init_mujoco()
@@ -114,7 +152,7 @@ class CameraBridgeNode(Node):
         mode = "MuJoCo renderer" if self._camera is not None else "synthetic fallback"
         self.get_logger().info(
             f"camera_bridge up ({self.w}x{self.h} @ {self.rate} Hz, {mode}, "
-            f"color={color_topic})."
+            f"color={color_topic}, camera={self.camera_name}, frame_id={self.frame_id})."
         )
 
     def _try_init_mujoco(self):
@@ -142,20 +180,134 @@ class CameraBridgeNode(Node):
             self._set_target_object_name(self._target_object_name, log=False)
             self._set_model_joints(self._q)
 
+            self._authority = CameraExtrinsicAuthority(
+                self._model,
+                mujoco,
+                pose_class_by_camera={self.camera_name: self.camera_pose_class},
+            )
+            state = self._authority.nominal(self.camera_name)
+            self._xml_fovy_deg = state.fovy_deg
+            # Prefer XML fovy for CameraInfo so K/P match the renderer camera.
+            fovy = float(state.fovy_deg if state.fovy_deg is not None
+                         else self.get_parameter("fovy_deg").value)
+            if bool(self.get_parameter("inject_enabled").value):
+                inj_t = [float(x) for x in self.get_parameter("inject_translation_m").value]
+                inj_r = [float(x) for x in self.get_parameter("inject_rpy_rad").value]
+                state = self._authority.inject_local(
+                    self.camera_name,
+                    translation_m=inj_t,
+                    rpy_rad=inj_r,
+                    provenance="camera_bridge_param_injection",
+                    write_model=True,
+                )
+            else:
+                self._authority.set_state(state, write_model=True)
+            self._extrinsic_state = state
+            self._publish_camera_tf(state)
+
+            expected_optical = optical_frame_name(self.camera_name)
+            if self.frame_id != expected_optical:
+                self.get_logger().warn(
+                    f"frame_id '{self.frame_id}' != contract optical '{expected_optical}'; "
+                    f"forcing header/TF optical to '{expected_optical}'"
+                )
+                self.frame_id = expected_optical
+
             camera = CameraModel(
-                name=str(self.get_parameter("camera_name").value),
+                name=self.camera_name,
                 width=self.w,
                 height=self.h,
-                fovy_deg=float(self.get_parameter("fovy_deg").value),
+                fovy_deg=fovy,
                 frame_id=self.frame_id,
             )
             self._camera = VirtualCamera(mujoco, self._model, camera)
-            self.get_logger().info(f"Loaded MuJoCo camera '{camera.name}' from {path}")
+            self.get_logger().info(
+                f"Loaded MuJoCo camera '{camera.name}' from {path} "
+                f"(fovy={fovy}, parent={state.parent_frame}, "
+                f"effective_id={state.effective_id()}, pose_class={state.pose_class})"
+            )
         except Exception as exc:  # pragma: no cover
             self.get_logger().warn(f"MuJoCo camera init failed ({exc}); using synthetic fallback.")
             self._model = None
             self._data = None
             self._camera = None
+            self._authority = None
+
+    def _state_from_dict(self, d: dict) -> CameraExtrinsicState:
+        return CameraExtrinsicState(
+            camera_name=str(d["camera_name"]),
+            parent_frame=str(d["parent_frame"]),
+            nominal_translation=[float(x) for x in d["nominal_translation"]],
+            nominal_quat_wxyz=[float(x) for x in d["nominal_quat_wxyz"]],
+            perturbation_translation=[float(x) for x in d.get(
+                "perturbation_translation", [0.0, 0.0, 0.0])],
+            perturbation_quat_wxyz=[float(x) for x in d.get(
+                "perturbation_quat_wxyz", [1.0, 0.0, 0.0, 0.0])],
+            seed=d.get("seed"),
+            provenance=str(d.get("provenance", "sim_published")),
+            composition=str(d.get(
+                "composition", "T_effective = T_nominal @ ΔT_camera_local")),
+            status=str(d.get("status", "AVAILABLE")),
+            pose_class=str(d.get("pose_class", self.camera_pose_class)),
+            fovy_deg=(float(d["fovy_deg"]) if d.get("fovy_deg") is not None else self._xml_fovy_deg),
+        )
+
+    def _on_camera_extrinsic(self, msg: String) -> None:
+        if self._model is None or self._authority is None:
+            return
+        if bool(self.get_parameter("inject_enabled").value):
+            # Diagnostic injection overrides live randomization for this node.
+            return
+        try:
+            payload = json.loads(msg.data)
+            cameras = payload.get("cameras", {})
+            raw = cameras.get(self.camera_name)
+            if raw is None:
+                return
+            state = self._state_from_dict(raw)
+            apply_state_to_model(self._model, mujoco, state)
+            self._authority.set_state(state, write_model=False)
+            self._extrinsic_state = state
+            self._publish_camera_tf(state)
+            self.get_logger().info(
+                f"Applied published extrinsic for '{self.camera_name}' "
+                f"id={state.effective_id()} provenance={state.provenance}"
+            )
+        except (json.JSONDecodeError, KeyError, TypeError, CameraExtrinsicError) as exc:
+            self.get_logger().warn(f"Ignoring invalid /sim/camera_extrinsic: {exc}")
+
+    def _publish_camera_tf(self, state: CameraExtrinsicState) -> None:
+        if self._tf_static is None:
+            return
+        stamp = self.get_clock().now().to_msg()
+        xyz, quat = transform_to_xyz_quat(state.effective_matrix())
+        # parent → camera_link (MuJoCo camera axes)
+        t_link = TransformStamped()
+        t_link.header.stamp = stamp
+        t_link.header.frame_id = state.parent_frame
+        t_link.child_frame_id = state.link_frame
+        t_link.transform.translation.x = float(xyz[0])
+        t_link.transform.translation.y = float(xyz[1])
+        t_link.transform.translation.z = float(xyz[2])
+        t_link.transform.rotation.w = float(quat[0])
+        t_link.transform.rotation.x = float(quat[1])
+        t_link.transform.rotation.y = float(quat[2])
+        t_link.transform.rotation.z = float(quat[3])
+        # camera_link → optical_frame (ROS REP-103)
+        T_opt = mujoco_to_optical_transform()
+        o_xyz, o_quat = transform_to_xyz_quat(T_opt)
+        t_opt = TransformStamped()
+        t_opt.header.stamp = stamp
+        t_opt.header.frame_id = state.link_frame
+        t_opt.child_frame_id = state.optical_frame
+        t_opt.transform.translation.x = float(o_xyz[0])
+        t_opt.transform.translation.y = float(o_xyz[1])
+        t_opt.transform.translation.z = float(o_xyz[2])
+        t_opt.transform.rotation.w = float(o_quat[0])
+        t_opt.transform.rotation.x = float(o_quat[1])
+        t_opt.transform.rotation.y = float(o_quat[2])
+        t_opt.transform.rotation.z = float(o_quat[3])
+        self._tf_static.sendTransform([t_link, t_opt])
 
     def _build_object_joint_map(self, mujoco_module) -> dict[str, dict[str, object]]:
         joints: dict[str, dict[str, object]] = {}

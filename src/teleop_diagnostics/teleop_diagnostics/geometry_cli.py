@@ -13,6 +13,7 @@ from teleop_diagnostics.poses import nominal_pose_set
 from teleop_diagnostics.report import (
     assert_no_pass_semantics,
     git_commit,
+    provenance_fields,
     write_geometry_diagnostics_json,
     write_geometry_samples_csv,
     write_run_manifest,
@@ -70,9 +71,11 @@ def run_report(out_dir: Path, *, random_count: int = 5, seed: int = 20260813) ->
     assert_no_pass_semantics(rows)
 
     zero_audit = controller_audits.get("zero", {})
+    prov = provenance_fields(repo=repo)
     manifest = {
         "stage": 1,
         "commit": commit,
+        **prov,
         "backend": cmp.backend_label,
         "scenario_set": [p.name for p in poses],
         "result_semantics": "REPORT_ONLY",

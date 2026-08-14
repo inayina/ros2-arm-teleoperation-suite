@@ -1,5 +1,5 @@
 # Copyright 2026 ros2-arm-teleoperation-suite contributors
-"""Evidence serialization for Stage-1 geometry diagnostics."""
+"""Evidence serialization for geometry / camera diagnostics."""
 
 from __future__ import annotations
 
@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from teleop_diagnostics.types import ResidualRow, ResultSemantics
+
+# Audit baseline: pre–Stage-1/2 geometry diagnostics snapshot (docs/GEOMETRY_TIMING…).
+AUDIT_BASELINE_COMMIT = "f3a760774d02aabf6a6bdd2993a53e1738b867b5"
+# First commit that landed Stage 1/2 diagnostics implementation.
+STAGE12_IMPLEMENTATION_COMMIT = "a131e180a77709f60d8b3a2bfb1a8cb0762b64e0"
 
 
 def git_commit(repo: Path | None = None) -> str:
@@ -28,6 +33,21 @@ def git_commit(repo: Path | None = None) -> str:
     return "UNKNOWN"
 
 
+def provenance_fields(
+    *,
+    repo: Path | None = None,
+    audit_baseline_commit: str = AUDIT_BASELINE_COMMIT,
+    implementation_commit: str | None = None,
+) -> dict[str, str]:
+    """Distinct commit semantics to avoid Stage-2-style provenance ambiguity."""
+    return {
+        "audit_baseline_commit": audit_baseline_commit,
+        "implementation_commit": implementation_commit
+        or STAGE12_IMPLEMENTATION_COMMIT,
+        "evidence_generation_commit": git_commit(repo),
+    }
+
+
 def write_run_manifest(path: Path, manifest: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -40,6 +60,7 @@ def write_geometry_diagnostics_json(path: Path, payload: dict[str, Any]) -> None
 
 _CSV_FIELDS = [
     "commit",
+    "evidence_generation_commit",
     "backend",
     "scenario",
     "q",
@@ -61,13 +82,16 @@ _CSV_FIELDS = [
 def write_geometry_samples_csv(path: Path, rows: Sequence[ResidualRow]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=_CSV_FIELDS)
+        writer = csv.DictWriter(fh, fieldnames=_CSV_FIELDS, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
             d = row.to_dict()
             writer.writerow(
                 {
-                    "commit": d.get("commit", ""),
+                    "commit": d.get("evidence_generation_commit", d.get("commit", "")),
+                    "evidence_generation_commit": d.get(
+                        "evidence_generation_commit", d.get("commit", "")
+                    ),
                     "backend": d.get("backend", ""),
                     "scenario": d.get("scenario", ""),
                     "q": json.dumps(d.get("q", [])),
@@ -81,7 +105,9 @@ def write_geometry_samples_csv(path: Path, rows: Sequence[ResidualRow]) -> None:
                     "evidence_class_a": d.get("evidence_class_a", ""),
                     "evidence_class_b": d.get("evidence_class_b", ""),
                     "input_status": d.get("input_status", ""),
-                    "result_semantics": d.get("result_semantics", ResultSemantics.REPORT_ONLY.value),
+                    "result_semantics": d.get(
+                        "result_semantics", ResultSemantics.REPORT_ONLY.value
+                    ),
                     "physical": d.get("physical", "NOT_RUN/UNAVAILABLE"),
                 }
             )
@@ -126,6 +152,7 @@ _FAULT_FIELDS = [
     "result_semantics",
     "physical",
     "commit",
+    "evidence_generation_commit",
 ]
 
 
@@ -135,4 +162,45 @@ def write_fault_matrix_csv(path: Path, rows: Sequence[dict]) -> None:
         writer = csv.DictWriter(fh, fieldnames=_FAULT_FIELDS, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
-            writer.writerow({k: row.get(k, "") for k in _FAULT_FIELDS})
+            out = {k: row.get(k, "") for k in _FAULT_FIELDS}
+            if not out.get("evidence_generation_commit"):
+                out["evidence_generation_commit"] = out.get("commit", "")
+            writer.writerow(out)
+
+
+_CAMERA_SAMPLE_FIELDS = [
+    "camera_name",
+    "camera_type",
+    "parent_frame",
+    "optical_frame",
+    "nominal_translation",
+    "nominal_rotation",
+    "injected_translation",
+    "injected_rotation",
+    "effective_translation",
+    "effective_rotation",
+    "renderer_translation",
+    "renderer_rotation",
+    "tf_translation",
+    "tf_rotation",
+    "renderer_tf_translation_residual_m",
+    "renderer_tf_rotation_residual_rad",
+    "nominal_effective_translation_delta_m",
+    "nominal_effective_rotation_delta_rad",
+    "seed",
+    "evidence_class",
+    "status",
+    "effective_extrinsic_id",
+    "input_status",
+    "result_semantics",
+    "evidence_generation_commit",
+]
+
+
+def write_camera_samples_csv(path: Path, rows: Sequence[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=_CAMERA_SAMPLE_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k, "") for k in _CAMERA_SAMPLE_FIELDS})

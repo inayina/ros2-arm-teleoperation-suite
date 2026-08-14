@@ -28,6 +28,9 @@ setup(
             "geometry_diagnostics_node = teleop_diagnostics.geometry_diagnostics_node:main",
             "geometry_live_tf_report = teleop_diagnostics.stage1_live_cli:main",
             "geometry_stage2_report = teleop_diagnostics.stage2_cli:main",
+            "camera_stage3a_report = teleop_diagnostics.stage3a_cli:main",
+            "camera_stage3b_report = teleop_diagnostics.stage3b_cli:main",
+            "camera_stage3c_report = teleop_diagnostics.stage3c_cli:main",
         ],
     },
 )

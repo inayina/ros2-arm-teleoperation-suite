@@ -2,6 +2,8 @@ import unittest
 from unittest.mock import MagicMock
 import numpy as np
 from mujoco_sim.domain_randomizer import DomainRandomizer
+from mujoco_sim.camera_extrinsics import make_transform, matrix_to_quat_wxyz
+
 
 class MockMujoco:
     class mjtObj:
@@ -24,10 +26,19 @@ class MockMujoco:
         "green_sphere_joint": 2,
         "scene_camera": 0,
         "key": 0,
+        "world": 0,
     }
+
+    _ID_TO_NAME = {v: k for k, v in _NAME_TO_ID.items()}
 
     def mj_name2id(self, model, obj_type, name):
         return self._NAME_TO_ID.get(name, -1)
+
+    def mj_id2name(self, model, obj_type, obj_id):
+        if obj_type == self.mjtObj.mjOBJ_BODY and obj_id == 0:
+            return "world"
+        return self._ID_TO_NAME.get(obj_id)
+
 
 class MockModel:
     def __init__(self):
@@ -39,8 +50,10 @@ class MockModel:
         ]
         self.jnt_qposadr = [0, 7, 14]             # 每个自由关节 7 个 qpos
         self.jnt_dofadr = [0, 6, 12]
-        self.cam_pos = [[0.55, -0.75, 0.55]]
-        self.cam_quat = [[1.0, 0.0, 0.0, 0.0]]
+        self.cam_pos = [np.array([0.55, -0.75, 0.55], dtype=float)]
+        self.cam_quat = [np.array([1.0, 0.0, 0.0, 0.0], dtype=float)]
+        self.cam_bodyid = [0]
+        self.cam_fovy = [45.0]
         self.light_diffuse = [[0.8, 0.8, 0.8]]
 
 class MockData:
@@ -158,25 +171,47 @@ class TestDomainRandomizer(unittest.TestCase):
         # Velocity should all be zero
         assert all(v == 0.0 for v in data.qvel)
 
-        # 2. Verify camera caching and randomization
-        # Cached values
+        # 2. Verify camera caching and camera-local randomization
         assert 0 in randomizer.orig_cam_pos
         assert 0 in randomizer.orig_cam_quat
         assert np.allclose(randomizer.orig_cam_pos[0], [0.55, -0.75, 0.55])
 
-        # Pos is shifted by pos_noise
+        first_state = randomizer.last_camera_states["scene_camera"]
+        # Identity nominal quat ⇒ local Δt appears directly in parent/world cam_pos.
         dx = model.cam_pos[0][0] - randomizer.orig_cam_pos[0][0]
         dy = model.cam_pos[0][1] - randomizer.orig_cam_pos[0][1]
         dz = model.cam_pos[0][2] - randomizer.orig_cam_pos[0][2]
         assert -0.05 <= dx <= 0.05
         assert -0.05 <= dy <= 0.05
         assert -0.05 <= dz <= 0.05
+        assert np.allclose(first_state.perturbation_translation, [dx, dy, dz], atol=1e-9)
 
-        # Quat is shifted by rot_noise
-        q = model.cam_quat[0]
-        # Magnitude should be close to 1.0 (normalized)
-        mag = np.linalg.norm(q)
-        assert abs(mag - 1.0) < 1e-5
+        q = np.asarray(model.cam_quat[0], dtype=float)
+        assert abs(np.linalg.norm(q) - 1.0) < 1e-5
+        T_eff = make_transform(model.cam_pos[0], quat_wxyz=q)
+        T_nom = make_transform(
+            randomizer.orig_cam_pos[0], quat_wxyz=randomizer.orig_cam_quat[0]
+        )
+        T_delta = np.linalg.inv(T_nom) @ T_eff
+        assert np.allclose(T_delta[:3, 3], first_state.perturbation_translation, atol=1e-9)
+
+        # Independent authority with same seed/draw must match (single random stream).
+        from mujoco_sim.camera_extrinsics import (
+            CameraExtrinsicAuthority,
+            apply_config_randomization,
+        )
+        twin = apply_config_randomization(
+            CameraExtrinsicAuthority(MockModel(), MockMujoco()).nominal("scene_camera"),
+            config["domain_randomization"]["camera"],
+            seed=42,
+            draw_index=0,
+        )
+        assert np.allclose(
+            twin.perturbation_translation, first_state.perturbation_translation, atol=1e-12
+        )
+        assert np.allclose(
+            twin.perturbation_quat_wxyz, first_state.perturbation_quat_wxyz, atol=1e-12
+        )
 
         # 3. Verify lighting randomization
         assert 0 in randomizer.orig_light_diffuse
@@ -184,9 +219,7 @@ class TestDomainRandomizer(unittest.TestCase):
         for val in model.light_diffuse[0]:
             assert 0.6 <= val <= 1.0
 
-        # Apply second time to verify no drift accumulation
-        # Model cam_pos should remain within pos_noise range relative to the ORIGIN cached value
-        # Simulate an ejected sphere that wandered off the table before reset.
+        # Apply second time: no drift vs cached nominal; new draw still in range.
         data.qpos[14] = 1.5
         data.qpos[15] = 0.8
         data.qpos[16] = 0.4

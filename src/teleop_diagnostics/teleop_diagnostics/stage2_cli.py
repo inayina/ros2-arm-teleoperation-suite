@@ -25,6 +25,7 @@ from teleop_diagnostics.mujoco_ee import MujocoEeSource
 from teleop_diagnostics.poses import nominal_pose_set
 from teleop_diagnostics.report import (
     git_commit,
+    provenance_fields,
     write_fault_matrix_csv,
     write_geometry_diagnostics_json,
     write_geometry_samples_csv,
@@ -282,6 +283,7 @@ def run_stage2_report(out_dir: Path, *, seed: int = 20260813) -> dict:
     manifest = {
         "stage": 2,
         "commit": commit,
+        **provenance_fields(repo=repo),
         "result_semantics_allowed": [
             "REPORT_ONLY",
             "SUSPECTED",

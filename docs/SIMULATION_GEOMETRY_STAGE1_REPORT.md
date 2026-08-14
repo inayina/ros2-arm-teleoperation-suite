@@ -4,7 +4,9 @@
 |---|---|
 | Status | Stage 1 implemented (REPORT_ONLY) |
 | Date | 2026-08-13 |
-| Commit (evidence run) | `f3a760774d02aabf6a6bdd2993a53e1738b867b5` |
+| Commit (evidence run) | regenerate; see `evidence_generation_commit` in manifest |
+| Audit baseline commit | `f3a760774d02aabf6a6bdd2993a53e1738b867b5` |
+| Implementation commit | `a131e180a77709f60d8b3a2bfb1a8cb0762b64e0` |
 | Package | `teleop_diagnostics` |
 | Physical | `NOT_RUN/UNAVAILABLE` |
 | Control law modified | **false** |

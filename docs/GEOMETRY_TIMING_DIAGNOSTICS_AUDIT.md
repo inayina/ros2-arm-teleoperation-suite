@@ -2,12 +2,14 @@
 
 | 元数据 | 值 |
 |---|---|
-| 状态 | Audit baseline + Stage 1 implemented (REPORT_ONLY) |
+| 状态 | Audit baseline + Stage 1/2 geometry + Stage 3 camera extrinsic contract (REPORT_ONLY) |
 | 审计日期 | 2026-08-13 |
 | 适用仓库 | `ros2-arm-teleoperation-suite` |
 | 审计快照 | `f3a760774d02aabf6a6bdd2993a53e1738b867b5` |
-| 审计阶段 | 只读审计已落盘；Stage 1 FK/TF/SIM_GT comparator 已实现；未进入 Stage 2+ |
+| 审计阶段 | 只读审计已落盘；Stage 1–3 已实现（见 Stage 报告）；未进入 Stage 4 timestamp |
 | Stage 1 入口 | [SIMULATION_GEOMETRY_STAGE1_REPORT.md](./SIMULATION_GEOMETRY_STAGE1_REPORT.md) / `teleop_diagnostics` |
+| Stage 2 入口 | [SIMULATION_GEOMETRY_STAGE2_REPORT.md](./SIMULATION_GEOMETRY_STAGE2_REPORT.md) |
+| Stage 3 入口 | [SIMULATION_GEOMETRY_STAGE3_REPORT.md](./SIMULATION_GEOMETRY_STAGE3_REPORT.md) |
 | 运行边界 | Stage 1 证据为离线 CLI；未常驻 ROS；无 fault injection / camera / timestamp |
 | 物理证据 | `PHYSICAL=NOT_RUN/UNAVAILABLE` |
 

@@ -236,7 +236,7 @@
                         <geom class="fingertip_pad_collision_5" />
                         <camera name="right_tactile_camera" pos="0 -0.01 0.0445" xyaxes="1 0 0 0 0 1" fovy="90" />
                       </body>
-                    <site name="panda_ee" pos="0 0 0.10" size="0.015" rgba="0 0.8 1 0" /><camera name="wrist_camera" pos="0 -0.08 0.03" xyaxes="1 0 0 0 0 1" fovy="70" /></body>
+                    <site name="panda_ee" pos="0 0 0.10" size="0.015" rgba="0 0.8 1 0" /><camera name="wrist_camera" pos="0.0 0.0 -0.02" xyaxes="1 0 0 0 -1 0" fovy="70.0" /></body>
                   </body>
                 </body>
               </body>

@@ -127,6 +127,8 @@ def generate_launch_description():
                 "use_mujoco_renderer": wrist_use_mujoco_renderer,
                 "synthetic_fallback": False,
                 "publish_depth": publish_depth,
+                # Stage 3C: XML wrist pose frozen as DESIGN_NOMINAL (sim design, not physical).
+                "camera_pose_class": "DESIGN_NOMINAL",
             }],
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("capture_mode"), "' == 'portfolio' and '",

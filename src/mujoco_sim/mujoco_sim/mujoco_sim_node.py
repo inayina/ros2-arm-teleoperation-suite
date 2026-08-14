@@ -299,6 +299,20 @@ class MujocoSimNode(Node):
         self.pub_obj = self.create_publisher(PoseStamped, "/sim/object_pose", 10)
         self.pub_gripper = self.create_publisher(Float64, "/gripper/state", 10)
         self.pub_contact_debug = self.create_publisher(String, "/grasp/contact_debug", 10)
+        # Effective camera extrinsic contract for the independent camera_bridge renderer.
+        # JSON String avoids a custom msg; PoseStamped carries parent→link_effective.
+        # TRANSIENT_LOCAL so late-joining camera_bridge receives the last reset state.
+        from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPolicy
+        extrinsic_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+        )
+        self.pub_cam_extrinsic_json = self.create_publisher(
+            String, "/sim/camera_extrinsic", extrinsic_qos)
+        self.pub_cam_extrinsic_pose = self.create_publisher(
+            PoseStamped, "/sim/camera_extrinsic/pose", extrinsic_qos)
 
         self.srv_reset = self.create_service(Trigger, "/sim/reset_scene", self._on_reset)
 
@@ -324,6 +338,7 @@ class MujocoSimNode(Node):
             self._release_gripper_contact_hold()
             self._set_initial_pose(mujoco)
             self.randomizer.apply(self.model, self.data, mujoco)
+            self._publish_camera_extrinsics()
             response.success = True
             response.message = "Scene reset; objects restored to table."
             self.get_logger().info("Reset scene triggered.")
@@ -331,6 +346,42 @@ class MujocoSimNode(Node):
             response.success = False
             response.message = "No MuJoCo backend."
         return response
+
+    def _publish_camera_extrinsics(self) -> None:
+        """Publish effective camera extrinsics after reset / load (REPORT contract).
+
+        camera_bridge loads an independent MjModel; without this message its
+        renderer would keep XML nominal while DomainRandomizer only mutates the
+        physics model. Prefer the published state over a second RNG draw.
+        """
+        states = getattr(self.randomizer, "last_camera_states", None) or {}
+        if not states:
+            return
+        stamp = self.get_clock().now().to_msg()
+        payload = {
+            "source": "mujoco_sim.DomainRandomizer",
+            "composition": "T_effective = T_nominal @ ΔT_camera_local",
+            "cameras": {name: state.to_dict() for name, state in states.items()},
+        }
+        msg = String()
+        msg.data = json.dumps(payload, sort_keys=True)
+        self.pub_cam_extrinsic_json.publish(msg)
+        # PoseStamped convenience for scene_camera (eye-to-hand / world parent).
+        scene = states.get("scene_camera")
+        if scene is not None:
+            pose = PoseStamped()
+            pose.header.stamp = stamp
+            pose.header.frame_id = scene.parent_frame
+            xyz = scene.effective_translation()
+            quat = scene.effective_quat_wxyz()
+            pose.pose.position.x = xyz[0]
+            pose.pose.position.y = xyz[1]
+            pose.pose.position.z = xyz[2]
+            pose.pose.orientation.w = quat[0]
+            pose.pose.orientation.x = quat[1]
+            pose.pose.orientation.y = quat[2]
+            pose.pose.orientation.z = quat[3]
+            self.pub_cam_extrinsic_pose.publish(pose)
 
     def _try_load_model(self):
         path = self.get_parameter("model_path").value
@@ -354,6 +405,7 @@ class MujocoSimNode(Node):
                 self._log_grasp_model_params(mujoco)
             self._set_initial_pose(mujoco)
             self.randomizer.apply(self.model, self.data, mujoco)
+            self._publish_camera_extrinsics()
 
             self.viewer = None
             if not self.get_parameter("headless").value:

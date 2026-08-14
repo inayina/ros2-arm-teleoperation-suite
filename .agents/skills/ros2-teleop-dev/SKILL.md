@@ -65,6 +65,8 @@ L7 lerobot_recorder    Python  多模态对齐 → LeRobot Dataset
 | `/ft_sensor` | `geometry_msgs/WrenchStamped` | mujoco_sim | impedance ctrl, recorder | Best Effort |
 | `/ee_pose` | `geometry_msgs/PoseStamped` | mujoco_sim | recorder | Best Effort |
 | `/sim/object_pose` | `geometry_msgs/PoseStamped` | mujoco_sim | camera_bridge, recorder | Best Effort |
+| `/sim/scene_visual` | `std_msgs/String` (JSON) | mujoco_sim | camera_bridge | Reliable + Transient Local |
+| `/sim/camera_extrinsic` | `std_msgs/String` (JSON) | mujoco_sim | camera_bridge | Reliable + Transient Local |
 | `/camera/color/image_raw` | `sensor_msgs/Image` | camera_bridge | recorder | Best Effort |
 | `/camera/depth/image_raw` | `sensor_msgs/Image` | camera_bridge | recorder | Best Effort |
 | `/camera/wrist/color/image_raw` | `sensor_msgs/Image` | camera_bridge | recorder | Best Effort |

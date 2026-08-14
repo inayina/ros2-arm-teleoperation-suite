@@ -29,7 +29,7 @@ def generate_launch_description():
         DeclareLaunchArgument("auto_record_seconds", default_value="0.0"),
         DeclareLaunchArgument("auto_record_delay_s", default_value="0.0"),
         DeclareLaunchArgument("capture_mode", default_value="portfolio"),
-        DeclareLaunchArgument("enable_wrist_camera", default_value="false"),
+        DeclareLaunchArgument("enable_wrist_camera", default_value="true"),
         DeclareLaunchArgument("expected_frame_rate_hz", default_value="10.0"),
         DeclareLaunchArgument("enable_system_telemetry", default_value="true"),
         DeclareLaunchArgument("simulator_backend", default_value=""),

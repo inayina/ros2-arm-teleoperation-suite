@@ -92,3 +92,59 @@ def wrist_pose_candidates(*, seed: int = 20260814) -> list[WristPoseCandidate]:
             rationale="Palm centerline with small +X offset; narrower FOV for grasp focus.",
         ),
     ]
+
+
+def wrist_pose_candidates_outside_palm(*, seed: int = 20260814) -> list[WristPoseCandidate]:
+    """Finite mounts intended to sit outside hand_0, still looking toward fingers.
+
+    Same look as B (+Z_hand). RGB, not GT projection, is the selection metric.
+    """
+    _ = seed
+    R_b = _axes_to_R((1.0, 0.0, 0.0), (0.0, -1.0, 0.0))
+    pitch = np.deg2rad(15.0)
+    cx, sx = np.cos(pitch), np.sin(pitch)
+    Rx = np.array([[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]])
+    R_pitch = R_b @ Rx
+    R = tuple(map(tuple, R_b.tolist()))
+    Rp = tuple(map(tuple, R_pitch.tolist()))
+    return [
+        WristPoseCandidate(
+            candidate_id="E_behind_z08",
+            translation_xyz=(0.0, 0.0, -0.08),
+            rotation_matrix=R,
+            fovy_deg=70.0,
+            rationale="Same look as B; 80 mm behind hand origin, toward wrist.",
+        ),
+        WristPoseCandidate(
+            candidate_id="F_behind_z12",
+            translation_xyz=(0.0, 0.0, -0.12),
+            rotation_matrix=R,
+            fovy_deg=70.0,
+            rationale="Further behind palm (120 mm) to clear hand_0 volume.",
+        ),
+        WristPoseCandidate(
+            candidate_id="G_dorsal_ym05_z06",
+            translation_xyz=(0.0, -0.05, -0.06),
+            rotation_matrix=R,
+            fovy_deg=70.0,
+            rationale="Dorsal −Y offset plus behind-palm; outside the shell.",
+        ),
+        WristPoseCandidate(
+            candidate_id="H_knuckle_z05",
+            translation_xyz=(0.0, 0.0, 0.05),
+            rotation_matrix=R,
+            fovy_deg=70.0,
+            rationale="Forward of palm at knuckle height, looking along fingers.",
+        ),
+        WristPoseCandidate(
+            candidate_id="I_dorsal_knuckle",
+            translation_xyz=(0.0, -0.04, 0.03),
+            rotation_matrix=Rp,
+            fovy_deg=70.0,
+            rationale="Dorsal knuckle mount with 15° pitch toward the table.",
+        ),
+    ]
+
+
+def all_wrist_pose_candidates(*, seed: int = 20260814) -> list[WristPoseCandidate]:
+    return wrist_pose_candidates(seed=seed) + wrist_pose_candidates_outside_palm(seed=seed)

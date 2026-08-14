@@ -31,6 +31,8 @@ setup(
             "camera_stage3a_report = teleop_diagnostics.stage3a_cli:main",
             "camera_stage3b_report = teleop_diagnostics.stage3b_cli:main",
             "camera_stage3c_report = teleop_diagnostics.stage3c_cli:main",
+            "timestamp_stage4_report = teleop_diagnostics.stage4_cli:main",
+            "wrist_rgb_report = teleop_diagnostics.wrist_rgb_cli:main",
         ],
     },
 )

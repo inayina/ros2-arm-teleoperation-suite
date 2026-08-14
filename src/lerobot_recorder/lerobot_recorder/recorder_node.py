@@ -52,6 +52,34 @@ def _stamp_sec(msg) -> float:
     return float(stamp.sec) + float(stamp.nanosec) * 1e-9
 
 
+ACTION_SOURCE_TELEOP = "teleop_command"
+ACTION_SOURCE_HOLD = "hold_from_ee"
+
+
+def resolve_frame_action(
+    *,
+    command_pose: PoseStamped | None,
+    grip_cmd: float | None,
+    ee_pose: PoseStamped,
+    grip_state: float,
+    batch_gate: bool,
+) -> tuple[list[float], str] | None:
+    """Build action[8] for a synced frame.
+
+    Training batch (`upstream_gate=batch_generator`) still requires a real
+    `/teleop/cmd_pose` + `/teleop/gripper_cmd`. Portfolio / teleop camera
+    capture may run with `start_teleop:=false`; dropping those frames silently
+    produced 0-frame episodes while RGB bags succeeded. Hold fill uses EE pose
+    + gripper *state* and must be tagged in episode metadata so it is not
+    treated as expert command.
+    """
+    if command_pose is not None and grip_cmd is not None:
+        return RecorderNode._pose_vec(command_pose) + [float(grip_cmd)], ACTION_SOURCE_TELEOP
+    if batch_gate:
+        return None
+    return RecorderNode._pose_vec(ee_pose) + [float(grip_state)], ACTION_SOURCE_HOLD
+
+
 class RecorderNode(Node):
     def __init__(self):
         super().__init__("lerobot_recorder")
@@ -64,7 +92,7 @@ class RecorderNode(Node):
         self.declare_parameter("auto_record_seconds", 0.0)
         self.declare_parameter("auto_record_delay_s", 0.0)
         self.declare_parameter("capture_mode", "portfolio")
-        self.declare_parameter("enable_wrist_camera", False)
+        self.declare_parameter("enable_wrist_camera", True)
         self.declare_parameter("expected_frame_rate_hz", 10.0)
         self.declare_parameter("close_command_threshold", 0.12)
         self.declare_parameter("require_close_command_for_batch", True)
@@ -97,6 +125,8 @@ class RecorderNode(Node):
         self._last_writer_s = 0.0
         self._last_writer_error = ""
         self._command_missing_rejects = 0
+        self._episode_used_hold_action = False
+        self._last_command_warn_s = 0.0
         self._last_commit_error = ""
         self._record_started = time.perf_counter()
 
@@ -188,6 +218,7 @@ class RecorderNode(Node):
         self._current_episode_metadata = {}
         self._close_command_seen = False
         self._command_missing_rejects = 0
+        self._episode_used_hold_action = False
         self._last_commit_error = ""
         self.recording = True
         self._record_started = time.perf_counter()
@@ -242,10 +273,19 @@ class RecorderNode(Node):
             "action_type": "ee_pose_gripper",
             "action_semantics": "ee_pose_gripper_cmd_v1",
             "action_sources": {
-                "pose": "/teleop/cmd_pose",
-                "gripper_command": "/teleop/gripper_cmd",
+                "pose": (
+                    "/ee_pose" if self._episode_used_hold_action else "/teleop/cmd_pose"
+                ),
+                "gripper_command": (
+                    "/gripper/state"
+                    if self._episode_used_hold_action else "/teleop/gripper_cmd"
+                ),
                 "gripper_observation": "/gripper/state",
             },
+            "command_missing": bool(self._episode_used_hold_action),
+            "action_fill": (
+                ACTION_SOURCE_HOLD if self._episode_used_hold_action else ACTION_SOURCE_TELEOP
+            ),
             "task_phase_contract_version": "panda_train_frame_phase_v1",
             "task_phase_source": "upstream_continuous_task_evaluator",
             "task_phase_semantics": "continuous_gt_achieved_subgoal_frontier",
@@ -373,9 +413,23 @@ class RecorderNode(Node):
     ):
         if not self.recording:
             return
-        if self._action is None or self._grip_cmd is None:
+        batch_gate = str(self.get_parameter("upstream_gate").value) == "batch_generator"
+        resolved = resolve_frame_action(
+            command_pose=self._action,
+            grip_cmd=self._grip_cmd,
+            ee_pose=ee_msg,
+            grip_state=float(self._grip),
+            batch_gate=batch_gate,
+        )
+        if resolved is None:
             self._command_missing_rejects += 1
+            self._warn_command_missing(dropped=True)
             return
+        action_pose, action_source = resolved
+        if action_source == ACTION_SOURCE_HOLD:
+            self._command_missing_rejects += 1
+            self._episode_used_hold_action = True
+            self._warn_command_missing(dropped=False)
         ft = [
             ft_msg.wrench.force.x,
             ft_msg.wrench.force.y,
@@ -384,14 +438,13 @@ class RecorderNode(Node):
             ft_msg.wrench.torque.y,
             ft_msg.wrench.torque.z,
         ]
-        action_pose = self._pose_vec(self._action)
         frame = {
             "observation.state": _pad(list(js.position), 7),
             "observation.ee_pose": self._pose_vec(ee_msg),
             "observation.object_pose": self._pose_vec(obj_msg),
             "observation.ft": ft,
             "observation.gripper": [float(self._grip)],
-            "action": action_pose + [float(self._grip_cmd)],
+            "action": action_pose,
             "timestamp": _stamp_sec(color if color is not None else js),
             "frame_index": len(self.frames),
             "episode_index": self.episode_index,
@@ -409,6 +462,23 @@ class RecorderNode(Node):
                 frame["observation.images.wrist"] = _img_to_np(wrist_color)
         self.frames.append(frame)
         self._frame_task_phases.append(frame["task_phase"])
+
+    def _warn_command_missing(self, *, dropped: bool) -> None:
+        now = time.perf_counter()
+        last = float(getattr(self, "_last_command_warn_s", 0.0))
+        if now - last < 5.0:
+            return
+        self._last_command_warn_s = now
+        if dropped:
+            self.get_logger().warn(
+                "dropping synced frame: /teleop/cmd_pose or /teleop/gripper_cmd "
+                "unseen (batch_generator requires expert command)"
+            )
+            return
+        self.get_logger().warn(
+            "teleop command unseen; filling action from /ee_pose + /gripper/state "
+            "(hold_from_ee, not expert command)"
+        )
 
     def _publish_diagnostics(self):
         elapsed = max(time.perf_counter() - self._record_started, 1e-9)
@@ -432,6 +502,9 @@ class RecorderNode(Node):
             "stale_rejects": sync_diag["reject_counts"]["stale"],
             "reused_rejects": sync_diag["reject_counts"]["reused"],
             "command_missing_rejects": self._command_missing_rejects,
+            "action_fill": (
+                ACTION_SOURCE_HOLD if self._episode_used_hold_action else ACTION_SOURCE_TELEOP
+            ),
             "gripper_command": (
                 self._grip_cmd if self._grip_cmd is not None else "unseen"
             ),

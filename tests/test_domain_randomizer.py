@@ -271,3 +271,26 @@ class TestDomainRandomizer(unittest.TestCase):
         assert abs(data.qpos[8] - (-0.14)) < 1e-9
         assert abs(data.qpos[14] - 0.52) < 1e-9
         assert abs(data.qpos[15] - 0.14) < 1e-9
+
+    def test_lighting_xml_name_top_aliases_mock_key(self):
+        """Live YAML uses lighting.top; mock model only registers light name 'key'."""
+        config = {
+            "domain_randomization": {
+                "enabled": True,
+                "lighting": {
+                    "top": {
+                        "diffuse_noise": [-0.2, 0.2],
+                    }
+                },
+            }
+        }
+        randomizer = DomainRandomizer(config)
+        model = MockModel()
+        data = MockData()
+        mujoco = MockMujoco()
+        mujoco.mj_forward = MagicMock()
+        randomizer.apply(model, data, mujoco)
+        assert 0 in randomizer.orig_light_diffuse
+        assert np.allclose(randomizer.orig_light_diffuse[0], [0.8, 0.8, 0.8])
+        for val in model.light_diffuse[0]:
+            assert 0.0 <= val <= 1.0

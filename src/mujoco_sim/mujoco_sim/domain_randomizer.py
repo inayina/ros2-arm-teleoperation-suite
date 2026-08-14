@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional
 import numpy as np
 
 from mujoco_sim.camera_extrinsics import CameraExtrinsicAuthority, CameraExtrinsicState
+from mujoco_sim.scene_visual import resolve_light_id
 
 
 class DomainRandomizer:
@@ -224,7 +225,7 @@ class DomainRandomizer:
     def _randomize_lighting(self, model, mujoco):
         light_cfg = self.config.get("lighting", {})
         for light_name, params in light_cfg.items():
-            light_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_LIGHT, light_name)
+            light_id = resolve_light_id(model, mujoco, light_name)
             if light_id < 0:
                 continue
 

@@ -52,3 +52,7 @@ def test_scene_only_sync_does_not_wait_for_wrist():
     sync._update("color", color)
     assert len(emitted) == 1
     assert sync.reject_counts["reused"] == 1
+    skew = sync.signed_publication_skews()
+    assert skew["skew_class"] == "PUBLISH_TIME_SKEW"
+    assert skew["source_time_status"] == "UNAVAILABLE"
+    assert "joint" in skew["deltas_s"]

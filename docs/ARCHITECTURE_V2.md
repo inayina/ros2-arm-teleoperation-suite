@@ -506,7 +506,7 @@ flowchart TB
 
 - **多模态传感器源**：MuJoCo 虚拟相机（`scene_camera` 场景相机 + `wrist_camera` 腕部手眼 + 左右指爪 `left_tactile_camera` / `right_tactile_camera` 视触觉相机）。
 - **GelSight 视触觉模拟**：新增 `tactile_mode` 参数，能读取指尖近景深度图（depth buffer）计算形变法向量，结合红/绿/蓝偏振光源（Phong 光度立体模型）渲染出高仿真度的 GelSight-like 视触觉彩色图像。在无物理引擎 Fallback 模式下，支持动态金属球接触挤压动画以确保单测可验证。
-- **渲染状态同步**：`camera_bridge` 订阅 `/joint_states`、`/gripper/state`、`/sim/object_pose`，每帧渲染前同步本地 MuJoCo model 的机械臂、夹爪和 `target_object_joint`，保证 wrist/tactile 画面与主 `mujoco_sim` 物理状态一致。
+- **渲染状态同步**：`camera_bridge` 加载独立 `MjModel`，订阅 `/joint_states`、`/gripper/state`、`/sim/object_pose`（当前目标）、`/sim/scene_visual`（全部可操作物体位姿 + 灯光 diffuse）、`/sim/camera_extrinsic`（有效外参）。每帧渲染前写入本地模型。`/sim/object_pose` 合同不变（recorder / batch_generator 仍只看当前目标）。质量/摩擦 DR 不同步（RGB 不可见）。两套模型未合并。
 - **ROS 2 话题发布**：
   - 场景视觉：`/camera/color/image_raw`, `/camera/depth/image_raw`
   - 腕部手眼：`/camera/wrist/color/image_raw`, `/camera/wrist/depth/image_raw`

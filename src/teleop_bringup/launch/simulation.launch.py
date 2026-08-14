@@ -117,7 +117,7 @@ def generate_launch_description():
         DeclareLaunchArgument("camera_height", default_value="240"),
         DeclareLaunchArgument("camera_rate", default_value="10.0"),
         DeclareLaunchArgument("publish_depth", default_value="false"),
-        DeclareLaunchArgument("enable_wrist_camera", default_value="false"),
+        DeclareLaunchArgument("enable_wrist_camera", default_value="true"),
         DeclareLaunchArgument("wrist_use_mujoco_renderer", default_value="true"),
         DeclareLaunchArgument("wrist_camera_width", default_value="320"),
         DeclareLaunchArgument("wrist_camera_height", default_value="240"),

@@ -19,7 +19,7 @@ from teleop_diagnostics.report import (
     write_run_manifest,
 )
 from teleop_diagnostics.types import EvidenceClass, InputStatus, ResultSemantics
-from teleop_diagnostics.wrist_pose_candidates import wrist_pose_candidates
+from teleop_diagnostics.wrist_pose_candidates import all_wrist_pose_candidates
 
 
 def _repo_root() -> Path:
@@ -35,7 +35,7 @@ def _set_q(model, data, mujoco, q) -> None:
 
 def freeze_wrist_xml(model_xml: Path, candidate_id: str) -> dict:
     """Replace wrist_camera pose in franka_panda.xml with selected DESIGN_NOMINAL."""
-    cand = next(c for c in wrist_pose_candidates() if c.candidate_id == candidate_id)
+    cand = next(c for c in all_wrist_pose_candidates() if c.candidate_id == candidate_id)
     R = np.asarray(cand.rotation_matrix)
     xyaxes = list(R[:, 0]) + list(R[:, 1])
     pos = cand.translation_xyz

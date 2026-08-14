@@ -2,15 +2,16 @@
 
 | 元数据 | 值 |
 |---|---|
-| 状态 | Audit baseline + Stage 1/2 geometry + Stage 3 camera extrinsic contract (REPORT_ONLY) |
+| 状态 | Audit baseline + Stage 1–4 (REPORT_ONLY); calibration solvers still out of scope |
 | 审计日期 | 2026-08-13 |
 | 适用仓库 | `ros2-arm-teleoperation-suite` |
 | 审计快照 | `f3a760774d02aabf6a6bdd2993a53e1738b867b5` |
-| 审计阶段 | 只读审计已落盘；Stage 1–3 已实现（见 Stage 报告）；未进入 Stage 4 timestamp |
+| 审计阶段 | 只读审计已落盘；Stage 1–4 已实现（见 Stage 报告）；仍为 REPORT_ONLY |
 | Stage 1 入口 | [SIMULATION_GEOMETRY_STAGE1_REPORT.md](./SIMULATION_GEOMETRY_STAGE1_REPORT.md) / `teleop_diagnostics` |
 | Stage 2 入口 | [SIMULATION_GEOMETRY_STAGE2_REPORT.md](./SIMULATION_GEOMETRY_STAGE2_REPORT.md) |
 | Stage 3 入口 | [SIMULATION_GEOMETRY_STAGE3_REPORT.md](./SIMULATION_GEOMETRY_STAGE3_REPORT.md) |
-| 运行边界 | Stage 1 证据为离线 CLI；未常驻 ROS；无 fault injection / camera / timestamp |
+| Stage 4 入口 | [SIMULATION_GEOMETRY_STAGE4_REPORT.md](./SIMULATION_GEOMETRY_STAGE4_REPORT.md) |
+| 运行边界 | Stage 1–4 证据为离线 CLI；未常驻 ROS；无物理标定 / `/clock` 生产合同 |
 | 物理证据 | `PHYSICAL=NOT_RUN/UNAVAILABLE` |
 
 > 本文固化 2026-08-13 对 TF/frame、URDF/MuJoCo/FK、joint zero/kinematic
@@ -615,10 +616,13 @@ Calibration solver 不进入上述四阶段。只有观察链稳定、数据具�
 
 ## 审计停止点
 
-截至本文快照：
+截至本文快照（`f3a760774d02aabf6a6bdd2993a53e1738b867b5`）：
 
 - 审计证据已经落盘；
 - diagnostics implementation 尚未开始；
 - 没有修改代码、接口、launch、配置或测试；
 - 没有生成新的运行时/物理证据；
 - 下一步必须由用户显式授权具体实施阶段。
+
+后续实施（不改写上述快照口径）：Stage 1–4 已按用户授权落地，见各 Stage 报告。
+Calibration solver、`/clock` 生产合同与 `SOURCE_TIME_SKEW` 测量仍未授权。

@@ -116,6 +116,27 @@ def test_mujoco_to_optical_convention():
     assert np.allclose(R_MUJOCO_TO_OPTICAL @ np.array([0, 1.0, 0]), [0, -1.0, 0])
 
 
+def test_outside_palm_candidates_are_deterministic():
+    from teleop_diagnostics.wrist_pose_candidates import (
+        all_wrist_pose_candidates,
+        wrist_pose_candidates_outside_palm,
+    )
+
+    ids = [c.candidate_id for c in wrist_pose_candidates_outside_palm()]
+    assert "H_knuckle_z05" in ids
+    assert "B_look_fingers" not in ids
+    all_ids = [c.candidate_id for c in all_wrist_pose_candidates()]
+    assert all_ids == [c.candidate_id for c in all_wrist_pose_candidates(seed=99)]
+    assert "H_knuckle_z05" in all_ids
+
+
+def test_frozen_xml_wrist_is_knuckle_mount():
+    xml = (REPO / "config/models/franka_panda.xml").read_text()
+    assert 'name="wrist_camera"' in xml
+    assert 'pos="0.0 0.0 0.05"' in xml
+    assert 'pos="0.0 0.0 -0.02"' not in xml
+
+
 def test_wrist_candidates_deterministic_and_parseable():
     from teleop_diagnostics.wrist_pose_candidates import wrist_pose_candidates
 
@@ -188,7 +209,7 @@ def test_stage3c_eye_in_hand_without_xml_write(tmp_path):
     # Don't mutate repo XML during unit test — evaluate relative contract on current model.
     manifest = run_stage3c(
         tmp_path / "wrist",
-        selected_candidate_id="B_look_fingers",
+        selected_candidate_id="H_knuckle_z05",
         apply_xml_freeze=False,
     )
     assert manifest["stage"] == "3C"

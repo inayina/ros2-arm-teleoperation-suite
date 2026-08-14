@@ -27,5 +27,5 @@ domain_randomization:
       object_blue_cylinder: [-180.0, 180.0]
       object_green_sphere: [-180.0, 180.0]
   lighting:
-    key:
+    top:
       diffuse_noise: [-0.2, 0.2]

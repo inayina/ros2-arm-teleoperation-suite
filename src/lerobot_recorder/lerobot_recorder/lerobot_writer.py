@@ -200,6 +200,8 @@ def write_episode(
             "action_type",
             "action_semantics",
             "action_sources",
+            "command_missing",
+            "action_fill",
             "simulator_backend",
             "simulator_version",
             "scene_id",

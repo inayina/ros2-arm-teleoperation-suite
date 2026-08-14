@@ -1,10 +1,7 @@
 """Shared object-name to MuJoCo joint mapping for camera render sync."""
 
-MANIPULABLE_OBJECTS = (
-    "object_red_box",
-    "object_blue_cylinder",
-    "object_green_sphere",
-)
+from mujoco_sim.scene_visual import MANIPULABLE_OBJECTS
+
 MUJOCO_SIM_PARAM_NODE = "/mujoco_sim"
 
 

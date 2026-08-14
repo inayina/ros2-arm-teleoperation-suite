@@ -62,6 +62,7 @@ class TestLeRobotRecorder(unittest.TestCase):
         values = {
             "enable_wrist_camera": False,
             "language_instruction": "pick the object",
+            "upstream_gate": "teleop",
         }
         node.get_parameter = lambda name: SimpleNamespace(value=values[name])
 
@@ -85,6 +86,140 @@ class TestLeRobotRecorder(unittest.TestCase):
         assert node.frames[0]["action"][-1] == 0.10
         assert "observation.images.scene" in node.frames[0]
         assert "observation.images.wrist" not in node.frames[0]
+
+    def test_resolve_frame_action_hold_for_teleop_gate(self):
+        from lerobot_recorder.recorder_node import (
+            ACTION_SOURCE_HOLD,
+            ACTION_SOURCE_TELEOP,
+            resolve_frame_action,
+        )
+
+        cmd = PoseStamped()
+        cmd.pose.position.x = 0.4
+        cmd.pose.orientation.w = 1.0
+        ee = PoseStamped()
+        ee.pose.position.x = 0.31
+        ee.pose.orientation.w = 1.0
+        teleop, source = resolve_frame_action(
+            command_pose=cmd,
+            grip_cmd=0.1,
+            ee_pose=ee,
+            grip_state=0.8,
+            batch_gate=False,
+        )
+        assert source == ACTION_SOURCE_TELEOP
+        assert teleop[-1] == 0.1
+        assert teleop[0] == 0.4
+
+        hold, source = resolve_frame_action(
+            command_pose=None,
+            grip_cmd=None,
+            ee_pose=ee,
+            grip_state=0.8,
+            batch_gate=False,
+        )
+        assert source == ACTION_SOURCE_HOLD
+        assert hold == [0.31, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.8]
+        assert resolve_frame_action(
+            command_pose=None,
+            grip_cmd=None,
+            ee_pose=ee,
+            grip_state=0.8,
+            batch_gate=True,
+        ) is None
+
+    def test_teleop_frame_without_command_uses_hold_fill(self):
+        node = RecorderNode.__new__(RecorderNode)
+        node.recording = True
+        node._action = None
+        node._grip_cmd = None
+        node._grip = 0.6
+        node._safety_estop = False
+        node._drive_fault = False
+        node._task_phase = "UNAVAILABLE"
+        node._task_phase_valid = False
+        node._frame_task_phases = []
+        node._command_missing_rejects = 0
+        node._episode_used_hold_action = False
+        node._last_command_warn_s = 0.0
+        node.frames = []
+        node.episode_index = 0
+        node.task = "live_rgb"
+        node.capture_mode = "portfolio"
+        values = {
+            "enable_wrist_camera": False,
+            "language_instruction": "pick the object",
+            "upstream_gate": "teleop",
+        }
+        node.get_parameter = lambda name: SimpleNamespace(value=values[name])
+        warns = []
+        node.get_logger = lambda: SimpleNamespace(warn=warns.append)
+
+        joint = JointState()
+        joint.position = [0.0] * 7
+        ee = PoseStamped()
+        ee.pose.position.x = 0.35
+        ee.pose.orientation.w = 1.0
+        wrench = WrenchStamped()
+        obj = PoseStamped()
+        obj.pose.orientation.w = 1.0
+        image = Image()
+        image.width = 2
+        image.height = 2
+        image.encoding = "rgb8"
+        image.data = np.zeros((2, 2, 3), dtype=np.uint8).tobytes()
+
+        node._on_frame(joint, ee, wrench, image, None, obj)
+
+        assert len(node.frames) == 1
+        assert node.frames[0]["action"] == [0.35, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.6]
+        assert node._episode_used_hold_action is True
+        assert node._command_missing_rejects == 1
+        assert warns
+
+    def test_batch_frame_without_command_is_dropped(self):
+        node = RecorderNode.__new__(RecorderNode)
+        node.recording = True
+        node._action = None
+        node._grip_cmd = None
+        node._grip = 0.6
+        node._safety_estop = False
+        node._drive_fault = False
+        node._task_phase = "UNAVAILABLE"
+        node._task_phase_valid = False
+        node._frame_task_phases = []
+        node._command_missing_rejects = 0
+        node._episode_used_hold_action = False
+        node._last_command_warn_s = 0.0
+        node.frames = []
+        node.episode_index = 0
+        node.task = "batch"
+        node.capture_mode = "portfolio"
+        values = {
+            "enable_wrist_camera": False,
+            "language_instruction": "pick the object",
+            "upstream_gate": "batch_generator",
+        }
+        node.get_parameter = lambda name: SimpleNamespace(value=values[name])
+        node.get_logger = lambda: SimpleNamespace(warn=lambda _text: None)
+
+        joint = JointState()
+        joint.position = [0.0] * 7
+        ee = PoseStamped()
+        ee.pose.orientation.w = 1.0
+        wrench = WrenchStamped()
+        obj = PoseStamped()
+        obj.pose.orientation.w = 1.0
+        image = Image()
+        image.width = 2
+        image.height = 2
+        image.encoding = "rgb8"
+        image.data = np.zeros((2, 2, 3), dtype=np.uint8).tobytes()
+
+        node._on_frame(joint, ee, wrench, image, None, obj)
+        assert node.frames == []
+        assert node._command_missing_rejects == 1
+        assert node._episode_used_hold_action is False
 
     def test_batch_episode_without_close_command_is_rejected(self):
         node = RecorderNode.__new__(RecorderNode)

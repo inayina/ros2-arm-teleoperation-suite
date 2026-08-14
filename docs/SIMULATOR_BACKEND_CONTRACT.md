@@ -117,7 +117,8 @@ P1 使用可配置节点名是兼容过渡，不把 ROS parameter service 宣称
 - 参数 `model_path` 默认 `config/models/franka_panda.xml`；
 - 参数 `use_mujoco_renderer`；
 - `object_sync.py` 固定 MuJoCo object→joint 命名和默认 `/mujoco_sim` 参数节点；
-- scene/wrist/tactile bridge 都加载 MuJoCo 模型并根据 ROS 状态同步 renderer。
+- scene/wrist/tactile bridge 都加载独立 MuJoCo 模型，并通过 ROS 状态同步 renderer；
+- MuJoCo 专用 `/sim/scene_visual` 复制非目标物体位姿与灯光 diffuse（不是 backend-neutral 合同；`/sim/object_pose` 仍只发当前目标）。
 
 P1 决策：不改 camera bridge；只将它视为 MuJoCo backend 的 perception implementation。Isaac P2/P3 应直接发布相同 camera topic，或提供独立 Isaac image adapter。
 

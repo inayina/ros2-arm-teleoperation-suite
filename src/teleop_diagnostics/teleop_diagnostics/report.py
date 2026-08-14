@@ -15,6 +15,8 @@ from teleop_diagnostics.types import ResidualRow, ResultSemantics
 AUDIT_BASELINE_COMMIT = "f3a760774d02aabf6a6bdd2993a53e1738b867b5"
 # First commit that landed Stage 1/2 diagnostics implementation.
 STAGE12_IMPLEMENTATION_COMMIT = "a131e180a77709f60d8b3a2bfb1a8cb0762b64e0"
+# Stage 3 camera extrinsic contract.
+STAGE3_IMPLEMENTATION_COMMIT = "4f71a494988fbe59b280cc3b99c2e4502eb52556"
 
 
 def git_commit(repo: Path | None = None) -> str:
@@ -33,18 +35,41 @@ def git_commit(repo: Path | None = None) -> str:
     return "UNKNOWN"
 
 
+def git_working_tree_dirty(repo: Path | None = None) -> bool:
+    try:
+        proc = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(repo) if repo else None,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return proc.returncode == 0 and bool(proc.stdout.strip())
+    except OSError:
+        return False
+
+
 def provenance_fields(
     *,
     repo: Path | None = None,
     audit_baseline_commit: str = AUDIT_BASELINE_COMMIT,
     implementation_commit: str | None = None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Distinct commit semantics to avoid Stage-2-style provenance ambiguity."""
+    head = git_commit(repo)
+    dirty = git_working_tree_dirty(repo)
     return {
         "audit_baseline_commit": audit_baseline_commit,
-        "implementation_commit": implementation_commit
-        or STAGE12_IMPLEMENTATION_COMMIT,
-        "evidence_generation_commit": git_commit(repo),
+        "stage12_implementation_commit": STAGE12_IMPLEMENTATION_COMMIT,
+        "stage3_implementation_commit": STAGE3_IMPLEMENTATION_COMMIT,
+        "implementation_commit": implementation_commit or head,
+        "evidence_generation_commit": head,
+        "evidence_working_tree_dirty": dirty,
+        "evidence_generation_note": (
+            f"HEAD={head} with uncommitted working tree; SHA is not the dirty tree"
+            if dirty
+            else f"HEAD={head} clean"
+        ),
     }
 
 
@@ -204,3 +229,35 @@ def write_camera_samples_csv(path: Path, rows: Sequence[dict]) -> None:
         writer.writeheader()
         for row in rows:
             writer.writerow({k: row.get(k, "") for k in _CAMERA_SAMPLE_FIELDS})
+
+
+_TIMESTAMP_FIELDS = [
+    "scenario",
+    "anchor_modality",
+    "other_modality",
+    "signed_delta_s",
+    "abs_delta_s",
+    "injected_delay_s",
+    "recovered_delay_s",
+    "skew_class",
+    "source_time_status",
+    "sequence_flag",
+    "input_status",
+    "result_semantics",
+    "evidence_class",
+    "physical",
+    "abs_slop_would_reject",
+    "stale_vs_slop",
+    "spatial_lag_m",
+    "speed_m_s",
+    "evidence_generation_commit",
+]
+
+
+def write_timestamp_skew_csv(path: Path, rows: Sequence[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=_TIMESTAMP_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k, "") for k in _TIMESTAMP_FIELDS})

@@ -129,6 +129,48 @@ class MultiModalSync:
         for key in required:
             self.last_emitted_stamp[key] = self._stamp_sec(self.latest[key])
 
+    def signed_publication_skews(self, anchor_key: str | None = None) -> dict:
+        """Observer-only signed Header deltas vs the trigger stamp.
+
+        Does **not** change emit / reject / slop behaviour.
+        ``signed_delta_s = t_modality - t_anchor``. SOURCE_TIME is not claimed.
+        """
+        trigger = anchor_key or (self.visual_keys[0] if self.include_images else "joint")
+        if trigger not in self.latest:
+            return {
+                "anchor": trigger,
+                "skew_class": "PUBLISH_TIME_SKEW",
+                "source_time_status": "UNAVAILABLE",
+                "input_status": "MISSING",
+                "deltas_s": {},
+            }
+        try:
+            anchor = self._stamp_sec(self.latest[trigger])
+        except Exception:
+            return {
+                "anchor": trigger,
+                "skew_class": "PUBLISH_TIME_SKEW",
+                "source_time_status": "UNAVAILABLE",
+                "input_status": "INVALID",
+                "deltas_s": {},
+            }
+        deltas = {}
+        for key, msg in self.latest.items():
+            if key == trigger:
+                continue
+            try:
+                deltas[key] = self._stamp_sec(msg) - anchor
+            except Exception:
+                deltas[key] = None
+        return {
+            "anchor": trigger,
+            "skew_class": "PUBLISH_TIME_SKEW",
+            "source_time_status": "UNAVAILABLE",
+            "input_status": "AVAILABLE",
+            "anchor_stamp_s": anchor,
+            "deltas_s": deltas,
+        }
+
     def diagnostics_snapshot(self) -> dict:
         now = self._now_s()
         ages = {
@@ -141,6 +183,7 @@ class MultiModalSync:
             ],
             "ages_s": ages,
             "reject_counts": dict(self.reject_counts),
+            "publication_skew": self.signed_publication_skews(),
         }
 
     def _now_s(self) -> float:

@@ -31,6 +31,7 @@ import yaml
 from std_srvs.srv import Trigger
 
 from mujoco_sim.domain_randomizer import DomainRandomizer
+from mujoco_sim.scene_visual import SCENE_VISUAL_TOPIC, snapshot_scene_visual
 
 try:
     import mujoco  # noqa: F401
@@ -313,6 +314,11 @@ class MujocoSimNode(Node):
             String, "/sim/camera_extrinsic", extrinsic_qos)
         self.pub_cam_extrinsic_pose = self.create_publisher(
             PoseStamped, "/sim/camera_extrinsic/pose", extrinsic_qos)
+        self.pub_scene_visual = self.create_publisher(
+            String, SCENE_VISUAL_TOPIC, extrinsic_qos)
+        if self.model is not None:
+            self._publish_camera_extrinsics()
+            self._publish_scene_visual()
 
         self.srv_reset = self.create_service(Trigger, "/sim/reset_scene", self._on_reset)
 
@@ -339,6 +345,7 @@ class MujocoSimNode(Node):
             self._set_initial_pose(mujoco)
             self.randomizer.apply(self.model, self.data, mujoco)
             self._publish_camera_extrinsics()
+            self._publish_scene_visual()
             response.success = True
             response.message = "Scene reset; objects restored to table."
             self.get_logger().info("Reset scene triggered.")
@@ -354,6 +361,8 @@ class MujocoSimNode(Node):
         renderer would keep XML nominal while DomainRandomizer only mutates the
         physics model. Prefer the published state over a second RNG draw.
         """
+        if getattr(self, "pub_cam_extrinsic_json", None) is None:
+            return
         states = getattr(self.randomizer, "last_camera_states", None) or {}
         if not states:
             return
@@ -383,6 +392,18 @@ class MujocoSimNode(Node):
             pose.pose.orientation.z = quat[3]
             self.pub_cam_extrinsic_pose.publish(pose)
 
+    def _publish_scene_visual(self) -> None:
+        """Copy object poses + light diffuse to camera_bridge (independent MjModel)."""
+        if getattr(self, "pub_scene_visual", None) is None:
+            return
+        if self.model is None or self.data is None or not _HAS_MUJOCO:
+            return
+        import mujoco
+        payload = snapshot_scene_visual(self.model, self.data, mujoco)
+        msg = String()
+        msg.data = json.dumps(payload, sort_keys=True)
+        self.pub_scene_visual.publish(msg)
+
     def _try_load_model(self):
         path = self.get_parameter("model_path").value
         if path and not os.path.isabs(path):
@@ -405,7 +426,9 @@ class MujocoSimNode(Node):
                 self._log_grasp_model_params(mujoco)
             self._set_initial_pose(mujoco)
             self.randomizer.apply(self.model, self.data, mujoco)
-            self._publish_camera_extrinsics()
+            # Publishers are created after load. Publishing here would raise
+            # AttributeError and the broad except would discard a valid model
+            # into the fallback integrator (no /sim/object_pose).
 
             self.viewer = None
             if not self.get_parameter("headless").value:
@@ -669,6 +692,8 @@ class MujocoSimNode(Node):
             obj_pose.pose.orientation.y = float(oq[2])
             obj_pose.pose.orientation.z = float(oq[3])
             self.pub_obj.publish(obj_pose)
+
+        self._publish_scene_visual()
 
         grip = Float64()
         grip.data = self._gripper_opening_normalized()

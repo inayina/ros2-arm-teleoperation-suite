@@ -5,7 +5,7 @@
 > [INTER_REPO_CONTRACTS.md](./INTER_REPO_CONTRACTS.md) → [ARCHITECTURE_V2.md](./ARCHITECTURE_V2.md)。
 >
 > `ROADMAP.md` 与 `SPEC_V2_M*.md` 是设计和验收入口，不作为当前完成状态的单一事实源。
-> 当前能力以根 README 的 Verified Capabilities、代码和测试为准。
+> 当前能力以根 README 的「当前状态」、代码和测试为准。
 
 跨三仓项目事实查询与本仓变更影响分析：
 
@@ -28,7 +28,9 @@ bin/project-evidence impact --base HEAD~1 --head HEAD
 | [GEOMETRY_TIMING_DIAGNOSTICS_AUDIT.md](./GEOMETRY_TIMING_DIAGNOSTICS_AUDIT.md) | 2026-08-13 TF/FK、相机外参与 timestamp skew 只读审计基线 |
 | [SIMULATION_GEOMETRY_STAGE1_REPORT.md](./SIMULATION_GEOMETRY_STAGE1_REPORT.md) | Stage 1：独立 FK、cross-model REPORT_ONLY、controller=`panda_link7` 合同冻结 |
 | [SIMULATION_GEOMETRY_STAGE2_REPORT.md](./SIMULATION_GEOMETRY_STAGE2_REPORT.md) | Stage 1 live TF closeout + Stage 2 joint-zero/TCP fault injection（诊断副本） |
-| [SIMULATION_GEOMETRY_STAGE3_REPORT.md](./SIMULATION_GEOMETRY_STAGE3_REPORT.md) | Stage 3：scene/wrist camera extrinsic authority、TF/renderer 一致、腕部 DESIGN_NOMINAL |
+| [SIMULATION_GEOMETRY_STAGE3_REPORT.md](./SIMULATION_GEOMETRY_STAGE3_REPORT.md) | Stage 3：scene/wrist camera extrinsic authority、TF/renderer 一致、腕部 DESIGN_NOMINAL、`/sim/scene_visual` 非目标+灯光 |
+| [SIMULATION_GEOMETRY_STAGE4_REPORT.md](./SIMULATION_GEOMETRY_STAGE4_REPORT.md) | Stage 4：signed publication-time skew、controlled delay copies、SOURCE_TIME UNAVAILABLE |
+| [WRIST_RGB_ACCEPTANCE_REPORT.md](./WRIST_RGB_ACCEPTANCE_REPORT.md) | 腕部 RGB：`H_knuckle_z05` 像素 4/4；portfolio 默认打开腕部相机 |
 | [CONTROL_FRAME_ALIGNMENT_PROPOSAL.md](./CONTROL_FRAME_ALIGNMENT_PROPOSAL.md) | 可选：阻抗 tip 对齐 `panda_ee` 的提案（未实施） |
 | [ROADMAP.md](./ROADMAP.md) | 开发路线图、分支策略、逐里程碑检查清单（M1–M7） |
 | [MEDIA_CAPTURE_PLAN.md](./MEDIA_CAPTURE_PLAN.md) | 各里程碑媒体采集计划（截图/GIF/录屏），规定内容、命令、存放路径与嵌入位置 |

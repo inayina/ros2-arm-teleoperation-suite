@@ -35,10 +35,18 @@ try:
         optical_frame_name,
         transform_to_xyz_quat,
     )
+    from mujoco_sim.scene_visual import (
+        SCENE_VISUAL_TOPIC,
+        apply_lights,
+    )
 
     _HAS_MUJOCO = True
 except Exception:  # pragma: no cover - exercised on systems without MuJoCo
     _HAS_MUJOCO = False
+    SCENE_VISUAL_TOPIC = "/sim/scene_visual"
+
+    def apply_lights(*_args, **_kwargs):
+        return []
 
 from camera_bridge.object_sync import MANIPULABLE_OBJECTS, MUJOCO_SIM_PARAM_NODE, object_joint_name
 
@@ -101,6 +109,7 @@ class CameraBridgeNode(Node):
         self._target_object_name = str(self.get_parameter("target_object_name").value)
         self._mujoco_sim_param_node = str(self.get_parameter("mujoco_sim_param_node").value)
         self._object_pose = None
+        self._object_poses: dict = {}
         self._ee_pose = None
         self._camera = None
         self._authority = None
@@ -139,6 +148,8 @@ class CameraBridgeNode(Node):
         )
         self.create_subscription(
             String, "/sim/camera_extrinsic", self._on_camera_extrinsic, extrinsic_qos)
+        self.create_subscription(
+            String, SCENE_VISUAL_TOPIC, self._on_scene_visual, extrinsic_qos)
 
         if bool(self.get_parameter("use_mujoco_renderer").value):
             self._try_init_mujoco()
@@ -275,6 +286,33 @@ class CameraBridgeNode(Node):
             )
         except (json.JSONDecodeError, KeyError, TypeError, CameraExtrinsicError) as exc:
             self.get_logger().warn(f"Ignoring invalid /sim/camera_extrinsic: {exc}")
+
+    def _on_scene_visual(self, msg: String) -> None:
+        if self._model is None or self._data is None:
+            return
+        try:
+            payload = json.loads(msg.data)
+        except json.JSONDecodeError as exc:
+            self.get_logger().warn(f"Ignoring invalid /sim/scene_visual: {exc}")
+            return
+        objects = payload.get("objects") or {}
+        lights = payload.get("lights") or {}
+        if isinstance(objects, dict):
+            poses = {}
+            for name, spec in objects.items():
+                if not isinstance(spec, dict):
+                    continue
+                try:
+                    pos = np.asarray(spec["pos"], dtype=float).reshape(-1)
+                    quat = np.asarray(spec["quat_wxyz"], dtype=float).reshape(-1)
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if pos.size != 3 or quat.size != 4:
+                    continue
+                poses[name] = (pos, quat)
+            self._object_poses = poses
+        if isinstance(lights, dict) and lights:
+            apply_lights(self._model, mujoco, lights)
 
     def _publish_camera_tf(self, state: CameraExtrinsicState) -> None:
         if self._tf_static is None:
@@ -417,8 +455,11 @@ class CameraBridgeNode(Node):
         for object_name, joint_info in self._object_joints.items():
             qposadr = int(joint_info["qposadr"])
             qveladr = int(joint_info["qveladr"])
-            if object_name == self._target_object_name and self._object_pose is not None:
-                pos, quat = self._object_pose
+            pose = self._object_poses.get(object_name)
+            if pose is None and object_name == self._target_object_name:
+                pose = self._object_pose
+            if pose is not None:
+                pos, quat = pose
                 self._data.qpos[qposadr: qposadr + 3] = pos
                 self._data.qpos[qposadr + 3: qposadr + 7] = quat
             else:

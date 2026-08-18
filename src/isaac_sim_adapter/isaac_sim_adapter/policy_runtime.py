@@ -60,6 +60,7 @@ class RawObservation:
     state: Sequence[float]
     image: Any
     task: str | None = None
+    wrist_image: Any = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,7 @@ class ModelObservation:
     state: tuple[float, ...]
     image: Any
     task: str | None = None
+    wrist_image: Any = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +149,15 @@ class RuntimeHealth:
     inference_latency_ms_last: float | None = None
     inference_latency_ms_p50: float | None = None
     inference_latency_ms_p95: float | None = None
+    inference_request_count: int = 0
+    inference_started_count: int = 0
+    inference_completion_count: int = 0
+    inference_failure_count: int = 0
+    pending_observation_drop_count: int = 0
+    completed_result_drop_count: int = 0
+    warmup_started_count: int = 0
+    warmup_completion_count: int = 0
+    warmup_failure_count: int = 0
     queue_depth: int = 0
     queue_underrun_count: int = 0
     deadline_miss_count: int = 0
@@ -425,6 +436,154 @@ class PolicyBackend(Protocol):
     def close(self) -> None: ...
 
 
+@dataclass(frozen=True)
+class AsyncInferenceResult:
+    """One completed background prediction, successful or failed."""
+
+    observation_sequence: int
+    envelope: ActionChunkEnvelope | None = None
+    error: Exception | None = None
+    is_warmup: bool = False
+
+    def __post_init__(self) -> None:
+        if (self.envelope is None) == (self.error is None):
+            raise ValueError('async result requires exactly one of envelope or error')
+
+
+class AsyncChunkInferenceWorker:
+    """Single-model worker with latest-only pending observation/result slots.
+
+    ``submit`` never waits for model execution. While one prediction is in
+    flight, a newer observation replaces the pending observation rather than
+    building an unbounded stale backlog. Completed results are also latest-only
+    so the ROS/control side can poll without sharing model state.
+
+    The worker does not own the backend lifecycle. Callers must load/reset the
+    backend before ``start`` and close it after ``stop`` when appropriate.
+    """
+
+    def __init__(self, backend: PolicyBackend, *, thread_name: str = 'policy-inference') -> None:
+        self._backend = backend
+        self._condition = threading.Condition()
+        self._pending: tuple[ModelObservation, bool] | None = None
+        self._result: AsyncInferenceResult | None = None
+        self._stopping = False
+        self._thread = threading.Thread(
+            target=self._run,
+            name=str(thread_name),
+            daemon=True,
+        )
+        self._started = False
+
+    @property
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
+
+    def start(self) -> None:
+        with self._condition:
+            if self._started:
+                raise RuntimeError('async inference worker already started')
+            self._started = True
+            self._thread.start()
+
+    def submit(self, observation: ModelObservation) -> None:
+        """Publish the newest observation without blocking on inference."""
+        self._submit(observation, is_warmup=False)
+
+    def submit_warmup(self, observation: ModelObservation) -> None:
+        """Schedule one non-executable model warmup prediction."""
+        self._submit(observation, is_warmup=True)
+
+    def _submit(self, observation: ModelObservation, *, is_warmup: bool) -> None:
+        with self._condition:
+            if not self._started:
+                raise RuntimeError('async inference worker is not started')
+            if self._stopping:
+                raise RuntimeError('async inference worker is stopping')
+            health = self._backend.health()
+            if not is_warmup:
+                health.inference_request_count += 1
+            if self._pending is not None:
+                health.pending_observation_drop_count += 1
+            self._pending = (observation, is_warmup)
+            self._condition.notify_all()
+
+    def poll_result(self) -> AsyncInferenceResult | None:
+        """Return and clear the latest completed result without waiting."""
+        with self._condition:
+            result = self._result
+            self._result = None
+            return result
+
+    def wait_for_result(self, timeout_s: float) -> AsyncInferenceResult | None:
+        """Bounded test/teardown helper; live control should use ``poll_result``."""
+        deadline = time.monotonic() + max(0.0, float(timeout_s))
+        with self._condition:
+            while self._result is None and not self._stopping:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    return None
+                self._condition.wait(remaining)
+            result = self._result
+            self._result = None
+            return result
+
+    def stop(self, timeout_s: float = 2.0) -> bool:
+        """Request bounded shutdown; return whether the model thread exited."""
+        with self._condition:
+            if not self._started:
+                return True
+            self._stopping = True
+            self._pending = None
+            self._condition.notify_all()
+        self._thread.join(max(0.0, float(timeout_s)))
+        return not self._thread.is_alive()
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                while self._pending is None and not self._stopping:
+                    self._condition.wait()
+                if self._stopping:
+                    return
+                observation, is_warmup = self._pending
+                self._pending = None
+                health = self._backend.health()
+                health.inference_busy = True
+                if is_warmup:
+                    health.warmup_started_count += 1
+                else:
+                    health.inference_started_count += 1
+            try:
+                envelope = self._backend.predict_chunk(observation)
+                result = AsyncInferenceResult(
+                    observation_sequence=observation.observation_sequence,
+                    envelope=envelope,
+                    is_warmup=is_warmup,
+                )
+                if is_warmup:
+                    health.warmup_completion_count += 1
+                else:
+                    health.inference_completion_count += 1
+            except Exception as error:  # surfaced to the fail-closed owner
+                result = AsyncInferenceResult(
+                    observation_sequence=observation.observation_sequence,
+                    error=error,
+                    is_warmup=is_warmup,
+                )
+                if is_warmup:
+                    health.warmup_failure_count += 1
+                else:
+                    health.inference_failure_count += 1
+            finally:
+                health.inference_busy = False
+            with self._condition:
+                if self._result is not None:
+                    health.completed_result_drop_count += 1
+                self._result = result
+                self._condition.notify_all()
+
+
 class SmolVlaPolicyBackend:
     """
     Compatibility backend over the existing SceneSmolVLARuntime.
@@ -465,17 +624,29 @@ class SmolVlaPolicyBackend:
             state=state,
             image=raw.image,
             task=raw.task,
+            wrist_image=raw.wrist_image,
         )
 
     def predict_chunk(self, observation: ModelObservation) -> ActionChunkEnvelope:
         if self._artifact is None or self._context is None:
             raise RuntimeError('backend must be loaded and reset before prediction')
         started = time.monotonic_ns()
-        actions = self._runtime.predict_chunk(
-            observation.state,
-            observation.image,
-            task=observation.task,
-        )
+        if observation.wrist_image is None:
+            # Keep the model-independent M1 fake/runtime compatibility path
+            # alive for legacy single-camera unit tests. The live S4 node
+            # supplies both image fields and takes the dual-camera path.
+            actions = self._runtime.predict_chunk(
+                observation.state,
+                observation.image,
+                task=observation.task,
+            )
+        else:
+            actions = self._runtime.predict_chunk(
+                observation.state,
+                observation.image,
+                observation.wrist_image,
+                task=observation.task,
+            )
         finished = time.monotonic_ns()
         execute_k = int(self._runtime.metadata['deploy_n_action_steps'])
         return ActionChunkEnvelope(

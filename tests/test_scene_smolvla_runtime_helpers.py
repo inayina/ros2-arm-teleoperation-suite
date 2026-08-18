@@ -19,6 +19,7 @@ from isaac_sim_adapter.s4_runtime_contract import (  # noqa: E402
     load_s4_runtime_contract,
 )
 from isaac_sim_adapter.scene_smolvla_runtime import (  # noqa: E402
+    CAMERA_KEYS,
     IMAGE_HW,
     SCENE_IMAGE_KEY,
     compose_state15,
@@ -60,12 +61,17 @@ def test_s4_runtime_contract_defaults_match_recovery():
     assert contract.control_rate_hz == 10.0
     assert contract.state_dim == 15
     assert contract.action_dim == 8
+    assert contract.camera_keys == (
+        'observation.images.scene',
+        'observation.images.wrist',
+    )
     assert contract.gripper_min == 0.0
     assert contract.gripper_max == 1.0
     assert contract.workspace_min == (0.20, -0.40, 0.02)
     assert contract.workspace_max == (0.65, 0.40, 0.75)
     assert IMAGE_HW == (contract.image_height, contract.image_width)
     assert SCENE_IMAGE_KEY == contract.camera_key
+    assert CAMERA_KEYS == contract.camera_keys
     assert contract.claims_task_success is False
     assert_runtime_matches_contract(
         chunk_size=10,

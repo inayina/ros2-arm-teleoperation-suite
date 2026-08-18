@@ -22,6 +22,8 @@ import numpy as np
 DEFAULT_TASK = 'pick up the red box and place it in the left bin\n'
 _S4_CONTRACT = load_s4_runtime_contract()
 SCENE_IMAGE_KEY = _S4_CONTRACT.camera_key
+WRIST_IMAGE_KEY = 'observation.images.wrist'
+CAMERA_KEYS = tuple(_S4_CONTRACT.camera_keys)
 IMAGE_HW = (_S4_CONTRACT.image_height, _S4_CONTRACT.image_width)
 
 
@@ -106,7 +108,7 @@ def compose_state15(
 
 
 class SceneSmolVLARuntime:
-    """Stateful SmolVLA wrapper: Recovery state[15] + scene RGB → action[8]."""
+    """Stateful SmolVLA wrapper: Recovery state[15] + scene/wrist RGB → action[8]."""
 
     def __init__(
         self,
@@ -181,6 +183,7 @@ class SceneSmolVLARuntime:
             'chunk_size': chunk_size,
             'deploy_n_action_steps': steps,
             'camera_key': SCENE_IMAGE_KEY,
+            'camera_keys': list(CAMERA_KEYS),
             's4_contract_version': contract.contract_version,
             'lora_dir': str(Path(lora_dir).resolve()),
             'base_dir': str(Path(base_dir).resolve()),
@@ -217,6 +220,7 @@ class SceneSmolVLARuntime:
         self,
         state15: Sequence[float],
         rgb_uint8: np.ndarray,
+        wrist_rgb_uint8: np.ndarray | None = None,
         *,
         task: str | None = None,
     ) -> list[float]:
@@ -229,11 +233,20 @@ class SceneSmolVLARuntime:
         instruction = self.task if task is None else (
             task if task.endswith('\n') else f'{task}\n'
         )
+        if WRIST_IMAGE_KEY in CAMERA_KEYS and wrist_rgb_uint8 is None:
+            raise ValueError('dual-camera S4 runtime requires wrist RGB input')
         batch_in = {
             'observation.state': self.torch.from_numpy(state).unsqueeze(0),
             SCENE_IMAGE_KEY: self.torch.from_numpy(img).unsqueeze(0),
             'task': [instruction],
         }
+        if WRIST_IMAGE_KEY in CAMERA_KEYS:
+            wrist_img = rgb_uint8_to_chw01(
+                wrist_rgb_uint8, IMAGE_HW[0], IMAGE_HW[1]
+            )
+            batch_in[WRIST_IMAGE_KEY] = self.torch.from_numpy(
+                wrist_img
+            ).unsqueeze(0)
         batch = self.preprocess(batch_in)
         with self.torch.inference_mode():
             pred = self.policy.select_action(batch)
@@ -250,6 +263,7 @@ class SceneSmolVLARuntime:
         self,
         state15: Sequence[float],
         rgb_uint8: np.ndarray,
+        wrist_rgb_uint8: np.ndarray | None = None,
         *,
         task: str | None = None,
     ) -> list[list[float]]:
@@ -263,11 +277,21 @@ class SceneSmolVLARuntime:
         instruction = self.task if task is None else (
             task if task.endswith('\n') else f'{task}\n'
         )
-        batch = self.preprocess({
+        if WRIST_IMAGE_KEY in CAMERA_KEYS and wrist_rgb_uint8 is None:
+            raise ValueError('dual-camera S4 runtime requires wrist RGB input')
+        batch_in = {
             'observation.state': self.torch.from_numpy(state).unsqueeze(0),
             SCENE_IMAGE_KEY: self.torch.from_numpy(img).unsqueeze(0),
             'task': [instruction],
-        })
+        }
+        if WRIST_IMAGE_KEY in CAMERA_KEYS:
+            wrist_img = rgb_uint8_to_chw01(
+                wrist_rgb_uint8, IMAGE_HW[0], IMAGE_HW[1]
+            )
+            batch_in[WRIST_IMAGE_KEY] = self.torch.from_numpy(
+                wrist_img
+            ).unsqueeze(0)
+        batch = self.preprocess(batch_in)
         with self.torch.inference_mode():
             if hasattr(self.policy, 'predict_action_chunk'):
                 chunk = self.policy.predict_action_chunk(batch)

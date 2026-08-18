@@ -154,40 +154,65 @@ def create_joint_graph(og, sdf_path) -> None:
 
 
 def create_camera_graph(og, sdf_path) -> None:
-    """Publish one low-resolution scene RGB stream for the P3 subset."""
+    """Publish the scene and hand-mounted wrist RGB streams."""
     og.Controller.edit(
         {'graph_path': '/World/CameraGraph', 'evaluator_name': 'execution'},
         {
             og.Controller.Keys.CREATE_NODES: [
                 ('OnPlaybackTick', 'omni.graph.action.OnPlaybackTick'),
-                ('CreateRenderProduct', 'isaacsim.core.nodes.IsaacCreateRenderProduct'),
-                ('PublishRgb', 'isaacsim.ros2.bridge.ROS2CameraHelper'),
+                ('CreateSceneRenderProduct', 'isaacsim.core.nodes.IsaacCreateRenderProduct'),
+                ('PublishSceneRgb', 'isaacsim.ros2.bridge.ROS2CameraHelper'),
+                ('CreateWristRenderProduct', 'isaacsim.core.nodes.IsaacCreateRenderProduct'),
+                ('PublishWristRgb', 'isaacsim.ros2.bridge.ROS2CameraHelper'),
             ],
             og.Controller.Keys.SET_VALUES: [
                 (
-                    'CreateRenderProduct.inputs:cameraPrim',
+                    'CreateSceneRenderProduct.inputs:cameraPrim',
                     [sdf_path('/World/SceneCamera')],
                 ),
-                ('CreateRenderProduct.inputs:height', ARGS.height),
-                ('CreateRenderProduct.inputs:width', ARGS.width),
+                ('CreateSceneRenderProduct.inputs:height', ARGS.height),
+                ('CreateSceneRenderProduct.inputs:width', ARGS.width),
                 (
-                    'PublishRgb.inputs:topicName',
+                    'PublishSceneRgb.inputs:topicName',
                     '/isaac/camera/color/image_raw',
                 ),
-                ('PublishRgb.inputs:type', 'rgb'),
+                ('PublishSceneRgb.inputs:type', 'rgb'),
+                (
+                    'CreateWristRenderProduct.inputs:cameraPrim',
+                    [sdf_path('/World/Franka/panda_hand/WristCamera')],
+                ),
+                ('CreateWristRenderProduct.inputs:height', ARGS.height),
+                ('CreateWristRenderProduct.inputs:width', ARGS.width),
+                (
+                    'PublishWristRgb.inputs:topicName',
+                    '/isaac/camera/wrist/color/image_raw',
+                ),
+                ('PublishWristRgb.inputs:type', 'rgb'),
             ],
             og.Controller.Keys.CONNECT: [
                 (
                     'OnPlaybackTick.outputs:tick',
-                    'CreateRenderProduct.inputs:execIn',
+                    'CreateSceneRenderProduct.inputs:execIn',
                 ),
                 (
-                    'CreateRenderProduct.outputs:execOut',
-                    'PublishRgb.inputs:execIn',
+                    'CreateSceneRenderProduct.outputs:execOut',
+                    'PublishSceneRgb.inputs:execIn',
                 ),
                 (
-                    'CreateRenderProduct.outputs:renderProductPath',
-                    'PublishRgb.inputs:renderProductPath',
+                    'CreateSceneRenderProduct.outputs:renderProductPath',
+                    'PublishSceneRgb.inputs:renderProductPath',
+                ),
+                (
+                    'OnPlaybackTick.outputs:tick',
+                    'CreateWristRenderProduct.inputs:execIn',
+                ),
+                (
+                    'CreateWristRenderProduct.outputs:execOut',
+                    'PublishWristRgb.inputs:execIn',
+                ),
+                (
+                    'CreateWristRenderProduct.outputs:renderProductPath',
+                    'PublishWristRgb.inputs:renderProductPath',
                 ),
             ],
         },
@@ -342,6 +367,15 @@ def main() -> None:
             look_at=NOMINAL_CAMERA_LOOK_AT,
             parent='/World',
             name='SceneCamera',
+        )
+        # The training wrist stream is eye-in-hand. Parent the Isaac camera
+        # under panda_hand so it follows the commanded arm pose. The local
+        # pose is the Isaac analogue of the MuJoCo wrist-camera nominal pose.
+        rep.functional.create.camera(
+            position=(0.0, 0.0, 0.05),
+            look_at=(0.0, 0.0, -0.30),
+            parent='/World/Franka/panda_hand',
+            name='WristCamera',
         )
         world.reset()
         nominal_joint_positions = np.asarray(
@@ -510,6 +544,7 @@ def main() -> None:
             'ee_topic': '/isaac/ee_pose',
             'ft_topic': '/isaac/ft_sensor',
             'camera_topic': '/isaac/camera/color/image_raw',
+            'wrist_camera_topic': '/isaac/camera/wrist/color/image_raw',
             'effort_command_topic': '/isaac/joint_effort_cmd',
             'position_command_topic': '/isaac/joint_position_cmd',
             'gripper_command_topic': '/isaac/gripper_cmd',
@@ -539,6 +574,9 @@ def main() -> None:
                 ],
                 'camera_position': list(NOMINAL_CAMERA_POSITION),
                 'camera_look_at': list(NOMINAL_CAMERA_LOOK_AT),
+                'wrist_camera_parent': '/World/Franka/panda_hand',
+                'wrist_camera_local_position': [0.0, 0.0, 0.05],
+                'wrist_camera_local_look_at': [0.0, 0.0, -0.30],
                 'ground_position': list(NOMINAL_GROUND_POSITION),
                 'ground_scale': list(NOMINAL_GROUND_SCALE),
             },

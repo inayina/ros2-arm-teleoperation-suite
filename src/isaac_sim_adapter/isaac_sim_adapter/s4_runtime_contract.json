@@ -1,6 +1,10 @@
 {
   "action_dim": 8,
   "camera_key": "observation.images.scene",
+  "camera_keys": [
+    "observation.images.scene",
+    "observation.images.wrist"
+  ],
   "chunk_size": 10,
   "claims_sim2real": false,
   "claims_task_success": false,

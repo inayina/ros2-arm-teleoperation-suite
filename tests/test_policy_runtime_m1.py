@@ -9,12 +9,15 @@ import sys
 import time
 from types import SimpleNamespace
 
+import numpy as np
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src' / 'isaac_sim_adapter'))
 
 from isaac_sim_adapter.policy_runtime import (  # noqa: E402
     ABSOLUTE_ACTION_SCHEMA,
     ActionChunkEnvelope,
+    AsyncChunkInferenceWorker,
     classify_runtime_error,
     CONTRACT_DESCRIPTOR_SHA256,
     CONTRACT_LOCK_CONTENT_SHA256,
@@ -32,6 +35,9 @@ from isaac_sim_adapter.policy_runtime_ros import (  # noqa: E402
     build_runtime_health_array,
     policy_command_qos,
     populate_policy_command,
+)
+from isaac_sim_adapter.remote_policy_client import (  # noqa: E402
+    RemoteSmolVlaPolicyBackend,
 )
 import pytest  # noqa: E402
 from rclpy.qos import (  # noqa: E402
@@ -320,6 +326,8 @@ def test_health_diagnostic_has_explicit_unavailable_values() -> None:
     assert fields['shadow_only'] == 'true'
     assert fields['trace_run_id'] == 'trace-health'
     assert fields['episode_id'] == 'episode-health'
+    assert fields['inference_request_count'] == '0'
+    assert fields['pending_observation_drop_count'] == '0'
 
 
 def test_m4_hold_clears_queue_without_reusing_command_sequence() -> None:
@@ -448,3 +456,228 @@ def test_backend_rejects_invalid_state15() -> None:
         backend.build_observation(
             RawObservation(0, 0, [0.0] * 14, object())
         )
+
+
+def test_remote_backend_maps_dual_camera_chunk_and_reset(monkeypatch) -> None:
+    import json
+
+    responses = [
+        {"protocol_version": "smolvla_remote_inference_v1", "reset": True},
+        {
+            "protocol_version": "smolvla_remote_inference_v1",
+            "observation_sequence": 4,
+            "action_schema_version": ABSOLUTE_ACTION_SCHEMA,
+            "execute_k": 5,
+            "actions": [
+                [0.4, 0.0, 0.3, 0.0, 0.0, 0.0, 1.0, 0.7]
+            ] * 10,
+        },
+    ]
+    requests = []
+
+    class _Response:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(self._payload).encode('utf-8')
+
+    def fake_urlopen(request, timeout):
+        del timeout
+        requests.append(json.loads(request.data.decode('utf-8')))
+        return _Response(responses.pop(0))
+
+    monkeypatch.setattr(
+        'isaac_sim_adapter.remote_policy_client.urlopen', fake_urlopen
+    )
+    backend = RemoteSmolVlaPolicyBackend('https://127.0.0.1:18080')
+    backend.load(
+        PolicyArtifact('smolvla_remote', 'v1', 'a' * 64, 'state15_scene_wrist')
+    )
+    backend.reset(EpisodeContext('trace', 'episode'))
+    image = np.zeros((240, 320, 3), dtype=np.uint8)
+    observation = backend.build_observation(
+        RawObservation(4, 123, [0.0] * 15, image, wrist_image=image.copy())
+    )
+    envelope = backend.predict_chunk(observation)
+    assert envelope.chunk_size == 10
+    assert envelope.execute_k == 5
+    assert envelope.observation_sequence == 4
+    assert requests[0]['protocol_version'] == 'smolvla_remote_inference_v1'
+    assert requests[1]['state'] == [0.0] * 15
+    assert requests[1]['image_encoding'] == 'jpeg'
+    assert len(requests[1]['scene_jpeg_b64']) > 100
+    assert len(requests[1]['wrist_jpeg_b64']) > 100
+
+
+class _BlockingChunkBackend:
+    def __init__(self) -> None:
+        import threading
+
+        self._health = RuntimeHealth(policy_loaded=True)
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.sequences: list[int] = []
+        self.fail_sequence: int | None = None
+
+    def load(self, artifact) -> None:
+        del artifact
+
+    def reset(self, context) -> None:
+        del context
+
+    def build_observation(self, raw):
+        return raw
+
+    def predict_chunk(self, observation):
+        self.sequences.append(observation.observation_sequence)
+        self.entered.set()
+        assert self.release.wait(2.0)
+        self.release.clear()
+        if observation.observation_sequence == self.fail_sequence:
+            raise RuntimeError('mock inference failed')
+        now = time.monotonic_ns()
+        return ActionChunkEnvelope(
+            observation_sequence=observation.observation_sequence,
+            observation_captured_monotonic_ns=(
+                observation.captured_monotonic_ns
+            ),
+            action_schema_version=ABSOLUTE_ACTION_SCHEMA,
+            actions=((0.4, 0.0, 0.3, 0.0, 0.0, 0.0, 1.0, 0.7),) * 10,
+            execute_k=5,
+            inference_started_monotonic_ns=now,
+            inference_finished_monotonic_ns=now,
+            from_native_chunk=True,
+        )
+
+    def health(self):
+        return self._health
+
+    def close(self) -> None:
+        pass
+
+
+def _model_observation(sequence: int):
+    from isaac_sim_adapter.policy_runtime import ModelObservation
+
+    return ModelObservation(
+        observation_sequence=sequence,
+        captured_monotonic_ns=time.monotonic_ns(),
+        state=(0.0,) * 15,
+        image=object(),
+    )
+
+
+def test_async_worker_submit_is_nonblocking_and_pending_is_latest_only() -> None:
+    backend = _BlockingChunkBackend()
+    worker = AsyncChunkInferenceWorker(backend)
+    worker.start()
+    try:
+        started = time.monotonic()
+        worker.submit(_model_observation(0))
+        assert time.monotonic() - started < 0.05
+        assert backend.entered.wait(1.0)
+
+        worker.submit(_model_observation(1))
+        worker.submit(_model_observation(2))
+        assert backend.health().pending_observation_drop_count == 1
+
+        backend.release.set()
+        first = worker.wait_for_result(1.0)
+        assert first is not None and first.observation_sequence == 0
+        assert backend.entered.wait(1.0)
+        backend.release.set()
+        second = worker.wait_for_result(1.0)
+        assert second is not None and second.observation_sequence == 2
+        assert backend.sequences == [0, 2]
+        assert backend.health().inference_request_count == 3
+        assert backend.health().inference_completion_count == 2
+        assert backend.health().inference_failure_count == 0
+    finally:
+        backend.release.set()
+        assert worker.stop(1.0)
+
+
+def test_async_worker_surfaces_inference_error_and_remains_bounded() -> None:
+    backend = _BlockingChunkBackend()
+    backend.fail_sequence = 4
+    worker = AsyncChunkInferenceWorker(backend)
+    worker.start()
+    try:
+        worker.submit(_model_observation(4))
+        assert backend.entered.wait(1.0)
+        backend.release.set()
+        result = worker.wait_for_result(1.0)
+        assert result is not None
+        assert result.envelope is None
+        assert isinstance(result.error, RuntimeError)
+        assert backend.health().inference_failure_count == 1
+        assert backend.health().inference_busy is False
+    finally:
+        backend.release.set()
+        assert worker.stop(1.0)
+
+
+def test_async_worker_marks_warmup_result_as_non_executable() -> None:
+    backend = _BlockingChunkBackend()
+    worker = AsyncChunkInferenceWorker(backend)
+    worker.start()
+    try:
+        worker.submit_warmup(_model_observation(0))
+        assert backend.entered.wait(1.0)
+        backend.release.set()
+        result = worker.wait_for_result(1.0)
+        assert result is not None and result.envelope is not None
+        assert result.is_warmup is True
+        assert backend.health().inference_request_count == 0
+        assert backend.health().warmup_started_count == 1
+        assert backend.health().warmup_completion_count == 1
+        assert backend.health().warmup_failure_count == 0
+    finally:
+        backend.release.set()
+        assert worker.stop(1.0)
+
+
+def test_async_worker_prefetches_replacement_while_scheduler_consumes() -> None:
+    backend = _BlockingChunkBackend()
+    worker = AsyncChunkInferenceWorker(backend)
+    scheduler, health = _active_scheduler()
+    worker.start()
+    try:
+        first_observation = _model_observation(10)
+        worker.submit(first_observation)
+        assert backend.entered.wait(1.0)
+        backend.release.set()
+        first = worker.wait_for_result(1.0)
+        assert first is not None and first.envelope is not None
+        scheduler.load_chunk(first.envelope)
+
+        second_observation = _model_observation(11)
+        worker.submit(second_observation)
+        # The model is blocked on the next chunk, while control can consume
+        # already-prefetched commands without waiting on model execution.
+        commands = [
+            scheduler.next_command(time.monotonic_ns()) for _ in range(3)
+        ]
+        assert all(command is not None for command in commands)
+        assert [command.chunk_index for command in commands] == [0, 1, 2]
+        assert health.queue_depth == 2
+
+        backend.release.set()
+        second = worker.wait_for_result(1.0)
+        assert second is not None and second.envelope is not None
+        scheduler.load_chunk(second.envelope)
+        replacement = scheduler.next_command(time.monotonic_ns())
+        assert replacement is not None
+        assert replacement.observation_sequence == 11
+        assert replacement.chunk_index == 0
+        assert replacement.command_sequence == 3
+    finally:
+        backend.release.set()
+        assert worker.stop(1.0)

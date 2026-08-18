@@ -128,6 +128,7 @@ class IsaacSimAdapter(Node):
         self._last_joint_time = 0.0
         self._last_object_time = 0.0
         self._last_camera_time = 0.0
+        self._last_wrist_camera_time = 0.0
         self._last_ee_time = 0.0
         self._last_ft_time = 0.0
         self._reset_event = threading.Event()
@@ -146,6 +147,9 @@ class IsaacSimAdapter(Node):
         )
         self._recorder_camera_pub = self.create_publisher(
             Image, '/camera/color/image_raw', qos_profile_sensor_data
+        )
+        self._wrist_camera_pub = self.create_publisher(
+            Image, '/camera/wrist/color/image_raw', qos_profile_sensor_data
         )
         self._ee_pub = self.create_publisher(
             PoseStamped, '/ee_pose', qos_profile_sensor_data
@@ -212,6 +216,13 @@ class IsaacSimAdapter(Node):
             Image,
             f'{self._source}/camera/color/image_raw',
             self._on_camera,
+            qos_profile_sensor_data,
+            callback_group=self._camera_group,
+        )
+        self.create_subscription(
+            Image,
+            f'{self._source}/camera/wrist/color/image_raw',
+            self._on_wrist_camera,
             qos_profile_sensor_data,
             callback_group=self._camera_group,
         )
@@ -307,6 +318,11 @@ class IsaacSimAdapter(Node):
         message.header.stamp = self.get_clock().now().to_msg()
         self._camera_pub.publish(message)
         self._recorder_camera_pub.publish(message)
+
+    def _on_wrist_camera(self, message: Image) -> None:
+        self._last_wrist_camera_time = time.monotonic()
+        message.header.stamp = self.get_clock().now().to_msg()
+        self._wrist_camera_pub.publish(message)
 
     def _on_ee_pose(self, message: PoseStamped) -> None:
         self._last_ee_time = time.monotonic()
@@ -466,6 +482,10 @@ class IsaacSimAdapter(Node):
         camera_live = (
             self._last_camera_time > 0.0 and now - self._last_camera_time < 2.0
         )
+        wrist_camera_live = (
+            self._last_wrist_camera_time > 0.0
+            and now - self._last_wrist_camera_time < 2.0
+        )
         ee_live = self._last_ee_time > 0.0 and now - self._last_ee_time < 2.0
         ft_live = self._last_ft_time > 0.0 and now - self._last_ft_time < 2.0
         command_status = str(command_health['status'])
@@ -518,10 +538,14 @@ class IsaacSimAdapter(Node):
                     key='force_torque_semantics',
                     value='panda_hand_incoming_joint_reaction_local_frame',
                 ),
-                KeyValue(key='wrist_camera', value='false'),
+                KeyValue(key='wrist_camera', value=str(wrist_camera_live).lower()),
                 KeyValue(key='joint_age_s', value=age(self._last_joint_time)),
                 KeyValue(key='object_age_s', value=age(self._last_object_time)),
                 KeyValue(key='camera_age_s', value=age(self._last_camera_time)),
+                KeyValue(
+                    key='wrist_camera_age_s',
+                    value=age(self._last_wrist_camera_time),
+                ),
                 KeyValue(key='ee_age_s', value=age(self._last_ee_time)),
                 KeyValue(key='ft_age_s', value=age(self._last_ft_time)),
             ],

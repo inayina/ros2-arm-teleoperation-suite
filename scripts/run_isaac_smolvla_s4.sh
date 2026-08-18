@@ -37,6 +37,12 @@ readonly GRIPPER_CLOSE_MAX="${GRIPPER_CLOSE_MAX:-0.70}"
 readonly PASS_THRESHOLD="${PASS_THRESHOLD:-1}"
 readonly DEVICE="${DEVICE:-cuda}"
 readonly DRY_RUN="${DRY_RUN:-false}"
+readonly POLICY_RUNTIME_BACKEND="${POLICY_RUNTIME_BACKEND:-local}"
+readonly POLICY_RUNTIME_REMOTE_ENDPOINT="${POLICY_RUNTIME_REMOTE_ENDPOINT:-http://127.0.0.1:18080}"
+readonly POLICY_RUNTIME_REMOTE_TIMEOUT_S="${POLICY_RUNTIME_REMOTE_TIMEOUT_S:-0.45}"
+readonly EXECUTION_ADAPTER_MODE="${EXECUTION_ADAPTER_MODE:-authoritative}"
+readonly POLICY_RUNTIME_ASYNC_CHUNK_ENABLED="${POLICY_RUNTIME_ASYNC_CHUNK_ENABLED:-true}"
+readonly POLICY_RUNTIME_WARMUP_ENABLED="${POLICY_RUNTIME_WARMUP_ENABLED:-true}"
 readonly REQUIRE_REPORT_PASS="${REQUIRE_REPORT_PASS:-false}"
 readonly WORKSPACE_MIN="${WORKSPACE_MIN:-0.20,-0.40,0.02}"
 readonly WORKSPACE_MAX="${WORKSPACE_MAX:-0.65,0.40,0.75}"
@@ -58,7 +64,11 @@ if [[ ! -x "${ISAAC_PYTHON}" || ! -x "${POLICY_PYTHON}" ]]; then
   echo "Isaac or policy Python is not executable" >&2
   exit 2
 fi
-if [[ ! -d "${LORA_DIR}" ]]; then
+if [[ "${POLICY_RUNTIME_BACKEND}" != "local" && "${POLICY_RUNTIME_BACKEND}" != "remote" ]]; then
+  echo "POLICY_RUNTIME_BACKEND must be local or remote" >&2
+  exit 2
+fi
+if [[ "${POLICY_RUNTIME_BACKEND}" == "local" && ! -d "${LORA_DIR}" ]]; then
   echo "LoRA checkpoint missing: ${LORA_DIR}" >&2
   exit 2
 fi
@@ -72,6 +82,18 @@ elif [[ "${ARM_COMMAND_MODE}" == "effort" ]]; then
   controller_profile="impedance"
 else
   echo "ARM_COMMAND_MODE must be effort or position" >&2
+  exit 2
+fi
+if [[ "${EXECUTION_ADAPTER_MODE}" == "authoritative" && "${DRY_RUN}" == "true" ]]; then
+  echo "authoritative execution requires DRY_RUN=false; use EXECUTION_ADAPTER_MODE=shadow for dry-run" >&2
+  exit 2
+fi
+if [[ "${POLICY_RUNTIME_ASYNC_CHUNK_ENABLED}" == "true" && "${EXECUTION_ADAPTER_MODE}" == "legacy" ]]; then
+  echo "async chunk requires EXECUTION_ADAPTER_MODE=shadow or authoritative" >&2
+  exit 2
+fi
+if [[ "${POLICY_RUNTIME_WARMUP_ENABLED}" == "true" && "${POLICY_RUNTIME_ASYNC_CHUNK_ENABLED}" != "true" ]]; then
+  echo "policy warmup requires POLICY_RUNTIME_ASYNC_CHUNK_ENABLED=true" >&2
   exit 2
 fi
 
@@ -101,19 +123,26 @@ nuke() {
 
 python3 - "${SUITE_OUT}" "${EVALUATION_RUN_ID}" "${SEEDS}" \
   "${LORA_DIR}" "${BASE_DIR}" "${VLM_DIR}" \
-  "${MIDSTREAM}/evaluation/examples/nominal_contract_fixture/run_manifest.json" <<'PY'
+  "${MIDSTREAM}/evaluation/examples/nominal_contract_fixture/run_manifest.json" \
+  "${EVALUATION_MODEL_ID}" "${EXECUTION_ADAPTER_MODE}" \
+  "${POLICY_RUNTIME_ASYNC_CHUNK_ENABLED}" "${POLICY_RUNTIME_WARMUP_ENABLED}" \
+  "${POLICY_RUNTIME_BACKEND}" "${POLICY_RUNTIME_REMOTE_ENDPOINT}" <<'PY'
 import hashlib, json, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-out, run_id, seeds_text, lora, base, vlm, fixture = sys.argv[1:8]
+(
+    out, run_id, seeds_text, lora, base, vlm, fixture, model_id,
+    execution_mode, async_chunk_enabled, warmup_enabled,
+    runtime_backend, remote_endpoint,
+) = sys.argv[1:14]
 out = Path(out)
 seeds = [int(x) for x in seeds_text.split()]
 suite = {
     "suite_id": "smolvla_s4_bounded5",
     "suite_version": "0.1.0",
     "description": (
-        "Bounded SmolVLA Recovery-v3 Isaac S4 closed-loop abs-EEF "
+        "Bounded SmolVLA dual-camera Isaac S4 closed-loop abs-EEF "
         "(≤5 seeds; lift GT via ContinuousTaskEvaluator)."
     ),
     "scene_id": "panda_pick_place_v1",
@@ -132,11 +161,23 @@ suite = {
         "execute_k": 5,
         "replan_period_s": 0.5,
         "gripper_command": "clip(raw, 0, 1)",
-        "cameras": "scene-only",
+        "cameras": "scene+wrist",
+        "camera_keys": [
+            "observation.images.scene",
+            "observation.images.wrist",
+        ],
         "state": "observation.state[15]",
+        "execution_adapter_mode": execution_mode,
+        "policy_runtime_backend": runtime_backend,
+        "policy_runtime_remote_endpoint": remote_endpoint,
+        "async_chunk_enabled": async_chunk_enabled == "true",
+        "warmup_enabled": warmup_enabled == "true",
+        "pending_observation_policy": "latest_only",
+        "queue_underrun_policy": "hold_current_pose",
     },
     "claims_task_success": False,
     "claims_sim2real": False,
+    "model_id": model_id,
 }
 (out / "s4_suite.json").write_text(json.dumps(suite, indent=2) + "\n")
 
@@ -158,13 +199,13 @@ manifest["created_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ
 manifest["execution_status"] = "running"
 manifest["evidence_level"] = "runtime_observed"
 manifest["provenance"]["model"] = {
-    "model_id": "smolvla_recovery_v3",
+    "model_id": model_id,
     "model_commit": git_sha(up),
     "checkpoint_sha256": None,
     "checkpoint_path": lora,
 }
 manifest["provenance"]["dataset"] = {
-    "release_id": "smolvla_s3_panda_abs_eef_scene_v3_phaseaware50",
+    "release_id": "smolvla_wrist_ablation_v1_panda_abs_eef_scene_wrist_phaseaware50",
     "manifest_path": None,
     "manifest_sha256": None,
 }
@@ -180,8 +221,18 @@ manifest["scenario"]["suite"]["config_sha256"] = hashlib.sha256(
 ).hexdigest()
 manifest["simulator"]["backend"] = "isaac"
 manifest["action_contract"]["policy_rate_hz"] = 10.0
+manifest["action_contract"]["adapter_rate_hz"] = 10.0
+manifest["action_contract"]["controller_rate_hz"] = 50.0
+manifest["action_contract"]["action_type"] = "absolute_eef_gripper"
+manifest["action_contract"]["action_dim"] = 8
+manifest["action_contract"]["action_schema_version"] = (
+    "panda_absolute_eef_gripper_v0"
+)
 manifest["action_contract"]["future_runtime_adapter"]["implementation_status"] = (
-    "smolvla_abs_eef_online_v0"
+    "smolvla_abs_eef_async_chunk_code_complete_online_unverified"
+)
+manifest["action_contract"]["future_runtime_adapter"]["command_semantics"] = (
+    "native_chunk10_execute_k5_latest_only_hold_on_underrun"
 )
 manifest["evidence_paths"] = {
     "artifact_root": str(out),
@@ -192,7 +243,7 @@ manifest["evidence_paths"] = {
     "nfr_snapshot": "nfr/",
 }
 manifest["limitations"] = [
-    "Bounded ≤5-seed Isaac S4 diagnostic; open-loop Pass ≠ task success.",
+    "Bounded ≤5-seed dual-camera Isaac S4 diagnostic; open-loop Pass ≠ task success.",
     "validation_mode=lift (not place).",
     "Does not claim Sim2Real or real-robot deployment.",
 ]
@@ -350,7 +401,7 @@ run_one_seed() {
   gt_pid=$!
 
   set +e
-  echo "[smolvla-s4] seed=${seed} domain=${ROS_DOMAIN_ID} timeout=${POLICY_RUNTIME_TIMEOUT_S}s device=${DEVICE} video=${RECORD_SCENE_VIDEO} telemetry=${DUMP_TELEMETRY}"
+  echo "[smolvla-s4] seed=${seed} domain=${ROS_DOMAIN_ID} timeout=${POLICY_RUNTIME_TIMEOUT_S}s device=${DEVICE} video=${RECORD_SCENE_VIDEO} telemetry=${DUMP_TELEMETRY} backend=${POLICY_RUNTIME_BACKEND} execution=${EXECUTION_ADAPTER_MODE} async_chunk=${POLICY_RUNTIME_ASYNC_CHUNK_ENABLED} warmup=${POLICY_RUNTIME_WARMUP_ENABLED}"
   local telemetry_episode_id
   telemetry_episode_id="$(printf 'episode_%04d_seed_%s' "${episode_index}" "${seed}")"
   TELEMETRY_ARGS=()
@@ -368,6 +419,12 @@ run_one_seed() {
     -p vlm_dir:="${VLM_DIR}" \
     -p device:="${DEVICE}" \
     -p dry_run:="${DRY_RUN}" \
+    -p policy_runtime_backend:="${POLICY_RUNTIME_BACKEND}" \
+    -p policy_runtime_remote_endpoint:="${POLICY_RUNTIME_REMOTE_ENDPOINT}" \
+    -p policy_runtime_remote_timeout_s:="${POLICY_RUNTIME_REMOTE_TIMEOUT_S}" \
+    -p execution_adapter_mode:="${EXECUTION_ADAPTER_MODE}" \
+    -p policy_runtime_async_chunk_enabled:="${POLICY_RUNTIME_ASYNC_CHUNK_ENABLED}" \
+    -p policy_runtime_warmup_enabled:="${POLICY_RUNTIME_WARMUP_ENABLED}" \
     -p max_actions:="${MAX_ACTIONS}" \
     -p n_action_steps:="${N_ACTION_STEPS}" \
     -p inference_rate_hz:="$(python3 -c "print(float('${INFERENCE_RATE_HZ}'))")" \

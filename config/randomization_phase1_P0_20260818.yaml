@@ -1,0 +1,31 @@
+domain_randomization:
+  enabled: true
+  # Phase-1 wrist smoke only. Do not reuse for v3 formal collection.
+  seed: 58
+  camera:
+    scene_camera:
+      pos_noise: [0.0, 0.0]
+      rot_noise: [0.0, 0.0]
+    wrist_camera:
+      pos_noise: [0.0, 0.0]
+      rot_noise: [0.0, 0.0]
+  object:
+    sphere_initial_z: 0.03
+    mass_range: [0.04, 0.04]
+    friction_range: [2.2, 2.2]
+    box_initial_z: 0.025
+    cylinder_initial_z: 0.03
+    sphere_friction_min: 4.0
+    sphere_friction_max: 6.0
+    # Per-object XY: red at target; distractors parked clear of grasp workspace.
+    initial_pos_by_object:
+      object_red_box: [0.38, -0.10]
+      object_blue_cylinder: [0.52, -0.14]
+      object_green_sphere: [0.52, 0.14]
+    yaw_range_deg_by_object:
+      object_red_box: [0.0, 0.0]
+      object_blue_cylinder: [0.0, 0.0]
+      object_green_sphere: [0.0, 0.0]
+  lighting:
+    key:
+      diffuse_noise: [0.0, 0.0]

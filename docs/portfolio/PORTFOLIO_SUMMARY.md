@@ -50,7 +50,7 @@ src 包全集（审计 §2.1 核对，与职责无缺失）：`camera_bridge` / 
 | 7 | **Gate 协议落盘**：`meta.json` 写 `upstream_gate` 与 `success`（见 §4） | 【已实现】有实测运行产物 | `data/e2_red_500hz_seed58_wrist_smoke2_20260723/episode_000000/meta.json` |
 | 8 | **安全监控**：watchdog / 限位 / Hold（零速度）/ E-stop 锁存；策略路径 `/policy/runtime_hold`（R2 清 queue 保持位置、R3 清 queue 服从 safety latch；authoritative 模式首目标前检查 pose/gripper publisher 数量） | 【已实现】软件路径；**非**认证硬件安全 | `src/safety_monitor/`；`src/isaac_sim_adapter/policy_runtime.py`（M4 已实现） |
 | 9 | **Task GT live mirror**：连续 GT recorder 发布 `/task/evaluation_status`（UNAVAILABLE / RUNNING / PASS / FAIL，`risk_may_override=false`） | 【已实现（代码/文档级，审计未复跑运行）】 | `docs/AGENTS.md` §5；`src/synth_data_gen/` 任务与 Gate 模块 |
-| 10 | **Policy Runtime（M1–M6，默认 legacy 路径）**：Backend / Lifecycle / native chunk10-K5 Scheduler；`policy_execution_adapter`（absolute EEF8 / delta EEF7 shadow 裁决）；`policy_runtime_ros`（QoS 映射）；`execution_adapter_mode=legacy|shadow|authoritative` 默认 `legacy`；M2 拒绝 shadow + 非 dry-run；M6 mock PolicyBackend 的 ROS/DDS wiring（RUN→R2 Hold→R3 E-stop + HOC trace）已验证，health 携带 `last_command_sequence` / `trace_run_id` / `episode_id` | 【已实现（mock/代码级）】**限制：authoritative 仅完成代码与 mock contract，未执行在线切流；在线 async double buffer 未实现** | `src/isaac_sim_adapter/policy_runtime.py`、`policy_execution_adapter.py`、`policy_runtime_ros.py`、`smolvla_policy_inference_node.py` |
+| 10 | **Policy Runtime（节点默认 legacy；S4 显式 async authoritative）**：Backend / Lifecycle / native chunk10-K5 Scheduler；latest-only 异步推理 worker；loopback/SSH-tunnel `RemoteSmolVlaPolicyBackend`；`policy_execution_adapter`（absolute EEF8 / delta EEF7 裁决）；QoS 与 health/report 映射；queue underrun/stale 保持当前位置；M6 mock ROS/DDS wiring（RUN→R2 Hold→R3 E-stop + HOC trace） | 【已实现（代码、CPU测试、远程双相机协议验证）】**限制：尚未执行 Isaac 在线验收；不能声称在线切流、任务成功或 Sim2Real** | `src/isaac_sim_adapter/policy_runtime.py`、`remote_policy_client.py`、`policy_execution_adapter.py`、`policy_runtime_ros.py`、`smolvla_policy_inference_node.py` |
 | 11 | **S4 运行时合同**：`s4_runtime_contract.json`（10 Hz / chunk10 / K5 / replan 0.5 s / `claims_sim2real=false` / `claims_task_success=false`） | 【已实现】注意：该合同与中游 `configs/smolvla_s3/` 双份镜像（md5 相同），审计建议声明权威源（中游），上游为镜像 | `src/isaac_sim_adapter/isaac_sim_adapter/s4_runtime_contract.json` |
 | 12 | **CANopen / DS402 接口**：SDO 服务器、DS402 状态机、EMCY 故障注入；`use_sim:=false` 启用；真实 SocketCAN（`can0`）启动参数存在但**未作为验收通过项** | 【已实现（接口/虚拟驱动级）】 | `src/canopen_hw_interface/`、`src/virtual_servo_driver/`；证据图见 `media/m2/`（多标 relabel，见 §5） |
 | 13 | **夹爪接口**：`MockModbusClient` | 【已实现（mock）】**内存寄存器模拟**，不经过 TCP Socket，不是真实 Modbus TCP/RTU/RS485 | `src/gripper_driver/` |
@@ -102,7 +102,7 @@ src 包全集（审计 §2.1 核对，与职责无缺失）：`camera_bridge` / 
 - learned-policy task success（S4 `outcome_success 0/5`；S4 首轮近黑 reach 3/5 · grasp 1/5 已被修光复测证伪，标注 Superseded，不得作权威）。
 - 离线 loss 提升等同于任务成功率提升。
 - 真实 Modbus 夹爪接入（`MockModbusClient` 为内存模拟）；认证硬件安全（软件 Hold/E-stop ≠ 功能安全认证）。
-- Policy Runtime `authoritative` 在线切流（仅代码 + mock contract）。
+- Policy Runtime `authoritative + async_chunk` Isaac 在线验收（远程双相机协议已测；Isaac 仍未重跑）。
 - 上游证据索引中 relabel / 待确认条目的「超出标签的更强主张」（如 grasp 鲁棒性、下游回放质量、policy 训练归属 —— 见 EVIDENCE_INDEX 各条「不能证明」列）。
 
 ## 7. 面试可讲点（均有可追溯证据）
@@ -110,7 +110,7 @@ src 包全集（审计 §2.1 核对，与职责无缺失）：`camera_bridge` / 
 1. **双轨评测与 Gate 落盘设计**：为什么批采门禁（`_validate_episode` → discard/stop_success）必须在上游做物理判定、中游 `filter_scope=training_split_only` 不重判 —— 职责单一化避免证据链漂移。
 2. **Gate 协议全链一致**：`upstream_gate` / `filter_scope` / `must_validate` 在 meta.json → manifest → handoff → benchmark_summary 逐层可回溯（审计逐字段实测一致）。
 3. **分层安全与运行时 Hold 语义**：safety_monitor（watchdog/限位）→ Hold/E-stop；策略路径 `/policy/runtime_hold` 的 R2/R3 行为与 authoritative 首目标前检查；同时主动声明软件路径 ≠ 认证硬件安全。
-4. **执行适配器的裁决设计**：`execution_adapter_mode=legacy|shadow|authoritative`、absolute EEF8 / delta EEF7 shadow 裁决、M2 拒绝 shadow+非 dry-run 组合 —— 以及**当前未启用 authoritative 在线切流**的诚实边界。
+4. **执行适配器的裁决设计**：`execution_adapter_mode=legacy|shadow|authoritative`、absolute EEF8 / delta EEF7 裁决、M2 拒绝 shadow+非 dry-run、latest-only 异步 chunk 与断供 Hold —— 以及**架构修改后尚未完成 Isaac 在线验收**的诚实边界。
 5. **三次止损（跨仓共享叙事）**：错误 evaluator 隔离（INVALID_EVALUATOR_V0）→ interface 5/5 ≠ 任务成功（continuous GT 0/20）→ 近黑 reach 3/5 主动修光复测证伪为 1/5（Superseded 标注）—— 展示「防包装」的工程文化。
 6. **证据纪律**：每份 claim 带 `claims_*=false`、lock SHA、provenance；EVIDENCE_INDEX 用 keep / relabel / regenerate 治理旧证据，公共图主动交还中游 canonical 源。
 7. **系统集成深度**：MoveIt Servo + 笛卡尔阻抗双速率、MuJoCo 默认 + Isaac 有界 adapter、多模态录制同步、CANopen/DS402 接口与虚拟伺服、DS402 状态机与 EMCY 故障注入。
@@ -120,7 +120,7 @@ src 包全集（审计 §2.1 核对，与职责无缺失）：`camera_bridge` / 
 - **Not real robot**：无真实 Franka Panda 部署；**Not Sim2Real**：未完成真实 Sim2Real，Sim2Real-readiness 仅是文档级 SOP；**无稳定在线自主抓取**。
 - **SmolVLA 状态（只描述事实，不推进）**：Recovery v3 离线 open-loop **Pass**（`eval_gate_v3` 冻结）≠ 任务成功；有界 Isaac S4 seeds 1–5 已跑（`ran_isaac=true`），interface 5/5、权威修光复测 GT lift **0/5** → **Hold**；首轮近黑产物为 **Superseded / historical**。**默认停止**：不扩种子、不重训、不新增采集；S3 任何继续修复/重训需显式人工批准与外部 GPU；`max_data_fix_retries: 1` 已用尽。ACT 为冻结诊断基线，不继续盲目训练。权威证据：中游 `evidence/smolvla_s4_bounded5_relight_20260724T151711Z/s4_gate.json`。
 - **硬件相关**：`MockModbusClient` 为内存寄存器模拟，非真实 Modbus；真实 SocketCAN（`can0`）未作为验收通过项；软件 Hold/E-stop ≠ 认证硬件安全；CAN/EMCY 等证据图为仿真/vcan 接口证据。
-- **运行时**：Policy Runtime 默认执行适配 `legacy`；`authoritative` 在线切流未启用；在线 async double buffer 未实现。
+- **运行时**：节点默认执行适配 `legacy`；S4 脚本显式配置 `authoritative + async_chunk`，远程3090服务通过SSH隧道真实双相机往返 p95≈325 ms；架构修改后尚未执行 Isaac 在线验收；异步队列不能补偿单 chunk 推理超过 0.5 s 消费窗的算力缺口。
 - **职责边界**：本仓不负责训练、release、handoff 与下游 replay/risk/HOC；本仓无 RRT（属 legacy/下游）。
 - **证据索引诚实性**：20/33 条资产为 relabel、2 条 regenerate、生成脚本大量「待确认」—— 以上为当前事实，不使用超出标签的更强主张。
 

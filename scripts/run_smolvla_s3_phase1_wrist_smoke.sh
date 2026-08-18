@@ -10,7 +10,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STAMP="$(date +%Y%m%d)"
 MIDSTREAM="${MIDSTREAM_ROOT:-/home/ina/robot-sim-lab/robot-arm-episode-data-lab}"
-RUN_TAG="${PHASE1_RUN_TAG:-wrist_smoke2}"
+RUN_TAG="${PHASE1_RUN_TAG:-wrist_ablation_v1_p1}"
 EPISODES_PER_POSITION="${PHASE1_EPISODES_PER_POSITION:-2}"
 
 # Two fixed table positions for the red box (wrist FOV diversity).
@@ -41,6 +41,9 @@ domain_randomization:
   seed: ${seed}
   camera:
     scene_camera:
+      pos_noise: [0.0, 0.0]
+      rot_noise: [0.0, 0.0]
+    wrist_camera:
       pos_noise: [0.0, 0.0]
       rot_noise: [0.0, 0.0]
   object:
@@ -103,6 +106,7 @@ run_position() {
   export BATCH_PREFLIGHT_WRIST_USE_MUJOCO_RENDERER=true
   export BATCH_PREFLIGHT_WRIST_CAMERA_WIDTH=320
   export BATCH_PREFLIGHT_WRIST_CAMERA_HEIGHT=240
+  export BATCH_PREFLIGHT_ENABLE_TACTILE=false
   export BATCH_PREFLIGHT_RANDOMIZATION_PATH="${yaml}"
   export BATCH_PREFLIGHT_GRASP_ASSIST=false
   export BATCH_PREFLIGHT_ENABLE_GRASP_MONITOR=false
@@ -170,6 +174,15 @@ manifest = {
     "accepted_target": len(positions) * ${EPISODES_PER_POSITION},
     "positions": positions,
     "cameras": ["observation.images.scene", "observation.images.wrist"],
+    "forbidden_cameras": [
+        "observation.images.tactile_left",
+        "observation.images.tactile_right",
+        "observation.images.camera3",
+    ],
+    "wrist_geometry_id": "H_knuckle_z05",
+    "orientation_flip_override": False,
+    "enable_tactile": False,
+    "publish_depth": False,
     "grasp_assist_enabled": False,
     "builds_release": False,
     "triggers_train": False,

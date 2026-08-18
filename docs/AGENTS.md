@@ -67,14 +67,15 @@ Canonical 总览：中游仓 `robot-arm-episode-data-lab/AGENTS.md` V2.1。
 - **合同来源**：中游 `panda_policy_runtime_v1` SHA lock。
 - **消息**：`teleop_interfaces/{PolicyCommand,PolicyExecutionReport,TaskEvaluationStatus}`。
 - **实现**：`isaac_sim_adapter/policy_runtime.py`（Backend、Lifecycle、native chunk10 / K5 Scheduler）、`policy_execution_adapter.py`（absolute EEF8 / delta EEF7 shadow 裁决）与 `policy_runtime_ros.py`（QoS、command/health/report ROS 映射）。
-- **接入**：`smolvla_policy_inference_node.py` 参数 `execution_adapter_mode=legacy|shadow|authoritative`，默认 `legacy`；旧 `policy_runtime_shadow_enabled` 仅保留兼容。
+- **接入**：`smolvla_policy_inference_node.py` 参数 `execution_adapter_mode=legacy|shadow|authoritative`，节点默认 `legacy`；旧 `policy_runtime_shadow_enabled` 仅保留兼容。S4 专用脚本显式选择 `authoritative`。
 - **已实现输出**：开启且 `dry_run=true` 后发布 shadow `/policy/command`、`/policy/runtime_health` 与 `/policy/execution_report`；M2 节点拒绝 shadow + 非 dry-run 组合。
 - **Task GT live mirror**：canonical Isaac/MuJoCo continuous GT recorder 发布 `/task/evaluation_status`；等待 privileged object pose 时为 `UNAVAILABLE`，运行中为 `RUNNING`，结束发布 `PASS/FAIL`，且 `risk_may_override=false`。
 - **已验证**：canonical S4 已有 telemetry 750 actions 的 bounded/clip parity；CPU、schema 与 mock ROS report tests 通过。
 - **M4 已实现**：订阅 `/policy/runtime_hold`；R2 清 queue 并在 authoritative 模式保持当前位置，R3 清 queue 并服从 safety latch；authoritative 模式在首个目标前检查 pose/gripper publisher count。
 - **M6 已验证**：mock PolicyBackend 的真实 ROS/DDS wiring 已完成 RUN→R2 Hold→R3 E-stop 与 HOC trace；health 现显式携带 `last_command_sequence`、`trace_run_id`、`episode_id`，避免跨 topic 到达顺序造成误关联。
-- **当前限制**：authoritative 只完成代码与 mock contract，未执行在线切流；在线 async double buffer 仍未实现。
-- **执行权威**：默认 `legacy`，旧 `/teleop/cmd_pose` 与 `/teleop/gripper_cmd` 路径保持不变；不得把 authoritative 可选代码路径写成已经在线接管或任务成功。
+- **异步 chunk 与远程推理已实现（非 Isaac 验收）**：`policy_runtime_async_chunk_enabled=true` 时，单独 worker 执行 native `predict_action_chunk`；latest-only pending/result slot 防止陈旧 backlog；控制定时器独立消费 K=5；可选异步 synthetic 双相机 warmup 的结果永不进入动作队列；queue underrun / stale 在 authoritative 路径保持当前位置并等待新鲜 chunk。新增 `RemoteSmolVlaPolicyBackend` 与 loopback HTTP `smolvla_remote_inference_v1`，health/report 包含请求、完成、失败、warmup、pending/result drop 与 underrun 计数。
+- **当前限制**：远程服务通过 SSH 隧道的 5 次真实双相机请求 p50≈323 ms、p95≈325 ms，证明协议吞吐进入 500 ms 重规划窗；该证据不包含 Isaac，也不代表在线切流、实时性 Gate 或抓取成功。若单 chunk 推理慢于 K=5 的 0.5 s 消费窗，异步结构仍会 fail-closed Hold，不能凭队列弥补算力缺口。
+- **执行权威**：节点默认仍为 `legacy`，便于回滚；S4 脚本是显式例外。不得把 authoritative 可选代码路径或异步测试写成已经在线接管或任务成功。
 
 ---
 

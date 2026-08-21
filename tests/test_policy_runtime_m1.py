@@ -58,16 +58,20 @@ def _envelope(
     *,
     observation_sequence: int = 7,
     captured_ns: int = 1_000_000_000,
+    execute_k: int = 2,
 ) -> ActionChunkEnvelope:
+    actions = (
+        (0.40, 0.00, 0.30, 0.0, 0.0, 0.0, 1.0, 0.8),
+        (0.41, 0.00, 0.29, 0.0, 0.0, 0.0, 1.0, 0.7),
+    )
+    if execute_k > len(actions):
+        actions += (actions[-1],) * (execute_k - len(actions))
     return ActionChunkEnvelope(
         observation_sequence=observation_sequence,
         observation_captured_monotonic_ns=captured_ns,
         action_schema_version=ABSOLUTE_ACTION_SCHEMA,
-        actions=(
-            (0.40, 0.00, 0.30, 0.0, 0.0, 0.0, 1.0, 0.8),
-            (0.41, 0.00, 0.29, 0.0, 0.0, 0.0, 1.0, 0.7),
-        ),
-        execute_k=2,
+        actions=actions,
+        execute_k=execute_k,
         inference_started_monotonic_ns=1_010_000_000,
         inference_finished_monotonic_ns=1_035_000_000,
         from_native_chunk=True,
@@ -644,7 +648,7 @@ def test_async_worker_marks_warmup_result_as_non_executable() -> None:
         assert worker.stop(1.0)
 
 
-def test_async_worker_prefetches_replacement_while_scheduler_consumes() -> None:
+def test_async_worker_prefetches_pending_without_truncating_active_chunk() -> None:
     backend = _BlockingChunkBackend()
     worker = AsyncChunkInferenceWorker(backend)
     scheduler, health = _active_scheduler()
@@ -673,11 +677,56 @@ def test_async_worker_prefetches_replacement_while_scheduler_consumes() -> None:
         second = worker.wait_for_result(1.0)
         assert second is not None and second.envelope is not None
         scheduler.load_chunk(second.envelope)
+        tail = [
+            scheduler.next_command(time.monotonic_ns()) for _ in range(2)
+        ]
+        assert all(command is not None for command in tail)
+        assert [command.observation_sequence for command in tail] == [10, 10]
+        assert [command.chunk_index for command in tail] == [3, 4]
+
         replacement = scheduler.next_command(time.monotonic_ns())
         assert replacement is not None
         assert replacement.observation_sequence == 11
         assert replacement.chunk_index == 0
-        assert replacement.command_sequence == 3
+        assert replacement.command_sequence == 5
     finally:
         backend.release.set()
         assert worker.stop(1.0)
+
+
+def test_scheduler_keeps_only_latest_pending_chunk() -> None:
+    scheduler, _health = _active_scheduler()
+    scheduler.load_chunk(_envelope(
+        observation_sequence=10, captured_ns=1_000_000_000, execute_k=5
+    ))
+    first = scheduler.next_command(1_000_000_100)
+    assert first is not None and first.observation_sequence == 10
+
+    scheduler.load_chunk(_envelope(
+        observation_sequence=11, captured_ns=1_000_000_200, execute_k=5
+    ))
+    scheduler.load_chunk(_envelope(
+        observation_sequence=12, captured_ns=1_000_000_300, execute_k=5
+    ))
+    active_tail = [
+        scheduler.next_command(1_000_000_400 + index)
+        for index in range(4)
+    ]
+    assert [command.chunk_index for command in active_tail] == [1, 2, 3, 4]
+    promoted = scheduler.next_command(1_000_000_500)
+    assert promoted is not None
+    assert promoted.observation_sequence == 12
+    assert promoted.chunk_index == 0
+
+
+def test_scheduler_clear_queue_drops_active_and_pending_chunks() -> None:
+    scheduler, health = _active_scheduler()
+    scheduler.load_chunk(_envelope(
+        observation_sequence=10, captured_ns=1_000_000_000
+    ))
+    scheduler.load_chunk(_envelope(
+        observation_sequence=11, captured_ns=1_000_000_100
+    ))
+    scheduler.clear_queue('risk_r2_hold')
+    assert scheduler.next_command(1_000_000_200) is None
+    assert health.reason_code == 'queue_underrun'

@@ -309,6 +309,7 @@ class ShadowCommandScheduler:
         self.command_ttl_ns = command_ttl_ns
         self.max_observation_age_ns = max_observation_age_ns
         self._chunk: ActionChunkEnvelope | None = None
+        self._pending_chunk: ActionChunkEnvelope | None = None
         self._chunk_index = 0
         self._command_sequence = 0
         self._last_observation_sequence: int | None = None
@@ -317,6 +318,7 @@ class ShadowCommandScheduler:
     def reset(self, context: EpisodeContext | None = None) -> None:
         with self._lock:
             self._chunk = None
+            self._pending_chunk = None
             self._chunk_index = 0
             self._command_sequence = 0
             self._last_observation_sequence = None
@@ -330,6 +332,7 @@ class ShadowCommandScheduler:
         """Drop pending actions without resetting monotonic command identity."""
         with self._lock:
             self._chunk = None
+            self._pending_chunk = None
             self._chunk_index = 0
             self.lifecycle.health.queue_depth = 0
             self.lifecycle.health.validity = 'WARMING_UP'
@@ -341,9 +344,16 @@ class ShadowCommandScheduler:
             if previous is not None and envelope.observation_sequence < previous:
                 raise ValueError('observation_sequence regressed')
             self._last_observation_sequence = envelope.observation_sequence
-            self._chunk = envelope
-            self._chunk_index = 0
-            self.lifecycle.health.queue_depth = envelope.execute_k
+            if self._chunk is None or self._chunk_index >= self._chunk.execute_k:
+                self._chunk = envelope
+                self._pending_chunk = None
+                self._chunk_index = 0
+                self.lifecycle.health.queue_depth = envelope.execute_k
+            else:
+                # Never truncate an active K-step chunk.  Async inference may
+                # replace only the latest pending result; it becomes active at
+                # the next chunk boundary.
+                self._pending_chunk = envelope
             self.lifecycle.health.record_latency(envelope.inference_latency_ms)
             self.lifecycle.health.validity = 'VALID'
             self.lifecycle.health.reason_code = 'none'
@@ -362,11 +372,17 @@ class ShadowCommandScheduler:
                 health.reason_code = 'lifecycle_inactive'
                 return None
             if self._chunk is None or self._chunk_index >= self._chunk.execute_k:
-                health.queue_depth = 0
-                health.queue_underrun_count += 1
-                health.validity = 'WARMING_UP'
-                health.reason_code = 'queue_underrun'
-                return None
+                if self._pending_chunk is not None:
+                    self._chunk = self._pending_chunk
+                    self._pending_chunk = None
+                    self._chunk_index = 0
+                    health.queue_depth = self._chunk.execute_k
+                else:
+                    health.queue_depth = 0
+                    health.queue_underrun_count += 1
+                    health.validity = 'WARMING_UP'
+                    health.reason_code = 'queue_underrun'
+                    return None
             observation_age = (
                 now_ns - self._chunk.observation_captured_monotonic_ns
             )

@@ -107,6 +107,11 @@ if [[ "${graph_ready}" != "true" ]]; then
   exit 4
 fi
 
+# Prove raw Isaac -> canonical policy-input topics before any bridge action.
+timeout 20s /usr/bin/python3 "${REPO_ROOT}/scripts/isaac_ros_topic_gate.py" \
+  --timeout-s 12.0 \
+  --output "${OUTPUT_DIR}/bridge_preflight.json"
+
 timeout 20s ros2 topic echo /sim/encoder_state --once \
   > "${OUTPUT_DIR}/first_encoder_state.txt"
 ros2 topic info -v /sim/encoder_state \

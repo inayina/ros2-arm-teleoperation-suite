@@ -75,6 +75,8 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
         )
         self.declare_parameter('command_rate_hz', 50.0)
         self.declare_parameter('observation_timeout_s', 0.5)
+        self.declare_parameter('policy_runtime_control_state_timeout_s', 0.5)
+        self.declare_parameter('policy_runtime_max_observation_age_s', 0.0)
         self.declare_parameter('startup_timeout_s', 90.0)
         self.declare_parameter('post_action_hold_s', 2.0)
         self.declare_parameter('max_joint_excursion_rad', 3.0)
@@ -106,6 +108,7 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
         self.declare_parameter('policy_runtime_trace_run_id', 'runtime_shadow_m1')
         self.declare_parameter('policy_runtime_episode_id', 'episode_unassigned')
         self.declare_parameter('policy_runtime_command_ttl_s', 0.1)
+        self.declare_parameter('simulation_backend', 'isaac')
         self.declare_parameter(
             'policy_runtime_policy_version', 'scene_v3_phaseaware50'
         )
@@ -160,6 +163,33 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
         self._observation_timeout = float(
             self.get_parameter('observation_timeout_s').value
         )
+        if self._observation_timeout <= 0.0:
+            raise ValueError('observation_timeout_s must be positive')
+        self._control_state_timeout = float(
+            self.get_parameter('policy_runtime_control_state_timeout_s').value
+        )
+        if self._control_state_timeout <= 0.0:
+            raise ValueError(
+                'policy_runtime_control_state_timeout_s must be positive'
+            )
+        max_observation_age_s = float(
+            self.get_parameter('policy_runtime_max_observation_age_s').value
+        )
+        if max_observation_age_s < 0.0:
+            raise ValueError(
+                'policy_runtime_max_observation_age_s must be >= 0 '
+                '(0 = observation_timeout_s)'
+            )
+        self._policy_runtime_max_observation_age = (
+            self._observation_timeout
+            if max_observation_age_s == 0.0
+            else max_observation_age_s
+        )
+        self._simulation_backend = str(
+            self.get_parameter('simulation_backend').value
+        ).strip().lower()
+        if self._simulation_backend not in {'isaac', 'mujoco'}:
+            raise ValueError('simulation_backend must be isaac or mujoco')
         self._startup_timeout = float(self.get_parameter('startup_timeout_s').value)
         self._post_action_hold = float(
             self.get_parameter('post_action_hold_s').value
@@ -327,7 +357,7 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
                 context=self._shadow_context,
                 command_ttl_ns=int(ttl_s * 1_000_000_000),
                 max_observation_age_ns=int(
-                    self._observation_timeout * 1_000_000_000
+                    self._policy_runtime_max_observation_age * 1_000_000_000
                 ),
             )
             self._shadow_execution_adapter = PandaPolicyExecutionAdapter(
@@ -377,11 +407,18 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
         self._execution_guard_reason: str | None = None
         self._runtime_hold_active = False
         self._queue_hold_active = False
+        self._runtime_hold_transition_count = 0
+        self._queue_hold_count = 0
         self._report_status: str | None = None
         self._groups = {
             'sensor': ReentrantCallbackGroup(),
             'inference': MutuallyExclusiveCallbackGroup(),
-            'command': MutuallyExclusiveCallbackGroup(),
+            # The 50 Hz target/heartbeat publisher must not share a mutually
+            # exclusive group with the 10 Hz chunk consumer.  When they share
+            # one group, the always-ready 50 Hz timer can starve policy action
+            # consumption until otherwise-valid chunks become stale.
+            'target_publish': MutuallyExclusiveCallbackGroup(),
+            'policy_command': MutuallyExclusiveCallbackGroup(),
         }
 
         self._pose_pub = self.create_publisher(PoseStamped, '/teleop/cmd_pose', 10)
@@ -472,13 +509,13 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
         )
         self.create_timer(
             1.0 / command_rate, self._on_command_timer,
-            callback_group=self._groups['command']
+            callback_group=self._groups['target_publish']
         )
         if self._policy_runtime_shadow_enabled:
             self.create_timer(
                 1.0 / inference_rate,
                 self._on_shadow_command_timer,
-                callback_group=self._groups['command'],
+                callback_group=self._groups['policy_command'],
             )
         self.create_timer(0.1, self._on_lifecycle_timer)
 
@@ -592,7 +629,14 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
     def _on_runtime_hold(self, message: Bool) -> None:
         """Apply M4 R2 Hold and require a fresh chunk after recovery."""
         active = bool(message.data)
+        if active == self._runtime_hold_active:
+            # RiskToSafetyBridge publishes the current state on every risk
+            # update.  Repeated level-triggered false/true samples are
+            # heartbeats, not lifecycle transitions; clearing the queue here
+            # would truncate an otherwise valid active K-step chunk.
+            return
         self._runtime_hold_active = active
+        self._runtime_hold_transition_count += 1
         # Releasing external Hold still requires a fresh inference result;
         # queued commands captured before/during Hold are never reused.
         self._queue_hold_active = True
@@ -645,6 +689,23 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
                 )
             ) * 1_000_000_000)
         return joints, gripper, ee_pose, image, wrist_image, captured_monotonic_ns
+
+    def _control_snapshot(self):
+        """Copy only control state; camera arrays belong to inference snapshots."""
+        now = time.monotonic()
+        with self._lock:
+            keys = ('joints', 'gripper', 'ee_pose')
+            if any(key not in self._observations for key in keys):
+                return None
+            if any(
+                now - self._observations[key][0] > self._control_state_timeout
+                for key in keys
+            ):
+                return None
+            joints = list(self._observations['joints'][1])
+            gripper = float(self._observations['gripper'][1])
+            ee_pose = tuple(self._observations['ee_pose'][1])
+        return joints, gripper, ee_pose
 
     def _mark_shadow_observation_unready(self, *, stale: bool) -> None:
         if not self._policy_runtime_shadow_enabled:
@@ -821,7 +882,7 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
                 self._inference_busy = False
 
     def _on_command_timer(self) -> None:
-        snapshot = self._snapshot()
+        snapshot = self._control_snapshot()
         if snapshot is not None and not self._shutdown_requested:
             header = Header()
             header.stamp = self.get_clock().now().to_msg()
@@ -848,10 +909,10 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
         """Consume chunks through the selected shadow/authoritative adapter."""
         if self._finished_at is not None:
             return
-        snapshot = self._snapshot()
+        snapshot = self._control_snapshot()
         if snapshot is None:
             return
-        _joints, _gripper, ee_pose, _image, _wrist_image, _captured_ns = snapshot
+        _joints, _gripper, ee_pose = snapshot
         now_ns = time.monotonic_ns()
         command = self._shadow_scheduler.next_command(now_ns)
         if command is None:
@@ -883,6 +944,7 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
         self._publish_shadow_report(decision)
         entry = {
             'index': len(self._actions),
+            'command_emitted_monotonic_ns': now_ns,
             'command_sequence': command.command_sequence,
             'observation_sequence': command.observation_sequence,
             'chunk_index': command.chunk_index,
@@ -943,6 +1005,8 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
         self, ee_pose: tuple[float, ...], gripper: float
     ) -> None:
         """Fail closed on queue depletion while keeping the arm stationary."""
+        if not self._queue_hold_active:
+            self._queue_hold_count += 1
         self._queue_hold_active = True
         self._shadow_lifecycle.health.hold_active = True
         self._shadow_execution_adapter.set_hold(True)
@@ -1101,6 +1165,17 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
             'chunk_size': self._runtime_metadata.get('chunk_size'),
             'lora_dir': self._runtime_metadata.get('lora_dir'),
             'policy_runtime_backend': self._policy_runtime_backend,
+            'simulation_backend': self._simulation_backend,
+            'observation_timeout_s': self._observation_timeout,
+            'policy_runtime_control_state_timeout_s': (
+                self._control_state_timeout
+            ),
+            'policy_runtime_max_observation_age_s': (
+                self._policy_runtime_max_observation_age
+            ),
+            'policy_runtime_command_ttl_s': float(
+                self.get_parameter('policy_runtime_command_ttl_s').value
+            ),
             'final_safety_ok': self._safety_ok,
             'final_safety_estop': self._safety_estop,
             'execution_guard_reason': self._execution_guard_reason,
@@ -1115,7 +1190,7 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
             'elapsed_s': now - self._started,
             'report_finalized': finalize,
             'claims_task_success': False,
-            'ran_isaac': True,
+            'ran_isaac': self._simulation_backend == 'isaac',
             'telemetry_dir': (
                 str(self._telemetry_dir) if self._telemetry_dir else None
             ),
@@ -1126,6 +1201,8 @@ class IsaacSmolVLAPolicyInferenceNode(Node):
                 else 'synchronous_callback'
             ),
             'execution_adapter_mode': self._execution_adapter_mode,
+            'runtime_hold_transition_count': self._runtime_hold_transition_count,
+            'queue_hold_count': self._queue_hold_count,
             'async_runtime_metrics': (
                 None
                 if self._shadow_lifecycle is None

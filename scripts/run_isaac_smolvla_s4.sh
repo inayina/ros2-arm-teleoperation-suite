@@ -349,6 +349,18 @@ run_one_seed() {
   fi
 
   sleep 6
+  # Fail closed before policy startup: topic existence alone does not prove a
+  # fresh raw Isaac -> adapter -> control/policy state path.
+  if ! timeout 25s /usr/bin/python3 "${REPO_ROOT}/scripts/isaac_ros_topic_gate.py" \
+    --timeout-s 15.0 \
+    --require-control-joint-states \
+    --output "${trial_dir}/bridge_preflight.json" \
+    > "${trial_dir}/bridge_preflight.log" 2>&1; then
+    echo "Isaac ROS freshness gate failed (seed ${seed})" >&2
+    echo 6 > "${trial_dir}/policy_exit_code.txt"
+    return 6
+  fi
+
   timeout 8s ros2 topic echo /safety/status --once \
     > "${trial_dir}/safety_pre.txt" || true
   if ! grep -q "ok: true" "${trial_dir}/safety_pre.txt" 2>/dev/null; then

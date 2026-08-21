@@ -2,6 +2,14 @@
 
 **Franka Panda 遥操作、实时控制与仿真采集**
 
+> **Current as of 2026-08-21.** This is the Execution / Acquisition / Task-GT
+> repository of one **Panda Manipulation Runtime, Data & Validation System**.
+> Route A's current learned-policy result is Reach `1/4`, Grasp `0/4`, Lift
+> `0/4`; Route B is an Isaac–ROS observation/control-state precondition block,
+> not a policy task result. The node default remains `legacy`; remote async and
+> authoritative experiment paths exist but are not an accepted Isaac online loop.
+> Current cross-repo facts live in the midstream canonical document.
+
 键盘或手柄给出末端目标 → 安全层拦截危险指令 → MoveIt Servo 生成关节轨迹 → 笛卡尔阻抗控制器出力矩 → MuJoCo 里的 Panda 动起来，并把关节、相机、力觉写成 LeRobot episode。
 
 这是三仓机械臂项目的**上游**：负责让手臂在仿真里可控地运动，并产出带物理判定的示教数据。不训练模型，也不做策略回放。

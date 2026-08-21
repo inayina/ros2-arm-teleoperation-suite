@@ -72,11 +72,15 @@ execution-chain failure or precondition gap, not evidence that B failed to
 learn the task. The raw run report and video are under
 `runs/smolvla_execution_contract_audit/learned_policy_seed1_local_isaac_remote_B_retry/`.
 
-## Required next evidence
+## Bridge evidence closure (2026-08-21)
 
-The next gate remains `ISAAC_ROS_BRIDGE_EVIDENCE_REQUIRED`: prove live receipt
-of `/isaac/joint_states` and the two raw camera topics by the ROS adapter, with
-a non-empty policy observation trace and a confirmed command path. Do not
-retrain, recollect, expand seeds, or alter geometry/control parameters. The
-authorized single B retry is now consumed; no further learned-policy attempt
-is justified by this evidence.
+`ISAAC_ROS_BRIDGE_EVIDENCE_REQUIRED` subsequently passed as a separate,
+non-policy interface probe: raw Isaac state, canonical state, scene/wrist
+images and `/joint_states` control-state were all observed; a deterministic
+non-policy command sequence also reached the backend and watchdog boundary.
+See [ISAAC_ROS_BRIDGE_EVIDENCE_P2.md](ISAAC_ROS_BRIDGE_EVIDENCE_P2.md).
+
+This does not retroactively validate the earlier B run, which had empty policy
+telemetry, nor does it authorize a new learned-policy rollout. The authorized
+single B retry remains consumed; no retraining, recollection, seed expansion,
+geometry/control tuning or automatic follow-up is justified.

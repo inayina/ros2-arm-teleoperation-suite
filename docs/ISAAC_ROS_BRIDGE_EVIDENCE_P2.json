@@ -1,0 +1,40 @@
+{
+  "artifact_type": "isaac_ros_bridge_evidence_p2_summary",
+  "executed_at": "2026-08-21",
+  "status": "PASS_INTERFACE_ONLY",
+  "claims_task_success": false,
+  "claims_policy_execution": false,
+  "scope": {
+    "checkpoint_loaded": false,
+    "policy_node_started": false,
+    "learned_policy_rollout": false,
+    "task_gt_evaluated": false
+  },
+  "fullstack_topic_gate": {
+    "status": "PASS",
+    "elapsed_ms": 13633.784,
+    "require_control_joint_states": true,
+    "observed": {
+      "raw_joint_state": {"topic": "/isaac/joint_states", "position_count": 9},
+      "encoder_state": {"topic": "/sim/encoder_state", "position_count": 7},
+      "ee_pose": {"topic": "/ee_pose", "frame_id": "panda_link0"},
+      "gripper_state": {"topic": "/gripper/state"},
+      "scene_rgb": {"topic": "/camera/color/image_raw", "width": 320, "height": 240, "encoding": "rgb8"},
+      "wrist_rgb": {"topic": "/camera/wrist/color/image_raw", "width": 320, "height": 240, "encoding": "rgb8"},
+      "control_joint_state": {"topic": "/joint_states", "position_count": 7}
+    }
+  },
+  "nonpolicy_command_path": {
+    "status": "PASS",
+    "topic": "/sim/joint_effort_cmd",
+    "repeat_count": 5,
+    "command_rate_hz": 100.0,
+    "watchdog_response": "zero_effort"
+  },
+  "raw_artifact_sha256": {
+    "fullstack_control_state_topics.json": "26b4d0e7c9776bef4554d23390c441f0320599bd346b38326cfa782327e0bb1c",
+    "e1_policy_input_topics.json": "113b97744bab866e0c9453b158a7d3e51d2a65e901de49ef972b79f328d9ff4e",
+    "e1_nonpolicy_command_path.json": "ffbbd2de8d1f949e1dceaaacfb435a45dcce9f4de4a5c82deabef72707df8364"
+  },
+  "stop_rule": "Do not use this interface result to authorize a learned-policy rollout, retraining, recollection, seed expansion, geometry tuning, or controller changes."
+}
